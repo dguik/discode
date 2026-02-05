@@ -17,6 +17,11 @@ export class ClaudeAdapter extends BaseAgentAdapter {
     super(claudeConfig);
   }
 
+  getStartCommand(projectPath: string, yolo = false): string {
+    const flags = yolo ? ' --dangerously-skip-permissions' : '';
+    return `cd "${projectPath}" && ${this.config.command}${flags}`;
+  }
+
   formatHookOutput(hookData: HookData): string {
     const toolName = hookData.tool_name || hookData.toolName || 'unknown';
     const toolInput = hookData.tool_input || hookData.input || {};
@@ -65,7 +70,7 @@ export class ClaudeAdapter extends BaseAgentAdapter {
       }
 
       case 'glob': {
-        const lines = output.trim().split('\n').filter(l => l.trim());
+        const lines = output.trim().split('\n').filter((l: string) => l.trim());
         const fileCount = lines.length;
         const firstFew = lines.slice(0, 3).map(basename).join(', ');
         summary = `🔍 Found ${fileCount} file${fileCount !== 1 ? 's' : ''}${firstFew ? `: ${firstFew}${fileCount > 3 ? ', ...' : ''}` : ''}`;
@@ -73,8 +78,8 @@ export class ClaudeAdapter extends BaseAgentAdapter {
       }
 
       case 'grep': {
-        const lines = output.trim().split('\n').filter(l => l.trim());
-        const files = new Set(lines.map(l => l.split(':')[0]).filter(Boolean));
+        const lines = output.trim().split('\n').filter((l: string) => l.trim());
+        const files = new Set(lines.map((l: string) => l.split(':')[0]).filter(Boolean));
         summary = `🔍 Found matches in ${files.size} file${files.size !== 1 ? 's' : ''}`;
         break;
       }

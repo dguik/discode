@@ -43,7 +43,7 @@ export abstract class BaseAgentAdapter {
   /**
    * Get the command to start this agent in a directory
    */
-  getStartCommand(projectPath: string): string {
+  getStartCommand(projectPath: string, _yolo = false): string {
     return `cd "${projectPath}" && ${this.config.command}`;
   }
 

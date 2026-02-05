@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code PreToolUse hook
-# - AskUserQuestion: forwards question to Discord as notification (user responds via Discord message)
+# - YOLO mode (AGENT_DISCORD_YOLO=1): auto-approve everything
+# - AskUserQuestion: forwards question to Discord as notification
 # - Other tools: sends approval request to Discord (user reacts with checkmark/X)
 # Exit 0 = allow, Exit 2 = deny
 
@@ -18,15 +19,19 @@ if [[ -z "$PROJECT_NAME" ]]; then
   exit 0
 fi
 
+# YOLO mode: auto-approve everything, no Discord approval needed
+# (Claude is already running with --dangerously-skip-permissions)
+if [[ "${AGENT_DISCORD_YOLO:-}" == "1" ]]; then
+  exit 0
+fi
+
 # Extract tool name
 TOOL_NAME=$(echo "$HOOK_INPUT" | jq -r '.tool_name // .toolName // "unknown"' 2>/dev/null || echo "unknown")
 
-# Handle AskUserQuestion: forward as notification, don't block
+# ── AskUserQuestion: forward as notification, don't block ──
 if [[ "$TOOL_NAME" == "AskUserQuestion" ]]; then
-  # Extract question data from tool input
   TOOL_INPUT=$(echo "$HOOK_INPUT" | jq -r '.tool_input // .input // ""' 2>/dev/null || echo "")
 
-  # Build a readable message from the questions
   MESSAGE=$(echo "$TOOL_INPUT" | jq -r '
     if .questions then
       .questions | to_entries | map(
@@ -42,7 +47,6 @@ if [[ "$TOOL_NAME" == "AskUserQuestion" ]]; then
 
   NOTIFY_MESSAGE="❓ **Claude is asking a question**\n\n${MESSAGE}\n\n💬 Reply here to answer (your message will be sent to the terminal)"
 
-  # Send notification (fire-and-forget)
   PAYLOAD=$(jq -n --arg msg "$NOTIFY_MESSAGE" '{message: $msg}')
   curl -s -X POST \
     -H "Content-Type: application/json" \
@@ -50,23 +54,20 @@ if [[ "$TOOL_NAME" == "AskUserQuestion" ]]; then
     "http://127.0.0.1:${BRIDGE_PORT}/notify/${PROJECT_NAME}/claude" \
     --max-time 5 >/dev/null 2>&1 || true
 
-  # Always allow AskUserQuestion
   exit 0
 fi
 
-# For all other tools: send approval request (blocking, waits for Discord reaction)
+# ── All other tools (Bash, Write, Edit, MCP write tools, etc.): require Discord approval ──
 RESPONSE=$(curl -s -X POST \
   -H "Content-Type: application/json" \
   -d "$HOOK_INPUT" \
   "http://127.0.0.1:${BRIDGE_PORT}/approve/${PROJECT_NAME}/claude" \
   --max-time 120 2>/dev/null || echo '{"approved": true}')
 
-# Parse response
 APPROVED=$(echo "$RESPONSE" | jq -r '.approved // true' 2>/dev/null || echo "true")
 
 if [[ "$APPROVED" == "true" ]]; then
   exit 0
 else
-  # Exit 2 = deny the tool use
   exit 2
 fi

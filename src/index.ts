@@ -262,7 +262,8 @@ export class AgentBridge {
     projectPath: string,
     agents: ProjectAgents,
     channelDisplayName?: string,
-    overridePort?: number
+    overridePort?: number,
+    yolo = false
   ): Promise<{ channelName: string; channelId: string; agentName: string; tmuxSession: string }> {
     const guildId = stateManager.getGuildId();
     if (!guildId) {
@@ -295,6 +296,9 @@ export class AgentBridge {
     const port = overridePort || config.hookServerPort || 18470;
     this.tmux.setSessionEnv(tmuxSession, 'AGENT_DISCORD_PROJECT', projectName);
     this.tmux.setSessionEnv(tmuxSession, 'AGENT_DISCORD_PORT', String(port));
+    if (yolo) {
+      this.tmux.setSessionEnv(tmuxSession, 'AGENT_DISCORD_YOLO', '1');
+    }
 
     // Start agent in tmux window
     const discordChannels: { [key: string]: string | undefined } = {
@@ -304,7 +308,7 @@ export class AgentBridge {
     this.tmux.startAgentInWindow(
       tmuxSession,
       adapter.config.name,
-      adapter.getStartCommand(projectPath)
+      adapter.getStartCommand(projectPath, yolo)
     );
 
     // Save state

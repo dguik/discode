@@ -269,6 +269,7 @@ program
   .argument('[agent]', 'Agent to use (claude, gemini, codex)')
   .option('-n, --name <name>', 'Project name (defaults to directory name)')
   .option('--no-attach', 'Do not attach to tmux session')
+  .option('--yolo', 'YOLO mode: run agent with --dangerously-skip-permissions (no approval needed)')
   .action(async (agentArg: string | undefined, options) => {
     try {
       validateConfig();
@@ -346,6 +347,11 @@ program
       }
 
       const tmux = new TmuxManager('agent-');
+      const yolo = !!options.yolo;
+
+      if (yolo) {
+        console.log(chalk.yellow('   ⚡ YOLO mode: --dangerously-skip-permissions'));
+      }
 
       if (!existingProject) {
         // New project: full setup via bridge
@@ -356,7 +362,7 @@ program
         const adapter = agentRegistry.get(agentName)!;
         const channelDisplayName = `${adapter.config.displayName} - ${projectName}`;
         const agents = { [agentName]: true };
-        const result = await bridge.setupProject(projectName, projectPath, agents, channelDisplayName, port);
+        const result = await bridge.setupProject(projectName, projectPath, agents, channelDisplayName, port, yolo);
 
         console.log(chalk.green(`✅ Project created`));
         console.log(chalk.cyan(`   Channel: #${result.channelName}`));
@@ -379,6 +385,9 @@ program
         // Set env vars on existing session too
         tmux.setSessionEnv(tmuxSession, 'AGENT_DISCORD_PROJECT', projectName);
         tmux.setSessionEnv(tmuxSession, 'AGENT_DISCORD_PORT', String(port));
+        if (yolo) {
+          tmux.setSessionEnv(tmuxSession, 'AGENT_DISCORD_YOLO', '1');
+        }
         console.log(chalk.green(`✅ Existing project resumed`));
       }
 
