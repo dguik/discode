@@ -31,7 +31,7 @@ The bridge uses a polling-based architecture that captures tmux pane content eve
 
 - **Node.js**: Version 18 or higher
 - **tmux**: Version 3.0 or higher
-- **Discord Bot**: Create a bot at [Discord Developer Portal](https://discord.com/developers/applications)
+- **Discord Bot**: Create a bot following the [Discord Bot Setup Guide](docs/DISCORD_SETUP.md)
   - Required permissions: Send Messages, Manage Channels, Read Message History
   - Required intents: Guilds, GuildMessages, MessageContent
 - **AI Agent**: At least one of:
@@ -49,7 +49,7 @@ npm install -g discord-agent-bridge
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/discord-agent-bridge.git
+git clone https://github.com/DoBuDevel/discord-agent-bridge.git
 cd discord-agent-bridge
 npm install
 npm run build
@@ -95,11 +95,17 @@ Your AI agent is now running in tmux, with output streaming to Discord every 30 
 
 #### `setup <token>`
 
-Configure Discord bot token (one-time setup).
+One-time setup: saves bot token, connects to Discord to auto-detect your server, and shows installed agents.
 
 ```bash
 agent-discord setup YOUR_BOT_TOKEN
 ```
+
+The setup process will:
+1. Save your bot token to `~/.discord-agent-bridge/config.json`
+2. Connect to Discord and detect which server(s) your bot is in
+3. If the bot is in multiple servers, prompt you to select one
+4. Save the server ID automatically
 
 #### `daemon <action>`
 
@@ -128,15 +134,15 @@ List available AI agents detected on your system.
 agent-discord agents
 ```
 
-#### `config <action> [key] [value]`
+#### `config [options]`
 
-Manage global configuration.
+View or update global configuration.
 
 ```bash
-agent-discord config set pollingInterval 45000
-agent-discord config get pollingInterval
-agent-discord config list
-agent-discord config reset
+agent-discord config --show              # Show current configuration
+agent-discord config --token NEW_TOKEN   # Update bot token
+agent-discord config --server SERVER_ID  # Set Discord server ID manually
+agent-discord config --port 18470        # Set hook server port
 ```
 
 ### Project Commands
@@ -279,45 +285,35 @@ Register your adapter in `src/agents/index.ts`.
 
 ### Global Config
 
-Stored in `~/.agent-discord/config.json`:
+Stored in `~/.discord-agent-bridge/config.json`:
 
 ```json
 {
-  "discordToken": "YOUR_BOT_TOKEN",
-  "pollingInterval": 30000,
-  "maxMessageLength": 1900
+  "token": "YOUR_BOT_TOKEN",
+  "serverId": "YOUR_SERVER_ID",
+  "hookServerPort": 18470
 }
 ```
 
-Edit via:
+Both `token` and `serverId` are required. The `setup` command auto-detects the server ID, or you can set it manually:
 
 ```bash
-agent-discord config set pollingInterval 45000
-agent-discord config get pollingInterval
+agent-discord config --show               # View current config
+agent-discord config --server SERVER_ID    # Set server ID manually
 ```
 
-### Project Config
+### Project State
 
-Stored in `.agent-discord.json` (per project):
-
-```json
-{
-  "agent": "claude",
-  "description": "My project description",
-  "channelId": "1234567890",
-  "sessionName": "agent-discord-my-project-abc123"
-}
-```
-
-**Do not commit** `.agent-discord.json` to version control (add to `.gitignore`).
+Project state is stored in `~/.discord-agent-bridge/state.json` and managed automatically.
 
 ### Environment Variables
 
 Override config with environment variables:
 
 ```bash
-AGENT_DISCORD_TOKEN=token agent-discord daemon start
-AGENT_DISCORD_POLLING_INTERVAL=60000 agent-discord go
+DISCORD_BOT_TOKEN=token agent-discord daemon start
+DISCORD_GUILD_ID=server_id agent-discord go
+HOOK_SERVER_PORT=18470 agent-discord go
 ```
 
 ## Development
@@ -396,10 +392,10 @@ const daemon = new DaemonManager(mockStorage);
 
 ### Bot not connecting
 
-1. Verify token: `agent-discord config get discordToken`
+1. Verify token: `agent-discord config --show`
 2. Check bot permissions in Discord Developer Portal
 3. Ensure MessageContent intent is enabled
-4. Restart daemon: `agent-discord daemon restart`
+4. Restart daemon: `agent-discord daemon stop && agent-discord daemon start`
 
 ### Agent not detected
 
@@ -416,7 +412,7 @@ const daemon = new DaemonManager(mockStorage);
 ### No messages in Discord
 
 1. Check daemon status: `agent-discord daemon status`
-2. Verify polling interval: `agent-discord config get pollingInterval`
+2. Check daemon logs
 3. Check Discord channel permissions (bot needs Send Messages)
 
 ## Contributing
@@ -444,14 +440,9 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - Built with [Discord.js](https://discord.js.org/)
 - Powered by [Claude Code](https://claude.ai/claude-code) and [OpenCode](https://github.com/OpenCodeAI/opencode)
-- Inspired by the need for remote AI agent monitoring and collaboration
+- Inspired by [OpenClaw](https://github.com/nicepkg/openclaw)'s messenger-based command system. The motivation was to remotely control and monitor long-running AI agent tasks from anywhere via Discord.
 
 ## Support
 
-- Issues: [GitHub Issues](https://github.com/yourusername/discord-agent-bridge/issues)
-- Discussions: [GitHub Discussions](https://github.com/yourusername/discord-agent-bridge/discussions)
-- Documentation: [Wiki](https://github.com/yourusername/discord-agent-bridge/wiki)
-
----
-
-**Made with ❤️ for the AI coding community**
+- Issues: [GitHub Issues](https://github.com/DoBuDevel/discord-agent-bridge/issues)
+- Discord Bot Setup: [Setup Guide](docs/DISCORD_SETUP.md)

@@ -32,7 +32,7 @@ Discord Agent Bridge는 AI 코딩 어시스턴트(Claude Code, OpenCode)를 Disc
 
 - **Node.js**: 버전 18 이상
 - **tmux**: 버전 3.0 이상
-- **Discord Bot**: [Discord Developer Portal](https://discord.com/developers/applications)에서 봇 생성
+- **Discord Bot**: [Discord 봇 설정 가이드](docs/DISCORD_SETUP.md)를 따라 봇 생성
   - 필수 권한: Send Messages, Manage Channels, Read Message History
   - 필수 인텐트: Guilds, GuildMessages, MessageContent
 - **AI 에이전트**: 다음 중 하나 이상:
@@ -50,7 +50,7 @@ npm install -g discord-agent-bridge
 ### 소스에서 설치
 
 ```bash
-git clone https://github.com/yourusername/discord-agent-bridge.git
+git clone https://github.com/DoBuDevel/discord-agent-bridge.git
 cd discord-agent-bridge
 npm install
 npm run build
@@ -96,11 +96,17 @@ agent-discord attach         # tmux 세션에 연결
 
 #### `setup <token>`
 
-Discord 봇 토큰 설정 (일회성 설정).
+일회성 설정: 봇 토큰 저장, Discord 연결하여 서버 자동 감지, 설치된 에이전트 확인.
 
 ```bash
 agent-discord setup YOUR_BOT_TOKEN
 ```
+
+설정 과정:
+1. 봇 토큰을 `~/.discord-agent-bridge/config.json`에 저장
+2. Discord에 연결하여 봇이 참여한 서버를 자동 감지
+3. 봇이 여러 서버에 있으면 선택 프롬프트 표시
+4. 서버 ID 자동 저장
 
 #### `daemon <action>`
 
@@ -129,15 +135,15 @@ agent-discord list
 agent-discord agents
 ```
 
-#### `config <action> [key] [value]`
+#### `config [options]`
 
-글로벌 설정 관리.
+글로벌 설정 조회 및 수정.
 
 ```bash
-agent-discord config set pollingInterval 45000
-agent-discord config get pollingInterval
-agent-discord config list
-agent-discord config reset
+agent-discord config --show              # 현재 설정 표시
+agent-discord config --token NEW_TOKEN   # 봇 토큰 변경
+agent-discord config --server SERVER_ID  # Discord 서버 ID 수동 설정
+agent-discord config --port 18470        # 훅 서버 포트 설정
 ```
 
 ### 프로젝트 명령어
@@ -279,45 +285,35 @@ export interface AgentAdapter {
 
 ### 글로벌 설정
 
-`~/.agent-discord/config.json`에 저장:
+`~/.discord-agent-bridge/config.json`에 저장:
 
 ```json
 {
-  "discordToken": "YOUR_BOT_TOKEN",
-  "pollingInterval": 30000,
-  "maxMessageLength": 1900
+  "token": "YOUR_BOT_TOKEN",
+  "serverId": "YOUR_SERVER_ID",
+  "hookServerPort": 18470
 }
 ```
 
-다음을 통해 편집:
+`token`과 `serverId` 모두 필요합니다. `setup` 명령이 서버 ID를 자동 감지하며, 수동 설정도 가능합니다:
 
 ```bash
-agent-discord config set pollingInterval 45000
-agent-discord config get pollingInterval
+agent-discord config --show               # 현재 설정 확인
+agent-discord config --server SERVER_ID    # 서버 ID 수동 설정
 ```
 
-### 프로젝트 설정
+### 프로젝트 상태
 
-`.agent-discord.json`에 저장 (프로젝트별):
-
-```json
-{
-  "agent": "claude",
-  "description": "내 프로젝트 설명",
-  "channelId": "1234567890",
-  "sessionName": "agent-discord-my-project-abc123"
-}
-```
-
-**버전 관리에 커밋하지 마세요** `.agent-discord.json`을 (`.gitignore`에 추가).
+프로젝트 상태는 `~/.discord-agent-bridge/state.json`에 저장되며 자동으로 관리됩니다.
 
 ### 환경 변수
 
-환경 변수로 설정 오버라이드:
+환경 변수로 설정을 오버라이드할 수 있습니다:
 
 ```bash
-AGENT_DISCORD_TOKEN=token agent-discord daemon start
-AGENT_DISCORD_POLLING_INTERVAL=60000 agent-discord go
+DISCORD_BOT_TOKEN=token agent-discord daemon start
+DISCORD_GUILD_ID=server_id agent-discord go
+HOOK_SERVER_PORT=18470 agent-discord go
 ```
 
 ## 개발
@@ -396,10 +392,10 @@ const daemon = new DaemonManager(mockStorage);
 
 ### 봇이 연결되지 않음
 
-1. 토큰 확인: `agent-discord config get discordToken`
+1. 토큰 확인: `agent-discord config --show`
 2. Discord Developer Portal에서 봇 권한 확인
 3. MessageContent 인텐트가 활성화되어 있는지 확인
-4. 데몬 재시작: `agent-discord daemon restart`
+4. 데몬 재시작: `agent-discord daemon stop && agent-discord daemon start`
 
 ### 에이전트가 감지되지 않음
 
@@ -416,7 +412,7 @@ const daemon = new DaemonManager(mockStorage);
 ### Discord에 메시지가 없음
 
 1. 데몬 상태 확인: `agent-discord daemon status`
-2. 폴링 간격 확인: `agent-discord config get pollingInterval`
+2. 데몬 로그 확인
 3. Discord 채널 권한 확인 (봇에게 Send Messages 권한 필요)
 
 ## 기여
@@ -444,14 +440,9 @@ MIT License - 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
 
 - [Discord.js](https://discord.js.org/)로 구축
 - [Claude Code](https://claude.ai/claude-code)와 [OpenCode](https://github.com/OpenCodeAI/opencode) 기반
-- 원격 AI 에이전트 모니터링 및 협업의 필요성에서 영감을 받음
+- [OpenClaw](https://github.com/nicepkg/openclaw)의 메신저 기반 명령 시스템에서 영감을 받았습니다. 원격에서 오래 걸리는 AI 에이전트 작업을 Discord로 컨트롤하고 모니터링하고 싶었습니다.
 
 ## 지원
 
-- 이슈: [GitHub Issues](https://github.com/yourusername/discord-agent-bridge/issues)
-- 토론: [GitHub Discussions](https://github.com/yourusername/discord-agent-bridge/discussions)
-- 문서: [Wiki](https://github.com/yourusername/discord-agent-bridge/wiki)
-
----
-
-**AI 코딩 커뮤니티를 위해 ❤️를 담아 제작**
+- 이슈: [GitHub Issues](https://github.com/DoBuDevel/discord-agent-bridge/issues)
+- Discord 봇 설정: [설정 가이드](docs/DISCORD_SETUP.md)
