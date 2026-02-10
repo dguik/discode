@@ -53,7 +53,12 @@ export interface ProjectState {
   projectPath: string;
   tmuxSession: string;
   /**
-   * Optional mapping from agentType -> tmux window name.
+   * Optional mapping from agentType -> tmux window target.
+   *
+   * Examples:
+   * - `codex` (window name; manager will target pane `.0`)
+   * - `codex.1` (explicit pane target)
+   *
    * If omitted, agentType is treated as the window name (legacy behavior).
    */
   tmuxWindows?: {

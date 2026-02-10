@@ -134,11 +134,47 @@ export class TmuxManager {
   }
 
   /**
+   * Resolve a tmux target for a window.
+   *
+   * If caller already provides an explicit pane target (e.g. `codex.1`), keep it.
+   * Otherwise, resolve the lowest existing pane index for the target window.
+   * This avoids active-pane drift while also working when tmux pane-base-index is 1.
+   */
+  private resolveWindowTarget(sessionName: string, windowName: string): string {
+    const hasExplicitPane = /\.\d+$/.test(windowName);
+    if (hasExplicitPane) {
+      return `${sessionName}:${windowName}`;
+    }
+
+    const baseTarget = `${sessionName}:${windowName}`;
+
+    try {
+      const escapedBaseTarget = escapeShellArg(baseTarget);
+      const output = this.executor.exec(`tmux list-panes -t ${escapedBaseTarget} -F "#{pane_index}"`);
+      const paneIndexes = output
+        .trim()
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => /^\d+$/.test(line))
+        .map((line) => parseInt(line, 10));
+
+      if (paneIndexes.length > 0) {
+        const firstPane = Math.min(...paneIndexes);
+        return `${baseTarget}.${firstPane}`;
+      }
+    } catch {
+      // Fall back to plain window target.
+    }
+
+    return baseTarget;
+  }
+
+  /**
    * Send keys to a specific window
    * @param sessionName Full session name (already includes prefix)
    */
   sendKeysToWindow(sessionName: string, windowName: string, keys: string): void {
-    const target = `${sessionName}:${windowName}`;
+    const target = this.resolveWindowTarget(sessionName, windowName);
     const escapedTarget = escapeShellArg(target);
     const escapedKeys = escapeShellArg(keys);
 
@@ -156,7 +192,7 @@ export class TmuxManager {
    * Useful when we want to control submission separately (e.g., Codex retries).
    */
   typeKeysToWindow(sessionName: string, windowName: string, keys: string): void {
-    const target = `${sessionName}:${windowName}`;
+    const target = this.resolveWindowTarget(sessionName, windowName);
     const escapedTarget = escapeShellArg(target);
     const escapedKeys = escapeShellArg(keys);
 
@@ -172,7 +208,7 @@ export class TmuxManager {
    * Useful for TUIs that may drop a submit when busy.
    */
   sendEnterToWindow(sessionName: string, windowName: string): void {
-    const target = `${sessionName}:${windowName}`;
+    const target = this.resolveWindowTarget(sessionName, windowName);
     const escapedTarget = escapeShellArg(target);
     try {
       this.executor.exec(`tmux send-keys -t ${escapedTarget} Enter`);
@@ -186,7 +222,7 @@ export class TmuxManager {
    * @param sessionName Full session name (already includes prefix)
    */
   capturePaneFromWindow(sessionName: string, windowName: string): string {
-    const target = `${sessionName}:${windowName}`;
+    const target = this.resolveWindowTarget(sessionName, windowName);
     const escapedTarget = escapeShellArg(target);
 
     try {

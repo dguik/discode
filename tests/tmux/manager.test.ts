@@ -181,49 +181,63 @@ describe('TmuxManager', () => {
   });
 
   describe('sendKeysToWindow', () => {
-    it('sends keys then Enter as two separate commands', () => {
+    it('sends keys then Enter to lowest pane index by default', () => {
+      executor.nextResult = '1\n2\n';
       tmux.sendKeysToWindow('agent-session', 'window1', 'echo hello');
 
-      expect(executor.calls).toHaveLength(2);
-      expect(executor.calls[0].command).toContain("tmux send-keys -t 'agent-session:window1'");
-      expect(executor.calls[0].command).toContain('echo hello');
-      expect(executor.calls[1].command).toContain("tmux send-keys -t 'agent-session:window1' Enter");
+      expect(executor.calls).toHaveLength(3);
+      expect(executor.calls[0].command).toContain("tmux list-panes -t 'agent-session:window1'");
+      expect(executor.calls[1].command).toContain("tmux send-keys -t 'agent-session:window1.1'");
+      expect(executor.calls[1].command).toContain('echo hello');
+      expect(executor.calls[2].command).toContain("tmux send-keys -t 'agent-session:window1.1' Enter");
     });
 
     it('escapes keys with single quotes', () => {
+      executor.nextResult = '0\n';
       tmux.sendKeysToWindow('agent-session', 'window1', "echo 'test'");
 
-      const firstCommand = executor.calls[0].command;
-      expect(firstCommand).toContain("'echo '\\''test'\\'''");
+      const sendKeysCommand = executor.calls[1].command;
+      expect(sendKeysCommand).toContain("'echo '\\''test'\\'''");
+    });
+
+    it('keeps explicit pane target when provided', () => {
+      tmux.sendKeysToWindow('agent-session', 'window1.2', 'echo hello');
+
+      expect(executor.calls).toHaveLength(2);
+      expect(executor.calls[0].command).toContain("tmux send-keys -t 'agent-session:window1.2'");
     });
   });
 
   describe('typeKeysToWindow', () => {
     it('types keys without sending Enter', () => {
+      executor.nextResult = '1\n';
       tmux.typeKeysToWindow('agent-session', 'codex', 'hello');
-      expect(executor.calls).toHaveLength(1);
-      expect(executor.calls[0].command).toContain("tmux send-keys -t 'agent-session:codex'");
-      expect(executor.calls[0].command).toContain('hello');
-      expect(executor.calls[0].command).not.toContain(' Enter');
+      expect(executor.calls).toHaveLength(2);
+      expect(executor.calls[1].command).toContain("tmux send-keys -t 'agent-session:codex.1'");
+      expect(executor.calls[1].command).toContain('hello');
+      expect(executor.calls[1].command).not.toContain(' Enter');
     });
   });
 
   describe('sendEnterToWindow', () => {
     it('sends Enter to the specified window', () => {
+      executor.nextResult = '1\n';
       tmux.sendEnterToWindow('agent-session', 'codex');
-      expect(executor.calls).toHaveLength(1);
-      expect(executor.calls[0].command).toContain("tmux send-keys -t 'agent-session:codex' Enter");
+      expect(executor.calls).toHaveLength(2);
+      expect(executor.calls[1].command).toContain("tmux send-keys -t 'agent-session:codex.1' Enter");
     });
   });
 
   describe('capturePaneFromWindow', () => {
     it('returns captured pane content', () => {
-      executor.nextResult = 'pane output line 1\npane output line 2';
+      executor.nextResult = '0\n';
 
       const output = tmux.capturePaneFromWindow('agent-session', 'window1');
 
-      expect(output).toBe('pane output line 1\npane output line 2');
-      expect(executor.getLastCommand()).toContain("tmux capture-pane -t 'agent-session:window1' -p");
+      expect(executor.getLastCommand()).toContain("tmux capture-pane -t 'agent-session:window1.0' -p");
+      executor.nextResult = 'pane output line 1\npane output line 2';
+      const captured = tmux.capturePaneFromWindow('agent-session', 'window1.0');
+      expect(captured).toBe('pane output line 1\npane output line 2');
     });
   });
 
@@ -240,14 +254,16 @@ describe('TmuxManager', () => {
 
   describe('startAgentInWindow', () => {
     it('creates window then sends command', () => {
+      executor.nextResult = '0\n';
       tmux.startAgentInWindow('agent-session', 'agent-window', 'node agent.js');
 
-      expect(executor.calls.length).toBeGreaterThanOrEqual(3);
+      expect(executor.calls.length).toBeGreaterThanOrEqual(4);
       // First call: create window
       expect(executor.calls[0].command).toContain('tmux new-window');
-      // Next calls: send keys
-      expect(executor.calls[1].command).toContain('tmux send-keys');
-      expect(executor.calls[1].command).toContain('node agent.js');
+      // Resolve pane then send keys
+      expect(executor.calls[1].command).toContain('tmux list-panes');
+      expect(executor.calls[2].command).toContain('tmux send-keys');
+      expect(executor.calls[2].command).toContain('node agent.js');
     });
 
     it('ignores duplicate window error', () => {
