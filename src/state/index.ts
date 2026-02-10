@@ -15,6 +15,9 @@ export interface ProjectState {
   tmuxWindows?: {
     [agentType: string]: string | undefined;  // agentType -> window target (name or name.pane)
   };
+  eventHooks?: {
+    [agentType: string]: boolean | undefined;  // agentType -> uses event-hook output path
+  };
   discordChannels: {
     [agentType: string]: string | undefined;  // agentType -> channel ID
   };

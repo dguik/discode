@@ -59,6 +59,7 @@ export class CapturePoller {
     for (const project of projects) {
       for (const [agentType, enabled] of Object.entries(project.agents)) {
         if (!enabled) continue;
+        if (project.eventHooks?.[agentType]) continue;
         try {
           await this.pollAgent(project, agentType);
         } catch (error) {

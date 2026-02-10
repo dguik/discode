@@ -64,6 +64,13 @@ export interface ProjectState {
   tmuxWindows?: {
     [agentType: string]: string | undefined;
   };
+  /**
+   * Optional mapping from agentType -> whether outbound Discord messages are
+   * delivered by agent-native event hooks instead of tmux capture polling.
+   */
+  eventHooks?: {
+    [agentType: string]: boolean | undefined;
+  };
   discordChannels: {
     [agentType: string]: string | undefined;
   };
