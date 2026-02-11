@@ -344,7 +344,7 @@ async function setupCommand(token: string) {
     console.log(chalk.cyan('\n✨ Setup complete!\n'));
     console.log(chalk.white('Next step:'));
     console.log(chalk.gray('   cd <your-project>'));
-    console.log(chalk.gray('   discode go\n'));
+    console.log(chalk.gray('   discode new\n'));
   } catch (error) {
     console.error(chalk.red('Setup failed:'), error);
     process.exit(1);
@@ -475,7 +475,7 @@ async function initCommand(agentName: string, description: string, options: Tmux
     console.log(chalk.green('✅ Environment variables auto-configured in tmux session'));
 
     console.log(chalk.white('\n🚀 Next step:\n'));
-    console.log(chalk.gray('   discode go'));
+    console.log(chalk.gray('   discode new'));
     console.log(chalk.cyan(`   Then send messages in Discord #${result.channelName}\n`));
 
     await bridge.stop();
@@ -502,7 +502,7 @@ async function goCommand(
     const projectName = options.name || basename(projectPath);
     const port = defaultDaemonManager.getPort();
 
-    console.log(chalk.cyan(`\n🚀 discode go — ${projectName}\n`));
+    console.log(chalk.cyan(`\n🚀 discode new — ${projectName}\n`));
 
       // Determine agent
     let agentName: string;
@@ -1032,7 +1032,7 @@ await yargs(hideBin(process.argv))
       })
   )
   .command(
-    'go [agent]',
+    'new [agent]',
     'Quick start: launch daemon, setup project, attach tmux',
     (y: Argv) => addTmuxOptions(y)
       .positional('agent', { type: 'string', describe: 'Agent to use (claude, codex, opencode)' })

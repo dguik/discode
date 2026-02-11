@@ -82,7 +82,7 @@ discode init claude "멋진 애플리케이션"
 
 ```bash
 # 빠른 시작: 데몬 + 프로젝트 + 연결을 한 번에
-discode go
+discode new
 
 # 또는 단계별로:
 discode daemon start    # 글로벌 데몬 시작
@@ -205,14 +205,14 @@ discode attach
 
 에이전트를 중지하지 않고 tmux에서 분리하려면 `Ctrl-b d`를 누르세요.
 
-#### `go [options]`
+#### `new [options]`
 
 빠른 시작: 데몬 시작, 프로젝트 시작, 연결을 한 번에 수행.
 
 ```bash
-discode go              # 일반 모드
-discode go --yolo      # YOLO 모드
-discode go --sandbox   # 샌드박스 모드 (Docker 컨테이너에서 Claude Code 실행)
+discode new              # 일반 모드
+discode new --yolo      # YOLO 모드
+discode new --sandbox   # 샌드박스 모드 (Docker 컨테이너에서 Claude Code 실행)
 ```
 
 ## 작동 원리
@@ -323,8 +323,8 @@ discode config --server SERVER_ID    # 서버 ID 수동 설정
 
 ```bash
 DISCORD_BOT_TOKEN=token discode daemon start
-DISCORD_GUILD_ID=server_id discode go
-HOOK_SERVER_PORT=18470 discode go
+DISCORD_GUILD_ID=server_id discode new
+HOOK_SERVER_PORT=18470 discode new
 ```
 
 ## 개발

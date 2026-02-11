@@ -115,7 +115,7 @@ In the **"BOT PERMISSIONS"** section that appears below, check:
 | Send Messages | ✅ Yes | Send agent output to Discord |
 | Read Message History | ✅ Yes | Track conversation context and collect reactions |
 | Embed Links | ✅ Yes | Format rich embeds for interactive questions |
-| Manage Channels | ✅ Yes | Auto-create/delete agent channels on `init`/`go`/`stop` |
+| Manage Channels | ✅ Yes | Auto-create/delete agent channels on `init`/`new`/`stop` |
 | Add Reactions | ✅ Yes | Interactive tool approval requests |
 
 ### Permission Issues
@@ -150,7 +150,7 @@ Replace `YOUR_BOT_TOKEN` with the token you copied in Step 1.3.
 Setup complete! Your bot is ready to use.
 
 Next steps:
-1. Run: discode go
+1. Run: discode new
 2. The bot will create a channel named 'agent-claude-XXXXX'
 3. All Claude CLI output will stream to that channel
 ```
@@ -165,7 +165,7 @@ Next steps:
 ### Step 5.4: Test with a Command
 
 ```bash
-discode go
+discode new
 ```
 
 Then in your terminal, type a message and press Enter. You should see:
@@ -249,7 +249,7 @@ Then in your terminal, type a message and press Enter. You should see:
 
 6. Run: discode setup YOUR_TOKEN
 
-7. Start using: discode go
+7. Start using: discode new
 ```
 
 ---

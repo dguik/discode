@@ -30,7 +30,7 @@ discode는 AI 에이전트 CLI(Claude Code, OpenCode)의 출력을 Discord로 �
 
 ### 1.3 핵심 가치 제안
 
-- **간단한 설정**: 한 명령어로 전체 세팅 완료 (`discode go`)
+- **간단한 설정**: 한 명령어로 전체 세팅 완료 (`discode new`)
 - **실시간 알림**: 에이전트 상태 변화를 즉시 Discord에 전송
 - **프로젝트 독립성**: 각 프로젝트가 독립적인 Discord 채널을 가짐
 - **글로벌 데몬**: 여러 프로젝트를 하나의 백그라운드 프로세스로 관리
@@ -776,7 +776,7 @@ YOLO 모드는 에이전트가 모든 권한 확인을 건너뛰도록 설정합
 **사용 예시:**
 
 ```bash
-discode go --yolo
+discode new --yolo
 ```
 
 **환경변수로도 설정 가능:**
@@ -796,13 +796,13 @@ Sandbox 모드는 Claude Code를 격리된 Docker 컨테이너에서 실행합�
 **사용 예시:**
 
 ```bash
-discode go --sandbox
+discode new --sandbox
 ```
 
 **YOLO와 Sandbox 동시 사용:**
 
 ```bash
-discode go --yolo --sandbox
+discode new --yolo --sandbox
 ```
 
 ### 5.4 에이전트 등록 시스템
@@ -861,7 +861,7 @@ CLI commands communicate with daemon via HTTP POST /reload
 
 ```bash
 # daemon이 없으면 자동으로 시작
-discode go
+discode new
   ↓
 DaemonManager.isRunning() → false
   ↓
@@ -1059,10 +1059,10 @@ discode setup <token>
 discode setup MTE2MjYxNzgxOTI5MzI2MzI4Ng.GxYZ1a.9ZjK0-Pq...
 ```
 
-### 8.2 go - 빠른 시작
+### 8.2 new - 빠른 시작
 
 ```bash
-discode go [agent] [options]
+discode new [agent] [options]
 ```
 
 **옵션:**
@@ -1082,25 +1082,25 @@ discode go [agent] [options]
 ```bash
 # 설치된 에이전트 자동 감지
 cd ~/my-project
-discode go
+discode new
 
 # 특정 에이전트 지정
-discode go claude
+discode new claude
 
 # YOLO 모드
-discode go --yolo
+discode new --yolo
 
 # Sandbox 모드
-discode go --sandbox
+discode new --sandbox
 
 # YOLO + Sandbox 모드
-discode go --yolo --sandbox
+discode new --yolo --sandbox
 
 # 프로젝트명 지정
-discode go -n my-awesome-project
+discode new -n my-awesome-project
 
 # tmux 연결 안 함
-discode go --no-attach
+discode new --no-attach
 ```
 
 ### 8.3 init - 프로젝트 초기화

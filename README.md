@@ -92,16 +92,16 @@ discode config --server SERVER_ID  # Change server ID manually
 ```bash
 cd ~/projects/my-app
 
-# Just run go — that's it!
-discode go
+# Just run new — that's it!
+discode new
 ```
 
-`go` handles everything automatically: detects installed agents, starts the daemon, creates a Discord channel, launches the agent in tmux, and attaches you to the session.
+`new` handles everything automatically: detects installed agents, starts the daemon, creates a Discord channel, launches the agent in tmux, and attaches you to the session.
 
 ```bash
-discode go claude        # Specify an agent explicitly
-discode go --yolo        # YOLO mode (skip permissions, Claude Code only)
-discode go --sandbox     # Sandbox mode (Docker isolation, Claude Code only)
+discode new claude        # Specify an agent explicitly
+discode new --yolo        # YOLO mode (skip permissions, Claude Code only)
+discode new --sandbox     # Sandbox mode (Docker isolation, Claude Code only)
 ```
 
 Your AI agent is now running in tmux, with output streaming to Discord every 30 seconds.
@@ -237,16 +237,16 @@ discode attach my-app       # Attach to a specific project
 
 Press `Ctrl-b d` to detach from tmux without stopping the agent.
 
-#### `go [agent] [options]`
+#### `new [agent] [options]`
 
 Quick start: start daemon, setup project if needed, and attach to tmux. Works without `init` — auto-detects installed agents and creates the Discord channel automatically.
 
 ```bash
-discode go              # Auto-detect agent, setup & attach
-discode go claude       # Use a specific agent
-discode go --yolo       # YOLO mode (skip permissions, Claude Code only)
-discode go --sandbox    # Sandbox mode (Docker isolation, Claude Code only)
-discode go --no-attach  # Start without attaching to tmux
+discode new              # Auto-detect agent, setup & attach
+discode new claude       # Use a specific agent
+discode new --yolo       # YOLO mode (skip permissions, Claude Code only)
+discode new --sandbox    # Sandbox mode (Docker isolation, Claude Code only)
+discode new --no-attach  # Start without attaching to tmux
 ```
 
 ## How It Works
@@ -382,7 +382,7 @@ Config values can be overridden with environment variables:
 
 ```bash
 DISCORD_BOT_TOKEN=token discode daemon start
-DISCORD_GUILD_ID=server_id discode go
+DISCORD_GUILD_ID=server_id discode new
 ```
 
 ### tmux Session Mode (CLI)
@@ -390,7 +390,7 @@ DISCORD_GUILD_ID=server_id discode go
 You can also override tmux session behavior via CLI flags (no env vars needed):
 
 ```bash
-discode go --tmux-session-mode shared --tmux-shared-session-name bridge
+discode new --tmux-session-mode shared --tmux-shared-session-name bridge
 ```
 
 ## Development

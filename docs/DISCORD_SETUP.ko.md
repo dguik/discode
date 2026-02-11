@@ -115,7 +115,7 @@ Discode를 위한 Discord 봇 설정 완전 가이드입니다.
 | Send Messages (메시지 전송) | ✅ 필수 | 에이전트 출력을 Discord로 전송 |
 | Read Message History (메시지 기록 읽기) | ✅ 필수 | 대화 컨텍스트 추적 및 리액션 수집 |
 | Embed Links (링크 임베드) | ✅ 필수 | 인터랙티브 질문 임베드 포맷팅 |
-| Manage Channels (채널 관리) | ✅ 필수 | `init`/`go`/`stop` 시 채널 생성/삭제 |
+| Manage Channels (채널 관리) | ✅ 필수 | `init`/`new`/`stop` 시 채널 생성/삭제 |
 | Add Reactions (반응 추가) | ✅ 필수 | 도구 승인 요청 인터랙션 |
 
 ### 권한 문제
@@ -150,7 +150,7 @@ discode setup YOUR_BOT_TOKEN
 설정 완료! 봇을 사용할 준비가 되었습니다.
 
 다음 단계:
-1. 실행: discode go
+1. 실행: discode new
 2. 봇이 'agent-claude-XXXXX' 채널을 생성합니다
 3. 모든 Claude CLI 출력이 해당 채널로 스트리밍됩니다
 ```
@@ -165,7 +165,7 @@ discode setup YOUR_BOT_TOKEN
 ### Step 5.4: 명령어로 테스트
 
 ```bash
-discode go
+discode new
 ```
 
 터미널에 메시지를 입력하고 Enter를 누르세요. 다음이 보여야 합니다:
@@ -249,7 +249,7 @@ discode go
 
 6. 실행: discode setup YOUR_TOKEN
 
-7. 사용 시작: discode go
+7. 사용 시작: discode new
 ```
 
 ---

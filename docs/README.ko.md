@@ -90,16 +90,16 @@ discode config --server SERVER_ID  # 서버 ID 수동 변경
 ```bash
 cd ~/projects/my-app
 
-# go 하나면 끝!
-discode go
+# new 하나면 끝!
+discode new
 ```
 
-`go`는 모든 것을 자동으로 처리합니다: 설치된 에이전트 감지, 데몬 시작, Discord 채널 생성, tmux에서 에이전트 실행, 세션 연결까지 한 번에 수행합니다.
+`new`는 모든 것을 자동으로 처리합니다: 설치된 에이전트 감지, 데몬 시작, Discord 채널 생성, tmux에서 에이전트 실행, 세션 연결까지 한 번에 수행합니다.
 
 ```bash
-discode go claude        # 에이전트를 직접 지정
-discode go --yolo        # YOLO 모드 (권한 확인 건너뛰기, Claude Code 전용)
-discode go --sandbox     # Sandbox 모드 (Docker 격리, Claude Code 전용)
+discode new claude        # 에이전트를 직접 지정
+discode new --yolo        # YOLO 모드 (권한 확인 건너뛰기, Claude Code 전용)
+discode new --sandbox     # Sandbox 모드 (Docker 격리, Claude Code 전용)
 ```
 
 AI 에이전트가 tmux에서 실행되고, 30초마다 출력이 Discord로 스트리밍됩니다.
@@ -227,16 +227,16 @@ discode attach my-app       # 특정 프로젝트에 연결
 
 tmux에서 에이전트를 중지하지 않고 분리하려면 `Ctrl-b d`를 누르세요.
 
-#### `go [agent] [options]`
+#### `new [agent] [options]`
 
 빠른 시작: 데몬 시작, 필요시 프로젝트 설정, tmux에 연결. `init` 없이도 동작합니다 — 설치된 에이전트를 자동 감지하고 Discord 채널을 자동으로 생성합니다.
 
 ```bash
-discode go              # 에이전트 자동 감지, 설정 & 연결
-discode go claude       # 특정 에이전트 사용
-discode go --yolo       # YOLO 모드 (권한 확인 건너뛰기, Claude Code 전용)
-discode go --sandbox    # Sandbox 모드 (Docker 격리, Claude Code 전용)
-discode go --no-attach  # tmux에 연결하지 않고 시작
+discode new              # 에이전트 자동 감지, 설정 & 연결
+discode new claude       # 특정 에이전트 사용
+discode new --yolo       # YOLO 모드 (권한 확인 건너뛰기, Claude Code 전용)
+discode new --sandbox    # Sandbox 모드 (Docker 격리, Claude Code 전용)
+discode new --no-attach  # tmux에 연결하지 않고 시작
 ```
 
 ## 동작 원리
@@ -371,7 +371,7 @@ discode config --port 18470          # 훅 서버 포트 설정
 
 ```bash
 DISCORD_BOT_TOKEN=token discode daemon start
-DISCORD_GUILD_ID=server_id discode go
+DISCORD_GUILD_ID=server_id discode new
 ```
 
 ### tmux 세션 모드 (CLI)
@@ -379,7 +379,7 @@ DISCORD_GUILD_ID=server_id discode go
 환경변수 없이 실행 인자로도 tmux 세션 동작을 오버라이드할 수 있습니다:
 
 ```bash
-discode go --tmux-session-mode shared --tmux-shared-session-name bridge
+discode new --tmux-session-mode shared --tmux-shared-session-name bridge
 ```
 
 ## 개발
