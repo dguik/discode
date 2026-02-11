@@ -39,8 +39,13 @@ export class TmuxManager {
     }
   }
 
-  createSession(name: string): void {
+  createSession(name: string, firstWindowName?: string): void {
     const escapedName = escapeShellArg(`${this.sessionPrefix}${name}`);
+    if (firstWindowName) {
+      const escapedWindowName = escapeShellArg(firstWindowName);
+      this.executor.exec(`tmux new-session -d -s ${escapedName} -n ${escapedWindowName}`);
+      return;
+    }
     this.executor.exec(`tmux new-session -d -s ${escapedName}`);
   }
 
@@ -86,12 +91,12 @@ export class TmuxManager {
    * Get existing session or create a new one
    * @returns Full session name with prefix
    */
-  getOrCreateSession(projectName: string): string {
+  getOrCreateSession(projectName: string, firstWindowName?: string): string {
     const fullSessionName = `${this.sessionPrefix}${projectName}`;
 
     if (!this.sessionExists(projectName)) {
       try {
-        this.createSession(projectName);
+        this.createSession(projectName, firstWindowName);
       } catch (error) {
         throw new Error(`Failed to create tmux session '${fullSessionName}': ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -104,12 +109,13 @@ export class TmuxManager {
    * Create a new window within a session
    * @param sessionName Full session name (already includes prefix)
    */
-  createWindow(sessionName: string, windowName: string): void {
+  createWindow(sessionName: string, windowName: string, initialCommand?: string): void {
     const escapedSession = escapeShellArg(sessionName);
     const escapedWindowName = escapeShellArg(windowName);
+    const commandSuffix = initialCommand ? ` ${escapeShellArg(initialCommand)}` : '';
 
     try {
-      this.executor.exec(`tmux new-window -t ${escapedSession} -n ${escapedWindowName}`);
+      this.executor.exec(`tmux new-window -t ${escapedSession} -n ${escapedWindowName}${commandSuffix}`);
     } catch (error) {
       throw new Error(`Failed to create window '${windowName}' in session '${sessionName}': ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -236,9 +242,24 @@ export class TmuxManager {
    * Start an agent in a specific window
    */
   startAgentInWindow(sessionName: string, windowName: string, agentCommand: string): void {
-    // Create window if it doesn't exist
+    const target = `${sessionName}:${windowName}`;
+    const escapedTarget = escapeShellArg(target);
+
+    // If the target window already exists, send command into it.
+    // This covers the session's first window (created via `new-session -n ...`) and avoids duplicates.
     try {
-      this.createWindow(sessionName, windowName);
+      this.executor.execVoid(`tmux has-session -t ${escapedTarget}`, { stdio: 'ignore' });
+      this.sendKeysToWindow(sessionName, windowName, agentCommand);
+      return;
+    } catch {
+      // Window does not exist yet; create it below.
+    }
+
+    // Create window and run command directly when possible.
+    // This avoids name/race issues with immediate send-keys on freshly created windows.
+    try {
+      this.createWindow(sessionName, windowName, agentCommand);
+      return;
     } catch (error) {
       // Window might already exist, which is fine
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -247,8 +268,18 @@ export class TmuxManager {
       }
     }
 
-    // Send the agent command to the window
-    this.sendKeysToWindow(sessionName, windowName, agentCommand);
+    // Existing window: send the agent command to it.
+    try {
+      this.sendKeysToWindow(sessionName, windowName, agentCommand);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.includes("can't find window")) {
+        throw error;
+      }
+
+      // Window name may have been auto-renamed before send. Recreate it and run command directly.
+      this.createWindow(sessionName, windowName, agentCommand);
+    }
   }
 
   /**

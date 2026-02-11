@@ -333,14 +333,6 @@ export class AgentBridge {
       throw new Error('Server ID not configured. Run: agent-bridge config --server <id>');
     }
 
-    // Create tmux session (default: per-project, optional: shared session)
-    const sessionMode = this.bridgeConfig.tmux.sessionMode || 'per-project';
-    const sharedSessionName = this.bridgeConfig.tmux.sharedSessionName || 'bridge';
-    const tmuxSession =
-      sessionMode === 'shared'
-        ? this.tmux.getOrCreateSession(sharedSessionName)
-        : this.tmux.getOrCreateSession(projectName);
-
     // Collect enabled agents (should be only one)
     const enabledAgents = this.registry.getAll().filter(a => agents[a.config.name]);
     const adapter = enabledAgents[0];
@@ -348,6 +340,18 @@ export class AgentBridge {
     if (!adapter) {
       throw new Error('No agent specified');
     }
+
+    // Create tmux session (default: per-project, optional: shared session)
+    const sessionMode = this.bridgeConfig.tmux.sessionMode || 'per-project';
+    const sharedSessionName = this.bridgeConfig.tmux.sharedSessionName || 'bridge';
+    const windowName =
+      sessionMode === 'shared'
+        ? this.toSharedWindowName(projectName, adapter.config.name)
+        : adapter.config.name;
+    const tmuxSession =
+      sessionMode === 'shared'
+        ? this.tmux.getOrCreateSession(sharedSessionName, windowName)
+        : this.tmux.getOrCreateSession(projectName, windowName);
 
     // Create Discord channel with custom name or default
     const channelName = channelDisplayName || `${projectName}-${adapter.config.channelSuffix}`;
@@ -372,11 +376,6 @@ export class AgentBridge {
     const discordChannels: { [key: string]: string | undefined } = {
       [adapter.config.name]: channelId,
     };
-
-    const windowName =
-      sessionMode === 'shared'
-        ? this.toSharedWindowName(projectName, adapter.config.name)
-        : adapter.config.name;
 
     const exportPrefix = this.buildExportPrefix({
       AGENT_DISCORD_PROJECT: projectName,

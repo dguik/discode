@@ -29,6 +29,23 @@ function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
+function attachToTmux(sessionName: string, windowName?: string): void {
+  const sessionTarget = sessionName;
+  const windowTarget = windowName ? `${sessionName}:${windowName}` : undefined;
+
+  if (!windowTarget) {
+    execSync(`tmux attach-session -t ${escapeShellArg(sessionTarget)}`, { stdio: 'inherit' });
+    return;
+  }
+
+  try {
+    execSync(`tmux attach-session -t ${escapeShellArg(windowTarget)}`, { stdio: 'inherit' });
+  } catch {
+    console.log(chalk.yellow(`⚠️ Window '${windowName}' not found, attaching to session '${sessionName}' instead.`));
+    execSync(`tmux attach-session -t ${escapeShellArg(sessionTarget)}`, { stdio: 'inherit' });
+  }
+}
+
 function applyTmuxCliOverrides(base: BridgeConfig, options: TmuxCliOptions): BridgeConfig {
   // NOTE: `config` comes from src/config via a Proxy (lazy getter). Do not spread it.
   // Access properties explicitly so the Proxy's `get` trap is used.
@@ -199,7 +216,7 @@ async function startCommand(options: TmuxCliOptions & { project?: string; attach
         // Start bridge, then attach
       await bridge.start();
       console.log(chalk.cyan(`\n📺 Attaching to ${attachTarget}...\n`));
-      execSync(`tmux attach-session -t ${escapeShellArg(attachTarget)}`, { stdio: 'inherit' });
+      attachToTmux(sessionName, windowName);
       return;
     }
 
@@ -424,7 +441,7 @@ async function goCommand(
       const windowName = projectState?.tmuxWindows?.[agentName] || agentName;
       const attachTarget = `${sessionName}:${windowName}`;
       console.log(chalk.cyan(`\n📺 Attaching to ${attachTarget}...\n`));
-      execSync(`tmux attach-session -t ${escapeShellArg(attachTarget)}`, { stdio: 'inherit' });
+      attachToTmux(sessionName, windowName);
       return;
     }
 
@@ -590,8 +607,8 @@ function attachCommand(projectName: string | undefined, options: TmuxCliOptions)
       process.exit(1);
     }
 
-    // Replace current process with tmux attach
-  execSync(`tmux attach-session -t ${escapeShellArg(attachTarget)}`, { stdio: 'inherit' });
+    console.log(chalk.cyan(`\n📺 Attaching to ${attachTarget}...\n`));
+    attachToTmux(sessionName, windowName);
 }
 
 async function stopCommand(

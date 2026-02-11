@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rebuild and Restart Daemon"
+  short_description: "Rebuild and restart daemon safely"
+  default_prompt: "Use $rebuild-restart-daemon to rebuild this project and restart the daemon with status checks."
