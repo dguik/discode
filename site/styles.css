@@ -44,9 +44,14 @@ header.shell {
 }
 
 .brand-icon {
-  width: 1.45rem;
-  height: 1.45rem;
+  width: 2rem;
+  height: 2rem;
   object-fit: contain;
+}
+
+.brand-label {
+  font-size: 1.22rem;
+  line-height: 1;
 }
 
 .repo {
