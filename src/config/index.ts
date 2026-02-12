@@ -13,6 +13,7 @@ export interface StoredConfig {
   token?: string;
   serverId?: string;
   hookServerPort?: number;
+  defaultAgentCli?: string;
   opencodePermissionMode?: 'allow' | 'default';
 }
 
@@ -46,6 +47,7 @@ export class ConfigManager {
           ? envPermissionModeRaw
           : undefined;
       const opencodePermissionMode = storedConfig.opencodePermissionMode || envPermissionMode;
+      const defaultAgentCli = storedConfig.defaultAgentCli || this.env.get('DISCODE_DEFAULT_AGENT_CLI');
 
       // Merge: stored config > environment variables > defaults
       const sessionModeRaw = this.env.get('TMUX_SESSION_MODE');
@@ -61,12 +63,13 @@ export class ConfigManager {
           guildId: storedConfig.serverId || this.env.get('DISCORD_GUILD_ID'),
         },
         tmux: {
-          sessionPrefix: this.env.get('TMUX_SESSION_PREFIX') || 'agent-',
+          sessionPrefix: this.env.get('TMUX_SESSION_PREFIX') || '',
           sessionMode: sessionMode,
           sharedSessionName: this.env.get('TMUX_SHARED_SESSION_NAME') || 'bridge',
         },
         hookServerPort: storedConfig.hookServerPort ||
           (this.env.get('HOOK_SERVER_PORT') ? parseInt(this.env.get('HOOK_SERVER_PORT')!, 10) : 18470),
+        ...(defaultAgentCli ? { defaultAgentCli } : {}),
         opencode: opencodePermissionMode
           ? { permissionMode: opencodePermissionMode }
           : undefined,

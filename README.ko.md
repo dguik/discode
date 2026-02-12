@@ -78,7 +78,7 @@ bun link
 
 ```bash
 # Discord 봇 토큰으로 일회성 설정
-discode setup YOUR_DISCORD_BOT_TOKEN
+discode onboard
 ```
 
 ### 2. 프로젝트 초기화
@@ -109,19 +109,23 @@ discode attach         # tmux 세션에 연결
 
 ### 글로벌 명령어
 
-#### `setup <token>`
+#### `onboard`
 
-일회성 설정: 봇 토큰 저장, Discord 연결하여 서버 자동 감지, 설치된 에이전트 확인.
+최초 온보딩: 봇 토큰 입력, Discord 서버 자동 감지, 기본 AI CLI 선택, OpenCode 권한 모드 설정.
 
 ```bash
-discode setup YOUR_BOT_TOKEN
+discode onboard
+# 비대화형 셸에서는 --token 사용
+discode onboard --token YOUR_BOT_TOKEN
 ```
 
 설정 과정:
 1. 봇 토큰을 `~/.discode/config.json`에 저장
 2. Discord에 연결하여 봇이 참여한 서버를 자동 감지
 3. 봇이 여러 서버에 있으면 선택 프롬프트 표시
-4. 서버 ID 자동 저장
+4. `discode new` 기본 AI CLI 선택
+5. OpenCode 권한 `allow` 사용 여부 확인
+6. `allow`를 사용하지 않으면 Discord 승인 프롬프트가 잦아 불편할 수 있음을 안내
 
 #### `daemon <action>`
 
@@ -323,7 +327,7 @@ export interface AgentAdapter {
 }
 ```
 
-`token`과 `serverId` 모두 필요합니다. `setup` 명령이 서버 ID를 자동 감지하며, 수동 설정도 가능합니다:
+`token`과 `serverId` 모두 필요합니다. `onboard` 명령이 서버 ID를 자동 감지하며, 수동 설정도 가능합니다:
 
 ```bash
 discode config --show               # 현재 설정 확인

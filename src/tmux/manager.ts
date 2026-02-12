@@ -22,7 +22,7 @@ export class TmuxManager {
   private sessionPrefix: string;
   private executor: ICommandExecutor;
 
-  constructor(sessionPrefix: string = 'agent-', executor?: ICommandExecutor) {
+  constructor(sessionPrefix: string = '', executor?: ICommandExecutor) {
     this.sessionPrefix = sessionPrefix;
     this.executor = executor || new ShellCommandExecutor();
   }

@@ -1039,24 +1039,25 @@ reload() {
 
 ## 8. CLI 명령어 레퍼런스
 
-### 8.1 setup - 초기 설정
+### 8.1 onboard - 초기 설정
 
 ```bash
-discode setup <token>
+discode onboard
 ```
 
-**역할**: 한 번에 토큰 저장, 서버 감지, 에이전트 감지
+**역할**: 토큰 입력, 서버 감지, 기본 AI CLI 선택, OpenCode 권한 모드 설정
 
 **동작:**
 1. 토큰 저장 (config.json)
 2. Discord 연결
 3. 서버 목록 표시 (다중 서버인 경우)
 4. 서버 선택 및 저장
-5. 설치된 에이전트 감지
+5. 기본 AI CLI 선택
+6. OpenCode 권한 `allow` 사용 여부 확인
 
 **예시:**
 ```bash
-discode setup MTE2MjYxNzgxOTI5MzI2MzI4Ng.GxYZ1a.9ZjK0-Pq...
+discode onboard
 ```
 
 ### 8.2 new - 빠른 시작
@@ -1438,9 +1439,10 @@ npm link             # 글로벌 discode 명령어 등록
 | `DISCORD_GUILD_ID` | 없음 | Discord 서버 ID |
 | `DISCORD_CHANNEL_ID` | 없음 | (현재 미사용) |
 | `HOOK_SERVER_PORT` | 18470 | 훅 서버 포트 |
-| `TMUX_SESSION_PREFIX` | "agent-" | tmux 세션 접두사 |
+| `TMUX_SESSION_PREFIX` | "" | tmux 세션 접두사 |
 | `TMUX_SESSION_MODE` | "shared" | tmux 세션 모드 (`shared` 또는 `per-project`) |
 | `TMUX_SHARED_SESSION_NAME` | "bridge" | 공유 tmux 세션 이름(접두사 제외), `TMUX_SESSION_MODE=shared`일 때 사용 |
+| `DISCODE_DEFAULT_AGENT_CLI` | 없음 | `discode new`에서 에이전트 미지정 시 사용할 기본 AI CLI |
 | `AGENT_DISCORD_PROJECT` | 없음 | 프로젝트명 (tmux에서만) |
 | `AGENT_DISCORD_PORT` | 없음 | 훅 서버 포트 (tmux에서만) |
 | `AGENT_DISCORD_YOLO` | 없음 | YOLO 모드 플래그 (tmux에서만) |

@@ -81,7 +81,8 @@ describe('ConfigManager', () => {
       expect(config.discord.token).toBe('');
       expect(config.discord.channelId).toBeUndefined();
       expect(config.discord.guildId).toBeUndefined();
-      expect(config.tmux.sessionPrefix).toBe('agent-');
+      expect(config.tmux.sessionPrefix).toBe('');
+      expect(config.defaultAgentCli).toBeUndefined();
       expect(config.hookServerPort).toBe(18470);
     });
 
@@ -92,6 +93,7 @@ describe('ConfigManager', () => {
         token: 'stored-token-123',
         serverId: 'stored-guild-456',
         hookServerPort: 9999,
+        defaultAgentCli: 'codex',
         opencodePermissionMode: 'allow',
       };
       storage.setFile(configFile, JSON.stringify(storedConfig));
@@ -102,6 +104,7 @@ describe('ConfigManager', () => {
       expect(config.discord.token).toBe('stored-token-123');
       expect(config.discord.guildId).toBe('stored-guild-456');
       expect(config.hookServerPort).toBe(9999);
+      expect(config.defaultAgentCli).toBe('codex');
       expect(config.opencode?.permissionMode).toBe('allow');
     });
 

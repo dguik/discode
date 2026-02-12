@@ -26,7 +26,7 @@ Complete step-by-step guide to setting up your Discord bot for the Discode.
 
 1. In the Bot page, find the **"TOKEN"** section
 2. Click **"Reset Token"** (first time) or **"Copy"** (if token already exists)
-3. **IMPORTANT**: Save this token securely - you'll need it for setup
+3. **IMPORTANT**: Save this token securely - you'll need it for onboarding
 4. **WARNING**: Never share this token publicly or commit it to git
 
 ### Step 1.4: Enable Privileged Gateway Intents
@@ -59,7 +59,7 @@ Complete step-by-step guide to setting up your Discord bot for the Discode.
 3. Save this ID - you may need it for manual configuration
 
 **Note:**
-- The `discode setup` command will auto-detect your server ID if you run it while Discord is active
+- The `discode onboard` command will auto-detect your server ID if you run it while Discord is active
 - Manual configuration: `discode config --server YOUR_SERVER_ID`
 
 ---
@@ -132,10 +132,10 @@ If the bot cannot send messages, check:
 ### Step 5.1: Run Setup Command
 
 ```bash
-discode setup YOUR_BOT_TOKEN
+discode onboard
 ```
 
-Replace `YOUR_BOT_TOKEN` with the token you copied in Step 1.3.
+When prompted, paste the token you copied in Step 1.3.
 
 ### Step 5.2: Expected Output
 
@@ -198,7 +198,7 @@ Then in your terminal, type a message and press Enter. You should see:
 
 - Token may have been regenerated - get a fresh token from Developer Portal
 - Ensure no extra spaces when copying the token
-- Run `discode setup` again with the new token
+- Run `discode onboard --token NEW_BOT_TOKEN` with the new token
 
 ### Cannot read messages or detect commands
 
@@ -247,7 +247,7 @@ Then in your terminal, type a message and press Enter. You should see:
 
 5. Invite bot to server
 
-6. Run: discode setup YOUR_TOKEN
+6. Run: discode onboard
 
 7. Start using: discode new
 ```

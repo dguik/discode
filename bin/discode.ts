@@ -28,6 +28,8 @@ type TmuxCliOptions = {
   tmuxSharedSessionName?: string;
 };
 
+type RegisteredAgentAdapter = ReturnType<typeof agentRegistry.getAll>[number];
+
 function resolveCliVersion(): string {
   if (typeof DISCODE_VERSION !== 'undefined' && DISCODE_VERSION) {
     return DISCODE_VERSION;
@@ -92,6 +94,7 @@ function applyTmuxCliOverrides(base: BridgeConfig, options: TmuxCliOptions): Bri
   const baseDiscord = base.discord;
   const baseTmux = base.tmux;
   const baseHookPort = base.hookServerPort;
+  const baseDefaultAgentCli = base.defaultAgentCli;
   const baseOpencode = base.opencode;
 
   const modeRaw = options?.tmuxSessionMode as string | undefined;
@@ -111,6 +114,7 @@ function applyTmuxCliOverrides(base: BridgeConfig, options: TmuxCliOptions): Bri
   return {
     discord: baseDiscord,
     hookServerPort: baseHookPort,
+    defaultAgentCli: baseDefaultAgentCli,
     opencode: baseOpencode,
     tmux: {
       ...baseTmux,
@@ -154,29 +158,76 @@ async function confirmYesNo(question: string, defaultValue: boolean): Promise<bo
     if (!answer) return defaultValue;
     if (answer === 'y' || answer === 'yes') return true;
     if (answer === 'n' || answer === 'no') return false;
-    console.log(chalk.yellow('Please answer y(es) or n(o).'));
+    console.log(chalk.yellow('Please answer y(es) or n(o). / y(es) 또는 n(o)으로 답해주세요.'));
   }
 }
 
-async function ensureOpencodePermissionChoice(agentName: string): Promise<void> {
-  if (agentName !== 'opencode') return;
-  if (config.opencode?.permissionMode) return;
+function isInteractiveShell(): boolean {
+  return !!(process.stdin.isTTY && process.stdout.isTTY);
+}
 
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+async function ensureOpencodePermissionChoice(options: {
+  shouldPrompt: boolean;
+  forcePrompt?: boolean;
+}): Promise<void> {
+  if (!options.shouldPrompt) return;
+  if (!options.forcePrompt && config.opencode?.permissionMode) return;
+
+  if (!isInteractiveShell()) {
     saveConfig({ opencodePermissionMode: 'default' });
-    console.log(chalk.yellow('⚠️ Non-interactive shell detected: OpenCode permission mode set to default.'));
+    console.log(chalk.yellow('⚠️ Non-interactive shell: OpenCode permission mode set to default. / 비대화형 셸이라 default로 설정했어요.'));
     return;
   }
 
-  console.log(chalk.white('\nOpenCode permission setup (one-time):'));
-  console.log(chalk.gray('Discode can set OpenCode permissions to always allow to avoid approval prompts in Discord.'));
-  const allow = await confirmYesNo(chalk.white('Allow OpenCode permissions automatically? [Y/n]: '), true);
+  console.log(chalk.white('\nOpenCode permission setup / OpenCode 권한 설정'));
+  console.log(chalk.gray('Set OpenCode to "allow" to reduce Discord approval prompts. / "allow"로 두면 Discord 승인 프롬프트를 줄일 수 있어요.'));
+  const allow = await confirmYesNo(chalk.white('Enable OpenCode "allow" mode? [Y/n]: '), true);
 
   saveConfig({ opencodePermissionMode: allow ? 'allow' : 'default' });
   if (allow) {
-    console.log(chalk.green('✅ OpenCode permission mode saved: allow'));
+    console.log(chalk.green('✅ OpenCode permission mode saved: allow (recommended)'));
   } else {
     console.log(chalk.gray('OpenCode permission mode saved: default'));
+    console.log(chalk.yellow('⚠️ Permission mode is default. Discord usage may feel inconvenient because approval prompts can appear often. / default 모드에서는 승인 프롬프트가 자주 떠서 사용이 불편할 수 있어요.'));
+  }
+}
+
+async function chooseDefaultAgentCli(installedAgents: RegisteredAgentAdapter[]): Promise<string | undefined> {
+  if (installedAgents.length === 0) {
+    console.log(chalk.yellow('⚠️ No installed AI CLI detected. Install one of: claude, codex, opencode. / 설치된 AI CLI가 없어요.'));
+    return undefined;
+  }
+
+  const configured = config.defaultAgentCli;
+  const configuredIndex = configured
+    ? installedAgents.findIndex((agent) => agent.config.name === configured)
+    : -1;
+  const defaultIndex = configuredIndex >= 0 ? configuredIndex : 0;
+
+  if (!isInteractiveShell()) {
+    const selected = installedAgents[defaultIndex];
+    console.log(chalk.yellow(`⚠️ Non-interactive shell: default AI CLI set to ${selected.config.name}. / 비대화형 셸이라 기본값으로 선택했어요.`));
+    return selected.config.name;
+  }
+
+  console.log(chalk.white('\nChoose default AI CLI / 기본 AI CLI 선택'));
+  installedAgents.forEach((agent, index) => {
+    const marker = index === defaultIndex ? ' (default)' : '';
+    console.log(chalk.gray(`   ${index + 1}. ${agent.config.displayName} (${agent.config.name})${marker}`));
+  });
+
+  while (true) {
+    const answer = await prompt(chalk.white(`\nSelect default AI CLI [1-${installedAgents.length}] (Enter = default): `));
+    if (!answer) {
+      return installedAgents[defaultIndex].config.name;
+    }
+
+    const idx = parseInt(answer, 10) - 1;
+    if (idx >= 0 && idx < installedAgents.length) {
+      return installedAgents[idx].config.name;
+    }
+
+    console.log(chalk.yellow('Please enter a valid number. / 올바른 번호를 입력해주세요.'));
   }
 }
 
@@ -271,7 +322,7 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       try {
         validateConfig();
         if (!stateManager.getGuildId()) {
-          append('⚠️ Not set up yet. Run: discode setup <token>');
+          append('⚠️ Not set up yet. Run: discode onboard');
           return false;
         }
 
@@ -289,7 +340,7 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
 
         const selected = parsed.agentName
           ? installed.find((agent) => agent.config.name === parsed.agentName)
-          : installed[0];
+          : installed.find((agent) => agent.config.name === config.defaultAgentCli) || installed[0];
 
         if (!selected) {
           append(`⚠️ Unknown agent '${parsed.agentName}'. Try claude, codex, or opencode.`);
@@ -415,14 +466,29 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   }
 }
 
-async function setupCommand(token: string) {
+async function onboardCommand(options: { token?: string }) {
   try {
-    console.log(chalk.cyan('\n🔧 Discode Setup\n'));
+    console.log(chalk.cyan('\n🚀 Discode Onboarding / 디스코드 온보딩\n'));
+
+    let token = options.token?.trim();
+    if (!token) {
+      if (!isInteractiveShell()) {
+        console.error(chalk.red('Token is required in non-interactive mode. / 비대화형 모드에서는 토큰이 필요합니다.'));
+        console.log(chalk.gray('Run: discode onboard --token YOUR_DISCORD_BOT_TOKEN'));
+        process.exit(1);
+      }
+
+      token = await prompt(chalk.white('Discord bot token / 디스코드 봇 토큰: '));
+      if (!token) {
+        console.error(chalk.red('Bot token is required. / 봇 토큰은 필수입니다.'));
+        process.exit(1);
+      }
+    }
 
     saveConfig({ token });
-    console.log(chalk.green('✅ Bot token saved'));
+    console.log(chalk.green('✅ Bot token saved / 봇 토큰 저장 완료'));
 
-    console.log(chalk.gray('   Connecting to Discord...'));
+    console.log(chalk.gray('   Connecting to Discord... / Discord에 연결 중...'));
     const client = new DiscordClient(token);
     await client.connect();
 
@@ -430,8 +496,8 @@ async function setupCommand(token: string) {
     let selectedGuild: { id: string; name: string };
 
     if (guilds.length === 0) {
-      console.error(chalk.red('\n❌ Bot is not in any server.'));
-      console.log(chalk.gray('   Invite your bot to a server first:'));
+      console.error(chalk.red('\n❌ Bot is not in any server. / 봇이 참여한 서버가 없습니다.'));
+      console.log(chalk.gray('   Invite your bot to a server first / 먼저 봇을 서버에 초대해주세요:'));
       console.log(chalk.gray('   https://discord.com/developers/applications → OAuth2 → URL Generator'));
       await client.disconnect();
       process.exit(1);
@@ -439,44 +505,49 @@ async function setupCommand(token: string) {
 
     if (guilds.length === 1) {
       selectedGuild = guilds[0];
-      console.log(chalk.green(`✅ Server detected: ${selectedGuild.name} (${selectedGuild.id})`));
+      console.log(chalk.green(`✅ Server detected / 서버 감지 완료: ${selectedGuild.name} (${selectedGuild.id})`));
     } else {
-      console.log(chalk.white('\n   Bot is in multiple servers:\n'));
+      console.log(chalk.white('\n   Bot is in multiple servers / 여러 서버가 감지되었습니다:\n'));
       guilds.forEach((g, i) => {
         console.log(chalk.gray(`   ${i + 1}. ${g.name} (${g.id})`));
       });
-      const answer = await prompt(chalk.white(`\n   Select server [1-${guilds.length}]: `));
-      const idx = parseInt(answer, 10) - 1;
-      if (idx < 0 || idx >= guilds.length) {
-        console.error(chalk.red('Invalid selection'));
-        await client.disconnect();
-        process.exit(1);
+
+      if (!isInteractiveShell()) {
+        selectedGuild = guilds[0];
+        console.log(chalk.yellow(`⚠️ Non-interactive shell: selecting first server ${selectedGuild.name} (${selectedGuild.id}). / 비대화형 셸이라 첫 번째 서버를 선택했어요.`));
+      } else {
+        const answer = await prompt(chalk.white(`\n   Select server [1-${guilds.length}] / 서버 선택: `));
+        const idx = parseInt(answer, 10) - 1;
+        if (idx < 0 || idx >= guilds.length) {
+          console.error(chalk.red('Invalid selection. / 잘못된 선택입니다.'));
+          await client.disconnect();
+          process.exit(1);
+        }
+        selectedGuild = guilds[idx];
+        console.log(chalk.green(`✅ Server selected / 서버 선택 완료: ${selectedGuild.name}`));
       }
-      selectedGuild = guilds[idx];
-      console.log(chalk.green(`✅ Server selected: ${selectedGuild.name}`));
     }
 
     stateManager.setGuildId(selectedGuild.id);
     saveConfig({ serverId: selectedGuild.id });
 
     const installedAgents = agentRegistry.getAll().filter(a => a.isInstalled());
-    console.log(chalk.white('\n🤖 Installed agents:'));
-    if (installedAgents.length === 0) {
-      console.log(chalk.yellow('   None detected. Install an agent CLI (claude, opencode) first.'));
-    } else {
-      for (const a of installedAgents) {
-        console.log(chalk.green(`   ✓ ${a.config.displayName} (${a.config.command})`));
-      }
+    const defaultAgentCli = await chooseDefaultAgentCli(installedAgents);
+    if (defaultAgentCli) {
+      saveConfig({ defaultAgentCli });
+      console.log(chalk.green(`✅ Default AI CLI saved / 기본 AI CLI 저장: ${defaultAgentCli}`));
     }
+
+    await ensureOpencodePermissionChoice({ shouldPrompt: true, forcePrompt: true });
 
     await client.disconnect();
 
-    console.log(chalk.cyan('\n✨ Setup complete!\n'));
-    console.log(chalk.white('Next step:'));
+    console.log(chalk.cyan('\n✨ Onboarding complete! / 온보딩 완료!\n'));
+    console.log(chalk.white('Next step / 다음 단계:'));
     console.log(chalk.gray('   cd <your-project>'));
     console.log(chalk.gray('   discode new\n'));
   } catch (error) {
-    console.error(chalk.red('Setup failed:'), error);
+    console.error(chalk.red('Onboarding failed / 온보딩 실패:'), error);
     process.exit(1);
   }
 }
@@ -579,7 +650,7 @@ async function initCommand(agentName: string, description: string, options: Tmux
 
     const projectPath = process.cwd();
     const projectName = options.name || basename(projectPath);
-    await ensureOpencodePermissionChoice(adapter.config.name);
+    await ensureOpencodePermissionChoice({ shouldPrompt: adapter.config.name === 'opencode' });
 
       // Channel name format: "Agent - description"
     const channelDisplayName = `${adapter.config.displayName} - ${description}`;
@@ -625,7 +696,7 @@ async function goCommand(
     const effectiveConfig = applyTmuxCliOverrides(config, options);
 
     if (!stateManager.getGuildId()) {
-      console.error(chalk.red('Not set up yet. Run: discode setup <token>'));
+      console.error(chalk.red('Not set up yet. Run: discode onboard'));
       process.exit(1);
     }
 
@@ -666,21 +737,37 @@ async function goCommand(
           agentName = installed[0].config.name;
           console.log(chalk.gray(`   Auto-selected agent: ${installed[0].config.displayName}`));
         } else {
-          console.log(chalk.white('   Multiple agents installed:\n'));
-          installed.forEach((a, i) => {
-            console.log(chalk.gray(`   ${i + 1}. ${a.config.displayName} (${a.config.command})`));
-          });
-          const answer = await prompt(chalk.white(`\n   Select agent [1-${installed.length}]: `));
-          const idx = parseInt(answer, 10) - 1;
-          if (idx < 0 || idx >= installed.length) {
-            console.error(chalk.red('Invalid selection'));
-            process.exit(1);
+          const defaultInstalled = effectiveConfig.defaultAgentCli
+            ? installed.find((agent) => agent.config.name === effectiveConfig.defaultAgentCli)
+            : undefined;
+          if (defaultInstalled) {
+            agentName = defaultInstalled.config.name;
+            console.log(chalk.gray(`   Using default AI CLI: ${defaultInstalled.config.displayName}`));
+          } else {
+            if (effectiveConfig.defaultAgentCli) {
+              console.log(chalk.yellow(`⚠️ Configured default AI CLI '${effectiveConfig.defaultAgentCli}' is not installed.`));
+            }
+            if (!isInteractiveShell()) {
+              agentName = installed[0].config.name;
+              console.log(chalk.yellow(`⚠️ Non-interactive shell: defaulting to ${installed[0].config.displayName}.`));
+            } else {
+              console.log(chalk.white('   Multiple agents installed:\n'));
+              installed.forEach((a, i) => {
+                console.log(chalk.gray(`   ${i + 1}. ${a.config.displayName} (${a.config.command})`));
+              });
+              const answer = await prompt(chalk.white(`\n   Select agent [1-${installed.length}]: `));
+              const idx = parseInt(answer, 10) - 1;
+              if (idx < 0 || idx >= installed.length) {
+                console.error(chalk.red('Invalid selection'));
+                process.exit(1);
+              }
+              agentName = installed[idx].config.name;
+            }
           }
-          agentName = installed[idx].config.name;
         }
       }
 
-    await ensureOpencodePermissionChoice(agentName);
+    await ensureOpencodePermissionChoice({ shouldPrompt: agentName === 'opencode' });
 
       // Ensure global daemon is running
     const running = await defaultDaemonManager.isRunning();
@@ -798,6 +885,7 @@ async function configCommand(options: {
   server?: string;
   token?: string;
   port?: string | number;
+  defaultAgent?: string;
   opencodePermission?: 'allow' | 'default';
 }) {
   if (options.show) {
@@ -806,6 +894,7 @@ async function configCommand(options: {
       console.log(chalk.gray(`   Server ID: ${stateManager.getGuildId() || '(not set)'}`));
       console.log(chalk.gray(`   Token: ${config.discord.token ? '****' + config.discord.token.slice(-4) : '(not set)'}`));
       console.log(chalk.gray(`   Hook Port: ${config.hookServerPort || 18470}`));
+      console.log(chalk.gray(`   Default AI CLI: ${config.defaultAgentCli || '(not set)'}`));
       console.log(chalk.gray(`   OpenCode Permission Mode: ${config.opencode?.permissionMode || '(not set)'}`));
       console.log(chalk.cyan('\n🤖 Registered Agents:\n'));
       for (const adapter of agentRegistry.getAll()) {
@@ -837,6 +926,19 @@ async function configCommand(options: {
       updated = true;
   }
 
+  if (options.defaultAgent) {
+    const normalized = options.defaultAgent.trim().toLowerCase();
+    const adapter = agentRegistry.get(normalized);
+    if (!adapter) {
+      console.error(chalk.red(`Unknown agent: ${options.defaultAgent}`));
+      console.log(chalk.gray(`Available agents: ${agentRegistry.getAll().map((a) => a.config.name).join(', ')}`));
+      process.exit(1);
+    }
+    saveConfig({ defaultAgentCli: adapter.config.name });
+    console.log(chalk.green(`✅ Default AI CLI saved: ${adapter.config.name}`));
+    updated = true;
+  }
+
   if (options.opencodePermission) {
     saveConfig({ opencodePermissionMode: options.opencodePermission });
     console.log(chalk.green(`✅ OpenCode permission mode saved: ${options.opencodePermission}`));
@@ -848,6 +950,7 @@ async function configCommand(options: {
     console.log(chalk.gray('\nExample:'));
     console.log(chalk.gray('  discode config --token YOUR_BOT_TOKEN'));
     console.log(chalk.gray('  discode config --server YOUR_SERVER_ID'));
+    console.log(chalk.gray('  discode config --default-agent claude'));
     console.log(chalk.gray('  discode config --opencode-permission allow'));
     console.log(chalk.gray('  discode config --show'));
   }
@@ -1150,10 +1253,19 @@ await yargs(hideBin(process.argv))
       })
   )
   .command(
-    'setup <token>',
-    'One-time setup: save token, detect server, install hooks',
-    (y: Argv) => y.positional('token', { type: 'string', describe: 'Discord bot token', demandOption: true }),
-    async (argv: any) => setupCommand(argv.token)
+    'onboard',
+    'One-time onboarding: save token, choose default AI CLI, configure OpenCode permission',
+    (y: Argv) => y.option('token', { alias: 't', type: 'string', describe: 'Discord bot token (optional; prompt if omitted)' }),
+    async (argv: any) => onboardCommand({ token: argv.token })
+  )
+  .command(
+    'setup [token]',
+    false,
+    (y: Argv) => y.positional('token', { type: 'string', describe: 'Discord bot token (deprecated)' }),
+    async (argv: any) => {
+      console.log(chalk.yellow('⚠️ `setup` is deprecated. Use `discode onboard` instead.'));
+      await onboardCommand({ token: argv.token });
+    }
   )
   .command(
     'start',
@@ -1209,6 +1321,7 @@ await yargs(hideBin(process.argv))
       .option('server', { alias: 's', type: 'string', describe: 'Set Discord server ID' })
       .option('token', { alias: 't', type: 'string', describe: 'Set Discord bot token' })
       .option('port', { alias: 'p', type: 'string', describe: 'Set hook server port' })
+      .option('default-agent', { type: 'string', describe: 'Set default AI CLI for `discode new`' })
       .option('opencode-permission', {
         type: 'string',
         choices: ['allow', 'default'],
@@ -1221,6 +1334,7 @@ await yargs(hideBin(process.argv))
         server: argv.server,
         token: argv.token,
         port: argv.port,
+        defaultAgent: argv.defaultAgent,
         opencodePermission: argv.opencodePermission,
       })
   )

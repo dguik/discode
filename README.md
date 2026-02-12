@@ -87,18 +87,18 @@ bun link
 ### 1. Setup Discord Bot
 
 ```bash
-# One-time setup with your Discord bot token
-discode setup YOUR_DISCORD_BOT_TOKEN
+# One-time onboarding
+discode onboard
 ```
 
-The `setup` command saves your token and auto-detects the Discord server ID. You can verify or change settings later:
+The `onboard` command prompts for your bot token, auto-detects the Discord server ID, lets you choose a default AI CLI, and asks whether to enable OpenCode `allow` permission mode. You can verify or change settings later:
 
 ```bash
 discode config --show              # View current configuration
 discode config --server SERVER_ID  # Change server ID manually
 ```
 
-> **Note**: `setup` is required for initial configuration — it auto-detects the server ID by connecting to Discord. The `config` command only updates individual values without auto-detection.
+> **Note**: `onboard` is required for initial configuration — it auto-detects the server ID by connecting to Discord. The `config` command only updates individual values without auto-detection.
 
 ### 2. Start Working
 
@@ -139,19 +139,23 @@ discode attach         # Attach to tmux session
 
 ### Global Commands
 
-#### `setup <token>`
+#### `onboard`
 
-One-time setup: saves bot token, connects to Discord to auto-detect your server, and shows installed agents.
+One-time onboarding: prompts for bot token, connects to Discord to auto-detect your server, lets you choose your default AI CLI, and configures OpenCode permission mode.
 
 ```bash
-discode setup YOUR_BOT_TOKEN
+discode onboard
+# Optional for non-interactive shells
+discode onboard --token YOUR_BOT_TOKEN
 ```
 
-The setup process will:
+The onboarding flow will:
 1. Save your bot token to `~/.discode/config.json`
 2. Connect to Discord and detect which server(s) your bot is in
 3. If the bot is in multiple servers, prompt you to select one
-4. Save the server ID automatically
+4. Let you choose a default AI CLI for `discode new`
+5. Ask whether to set OpenCode permission mode to `allow`
+6. Warn that non-`allow` mode may cause inconvenient approval prompts in Discord
 
 #### `daemon <action>`
 
@@ -364,9 +368,10 @@ Stored in `~/.discode/config.json`:
 
 | Key | Required | Description | Default |
 |-----|----------|-------------|---------|
-| `token` | **Yes** | Discord bot token. Set via `discode setup <token>` or `config --token` | - |
-| `serverId` | **Yes** | Discord server (guild) ID. Auto-detected by `setup`, or set via `config --server` | - |
+| `token` | **Yes** | Discord bot token. Set via `discode onboard` or `config --token` | - |
+| `serverId` | **Yes** | Discord server (guild) ID. Auto-detected by `onboard`, or set via `config --server` | - |
 | `hookServerPort` | No | Port for the hook server | `18470` |
+| `defaultAgentCli` | No | Default AI CLI used by `discode new` when agent is omitted | First installed CLI |
 
 ```bash
 discode config --show               # View current config
@@ -388,9 +393,10 @@ Config values can be overridden with environment variables:
 | `DISCORD_BOT_TOKEN` | **Yes** (if not in config.json) | Discord bot token | - |
 | `DISCORD_GUILD_ID` | **Yes** (if not in config.json) | Discord server ID | - |
 | `DISCORD_CHANNEL_ID` | No | Override default channel | Auto-created per project |
-| `TMUX_SESSION_PREFIX` | No | Prefix for tmux session names | `agent-` |
+| `TMUX_SESSION_PREFIX` | No | Prefix for tmux session names | `` |
 | `TMUX_SESSION_MODE` | No | tmux session mode: `shared` (default) or `per-project` | `shared` |
 | `TMUX_SHARED_SESSION_NAME` | No | Shared tmux session name (without prefix), used when `TMUX_SESSION_MODE=shared` | `bridge` |
+| `DISCODE_DEFAULT_AGENT_CLI` | No | Default AI CLI used by `discode new` when agent is omitted | First installed CLI |
 | `HOOK_SERVER_PORT` | No | Port for the hook server | `18470` |
 
 ```bash

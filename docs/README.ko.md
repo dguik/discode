@@ -86,17 +86,17 @@ bun link
 
 ```bash
 # Discord 봇 토큰으로 최초 1회 설정
-discode setup YOUR_DISCORD_BOT_TOKEN
+discode onboard
 ```
 
-`setup` 명령어는 토큰을 저장하고 Discord 서버 ID를 자동 감지합니다. 설정을 확인하거나 변경하려면:
+`onboard` 명령어는 토큰 입력, Discord 서버 ID 자동 감지, 기본 AI CLI 선택, OpenCode 권한 모드 설정을 진행합니다. 설정을 확인하거나 변경하려면:
 
 ```bash
 discode config --show              # 현재 설정 조회
 discode config --server SERVER_ID  # 서버 ID 수동 변경
 ```
 
-> **참고**: 최초 설정은 반드시 `setup`을 사용하세요 — Discord에 연결하여 서버 ID를 자동 감지합니다. `config` 명령어는 자동 감지 없이 개별 값만 변경합니다.
+> **참고**: 최초 설정은 반드시 `onboard`를 사용하세요 — Discord에 연결하여 서버 ID를 자동 감지합니다. `config` 명령어는 자동 감지 없이 개별 값만 변경합니다.
 
 ### 2. 작업 시작
 
@@ -137,19 +137,23 @@ discode attach         # tmux 세션에 연결
 
 ### 글로벌 명령어
 
-#### `setup <token>`
+#### `onboard`
 
-최초 설정: 봇 토큰 저장, Discord에 연결하여 서버 자동 감지, 설치된 에이전트 표시.
+최초 설정: 봇 토큰 입력, Discord 서버 자동 감지, 기본 AI CLI 선택, OpenCode 권한 모드 설정.
 
 ```bash
-discode setup YOUR_BOT_TOKEN
+discode onboard
+# 비대화형 셸에서는 --token 사용
+discode onboard --token YOUR_BOT_TOKEN
 ```
 
 설정 과정:
 1. `~/.discode/config.json`에 봇 토큰 저장
 2. Discord에 연결하여 봇이 속한 서버 감지
 3. 봇이 여러 서버에 있으면 선택 프롬프트 표시
-4. 서버 ID 자동 저장
+4. `discode new` 기본 AI CLI 선택
+5. OpenCode 권한 `allow` 사용 여부 확인
+6. `allow`가 아니면 Discord 승인 프롬프트로 인해 사용이 불편할 수 있음을 안내
 
 #### `daemon <action>`
 
@@ -353,9 +357,10 @@ export class MyAgentAdapter extends BaseAgentAdapter {
 
 | 키 | 필수 | 설명 | 기본값 |
 |----|------|------|--------|
-| `token` | **필수** | Discord 봇 토큰. `discode setup <token>` 또는 `config --token`으로 설정 | - |
-| `serverId` | **필수** | Discord 서버(길드) ID. `setup`에서 자동 감지되거나 `config --server`로 수동 설정 | - |
+| `token` | **필수** | Discord 봇 토큰. `discode onboard` 또는 `config --token`으로 설정 | - |
+| `serverId` | **필수** | Discord 서버(길드) ID. `onboard`에서 자동 감지되거나 `config --server`로 수동 설정 | - |
 | `hookServerPort` | 선택 | 훅 서버 포트 | `18470` |
+| `defaultAgentCli` | 선택 | `discode new`에서 에이전트 미지정 시 사용할 기본 AI CLI | 첫 설치 CLI |
 
 ```bash
 discode config --show               # 현재 설정 조회
@@ -377,9 +382,10 @@ discode config --port 18470          # 훅 서버 포트 설정
 | `DISCORD_BOT_TOKEN` | **필수** (config.json에 없는 경우) | Discord 봇 토큰 | - |
 | `DISCORD_GUILD_ID` | **필수** (config.json에 없는 경우) | Discord 서버 ID | - |
 | `DISCORD_CHANNEL_ID` | 선택 | 기본 채널 덮어쓰기 | 프로젝트별 자동 생성 |
-| `TMUX_SESSION_PREFIX` | 선택 | tmux 세션 이름 접두사 | `agent-` |
+| `TMUX_SESSION_PREFIX` | 선택 | tmux 세션 이름 접두사 | `` |
 | `TMUX_SESSION_MODE` | 선택 | tmux 세션 모드: `shared`(기본) 또는 `per-project` | `shared` |
 | `TMUX_SHARED_SESSION_NAME` | 선택 | 공유 tmux 세션 이름(접두사 제외), `TMUX_SESSION_MODE=shared`일 때 사용 | `bridge` |
+| `DISCODE_DEFAULT_AGENT_CLI` | 선택 | `discode new`에서 에이전트 미지정 시 사용할 기본 AI CLI | 첫 설치 CLI |
 | `HOOK_SERVER_PORT` | 선택 | 훅 서버 포트 | `18470` |
 
 ```bash
