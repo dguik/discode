@@ -13,13 +13,22 @@ Bridge AI agent CLIs to Discord for remote monitoring and collaboration.
 
 ## Overview
 
-Discode connects AI coding assistants (Claude Code, OpenCode) to Discord, enabling remote monitoring and collaboration. Watch your AI agents work in real-time through Discord channels and track multiple projects simultaneously.
+Discoding - run AI coding CLIs locally and relay them to Discord.
 
-The bridge uses a polling-based architecture that captures tmux pane content every 30 seconds, detects state changes, and streams updates to dedicated Discord channels. Each project gets its own channel, and a single global daemon manages all connections efficiently.
+I built this after experimenting with OpenClaw.
+Even with full system permissions, I realized I preferred conversational control over full autonomy.
+
+Instead of building another dashboard, I wired my AI CLI to Discord.
+
+Discode runs your AI agent in tmux and simply relays output to Discord - no wrappers, no hidden execution layers, no cloud dependency.
+- Local-first
+- Relay-only architecture
+- Persistent tmux sessions
+- Single daemon managing multiple projects
 
 ## Features
 
-- **Multi-Agent Support**: Works with Claude Code and OpenCode
+- **Multi-Agent Support**: Works with Claude Code, Codex, and OpenCode
 - **Auto-Discovery**: Automatically detects installed AI agents on your system
 - **Real-Time Streaming**: Captures tmux output and streams to Discord every 30 seconds
 - **Project Isolation**: Each project gets a dedicated Discord channel
@@ -47,6 +56,7 @@ The bridge uses a polling-based architecture that captures tmux pane content eve
   - Required intents: Guilds, GuildMessages, MessageContent, GuildMessageReactions
 - **AI Agent**: At least one of:
   - [Claude Code](https://code.claude.com/docs/en/overview)
+  - [Codex](https://github.com/openai/codex)
   - [OpenCode](https://github.com/OpenCodeAI/opencode)
 
 ## Installation
@@ -339,7 +349,7 @@ Test suite includes 129 tests covering:
 discode/
 ├── bin/                  # CLI entry point (discode)
 ├── src/
-│   ├── agents/           # Agent adapters (Claude, OpenCode)
+│   ├── agents/           # Agent adapters (Claude, Codex, OpenCode)
 │   ├── capture/          # tmux capture, polling, state detection
 │   ├── config/           # Configuration management
 │   ├── discord/          # Discord client and message handlers
@@ -433,7 +443,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Acknowledgments
 
 - Built with [Discord.js](https://discord.js.org/)
-- Powered by [Claude Code](https://code.claude.com/docs/en/overview) and [OpenCode](https://github.com/OpenCodeAI/opencode)
+- Powered by [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://github.com/openai/codex), and [OpenCode](https://github.com/OpenCodeAI/opencode)
 - Inspired by [OpenClaw](https://github.com/nicepkg/openclaw)'s messenger-based command system. The motivation was to remotely control and monitor long-running AI agent tasks from anywhere via Discord.
 
 ## Support
