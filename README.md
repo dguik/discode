@@ -4,7 +4,7 @@
 
 [English](README.md) | [한국어](docs/README.ko.md)
 
-Bridge AI agent CLIs to Discord for remote monitoring and collaboration.
+Bridge AI agent CLIs to Discord for remote monitoring and control.
 
 > Derived from [DoBuDevel/discord-agent-bridge](https://github.com/DoBuDevel/discord-agent-bridge). This project preserves original authorship and builds on top of the upstream work.
 
