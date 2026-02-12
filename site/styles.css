@@ -77,6 +77,12 @@ body {
   padding: 8.6rem 0 2rem;
 }
 
+.main-shell .hero,
+.main-shell .install-card,
+.main-shell .about-copy {
+  margin-inline: clamp(1.5rem, 6vw, 7rem);
+}
+
 .news {
   margin: 0;
   color: var(--muted);
@@ -118,14 +124,12 @@ h1 {
 }
 
 .demo-section {
-  margin: 1.6rem 0 4rem;
+  margin: 4.5rem 0 4rem;
 }
 
 .demo-image {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 0.7rem;
-  background: #ffffff;
+  border-radius: 0;
   display: block;
 }
 
@@ -208,6 +212,16 @@ pre {
 
   .hero {
     padding-top: 4rem;
+  }
+
+  .main-shell .hero,
+  .main-shell .install-card,
+  .main-shell .about-copy {
+    margin-inline: 1rem;
+  }
+
+  .demo-section {
+    margin-top: 3rem;
   }
 
   .shell {
