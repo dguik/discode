@@ -51,10 +51,11 @@ Discode는 AI 코딩 어시스턴트(Claude Code, OpenCode)를 Discord에 연결
 
 ## 설치
 
-### 전역 설치
+### 전역 설치 (npm 또는 Bun)
 
 ```bash
 npm install -g @siisee11/discode
+bun add -g @siisee11/discode
 ```
 
 ### curl 설치 (Bun/Node 런타임 없이 사용)

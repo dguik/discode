@@ -14,16 +14,43 @@ import { TmuxManager } from '../src/tmux/manager.js';
 import { agentRegistry } from '../src/agents/index.js';
 import { DiscordClient } from '../src/discord/client.js';
 import { defaultDaemonManager } from '../src/daemon.js';
+import { readFileSync } from 'fs';
 import { basename, resolve } from 'path';
 import { execSync } from 'child_process';
 import { createInterface } from 'readline';
 import chalk from 'chalk';
 import type { BridgeConfig } from '../src/types/index.js';
 
+declare const DISCODE_VERSION: string | undefined;
+
 type TmuxCliOptions = {
   tmuxSessionMode?: string;
   tmuxSharedSessionName?: string;
 };
+
+function resolveCliVersion(): string {
+  if (typeof DISCODE_VERSION !== 'undefined' && DISCODE_VERSION) {
+    return DISCODE_VERSION;
+  }
+
+  const candidates = [
+    resolve(import.meta.dirname, '../package.json'),
+    resolve(import.meta.dirname, '../../package.json'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(readFileSync(candidate, 'utf-8')) as { version?: string };
+      if (parsed.version) return parsed.version;
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  return process.env.npm_package_version || '0.0.0';
+}
+
+const CLI_VERSION = resolveCliVersion();
 
 function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, "'\\''")}'`;
@@ -1109,7 +1136,7 @@ function addTmuxOptions<T>(y: Argv<T>) {
 await yargs(hideBin(process.argv))
   .scriptName('discode')
   .usage('$0 [command]')
-  .version('0.1.0')
+  .version(CLI_VERSION)
   .help()
   .strict()
   .command(

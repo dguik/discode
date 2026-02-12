@@ -43,10 +43,23 @@ Discode는 AI 코딩 어시스턴트(Claude Code, OpenCode)를 Discord에 연결
 
 ## 설치
 
-### 전역 설치
+### 전역 설치 (npm 또는 Bun)
 
 ```bash
+npm install -g @siisee11/discode
 bun add -g @siisee11/discode
+```
+
+### 바이너리 설치 (Bun/Node 런타임 없이 사용)
+
+```bash
+curl -fsSL https://discode.chat/install | bash
+```
+
+대체 경로:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/siisee11/discode/main/install | bash
 ```
 
 ### 소스에서 설치
@@ -117,7 +130,6 @@ discode setup YOUR_BOT_TOKEN
 ```bash
 discode daemon start    # 데몬 시작
 discode daemon stop     # 데몬 중지
-discode daemon restart  # 데몬 재시작
 discode daemon status   # 데몬 상태 확인
 ```
 
@@ -171,20 +183,22 @@ discode init opencode "데이터 파이프라인 프로젝트"
 
 #### `start [options]`
 
-이 프로젝트의 AI 에이전트 시작.
+등록된 프로젝트의 브리지 서버 시작.
 
 ```bash
-discode start                    # 일반 모드
-discode start --yolo            # YOLO 모드 (권한 확인 스킵)
-discode start --dangerously-skip-permissions  # --yolo와 동일
+discode start                        # 모든 프로젝트 시작
+discode start -p my-app             # 특정 프로젝트 시작
+discode start -p my-app --attach    # 시작 후 tmux에 연결
 ```
 
-#### `stop`
+#### `stop [project]`
 
-이 프로젝트의 AI 에이전트 중지.
+프로젝트 중지: tmux 세션 종료, Discord 채널 삭제, 프로젝트 상태 제거. 프로젝트를 지정하지 않으면 현재 디렉토리 이름을 사용합니다.
 
 ```bash
-discode stop
+discode stop                # 현재 디렉토리의 프로젝트 중지
+discode stop my-app         # 특정 프로젝트 중지
+discode stop --keep-channel # Discord 채널 유지 (tmux만 종료)
 ```
 
 #### `status`
@@ -195,24 +209,27 @@ discode stop
 discode status
 ```
 
-#### `attach`
+#### `attach [project]`
 
-이 프로젝트의 tmux 세션에 연결.
+프로젝트 tmux 세션에 연결. 프로젝트를 지정하지 않으면 현재 디렉토리 이름을 사용합니다.
 
 ```bash
-discode attach
+discode attach              # 현재 디렉토리의 프로젝트에 연결
+discode attach my-app       # 특정 프로젝트에 연결
 ```
 
 에이전트를 중지하지 않고 tmux에서 분리하려면 `Ctrl-b d`를 누르세요.
 
-#### `new [options]`
+#### `new [agent] [options]`
 
-빠른 시작: 데몬 시작, 프로젝트 시작, 연결을 한 번에 수행.
+빠른 시작: 데몬 시작, 필요 시 프로젝트 설정, tmux 연결까지 한 번에 수행. `init` 없이도 동작하며, 설치된 에이전트를 자동 감지하고 Discord 채널을 자동 생성합니다.
 
 ```bash
-discode new              # 일반 모드
-discode new --yolo      # YOLO 모드
-discode new --sandbox   # 샌드박스 모드 (Docker 컨테이너에서 Claude Code 실행)
+discode new              # 에이전트 자동 감지, 설정 및 연결
+discode new claude       # 특정 에이전트 사용
+discode new --yolo       # YOLO 모드 (권한 확인 스킵, Claude Code 전용)
+discode new --sandbox    # 샌드박스 모드 (Docker 컨테이너에서 Claude Code 실행, Claude Code 전용)
+discode new --no-attach  # tmux에 연결하지 않고 시작
 ```
 
 ## 작동 원리

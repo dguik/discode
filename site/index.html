@@ -37,15 +37,43 @@
         </section>
 
         <section class="install-card" aria-label="Install command">
-          <div class="tabs">
-            <span class="tab">bun</span>
-            <span class="tab">npm</span>
-            <span class="tab tab-active">curl</span>
-            <span class="tab">brew</span>
+          <div class="tabs" role="tablist" aria-label="Install methods">
+            <button class="tab" role="tab" data-tab="bun" aria-selected="false">bun</button>
+            <button class="tab" role="tab" data-tab="npm" aria-selected="false">npm</button>
+            <button class="tab tab-active" role="tab" data-tab="curl" aria-selected="true">curl</button>
+            <button class="tab" role="tab" data-tab="brew" aria-selected="false">brew</button>
           </div>
-          <pre><code>curl -fsSL https://discode.chat/install | bash</code></pre>
+          <pre><code id="install-command">curl -fsSL https://discode.chat/install | bash</code></pre>
         </section>
       </main>
     </div>
+    <script>
+      const installCommands = {
+        bun: "bun add -g @siisee11/discode",
+        npm: "npm install -g @siisee11/discode",
+        curl: "curl -fsSL https://discode.chat/install | bash",
+        brew: "# coming soon",
+      };
+
+      const tabs = Array.from(document.querySelectorAll(".tab[data-tab]"));
+      const installCommand = document.getElementById("install-command");
+
+      function activateTab(nextTab) {
+        const tabKey = nextTab.dataset.tab;
+        if (!tabKey || !installCommand) return;
+
+        tabs.forEach((tab) => {
+          const isActive = tab === nextTab;
+          tab.classList.toggle("tab-active", isActive);
+          tab.setAttribute("aria-selected", isActive ? "true" : "false");
+        });
+
+        installCommand.textContent = installCommands[tabKey] || "";
+      }
+
+      tabs.forEach((tab) => {
+        tab.addEventListener("click", () => activateTab(tab));
+      });
+    </script>
   </body>
 </html>

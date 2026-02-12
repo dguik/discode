@@ -53,10 +53,11 @@ The bridge uses a polling-based architecture that captures tmux pane content eve
 
 ## Installation
 
-### Global install
+### Global install (npm or Bun)
 
 ```bash
 npm install -g @siisee11/discode
+bun add -g @siisee11/discode
 ```
 
 ### Binary install (no Bun/Node runtime required)

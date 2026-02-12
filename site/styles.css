@@ -130,9 +130,18 @@ h1 {
   height: 100%;
   display: inline-flex;
   align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
   color: #9a9ba0;
   font-family: "IBM Plex Mono", monospace;
   font-size: 1.02rem;
+}
+
+.tab:focus-visible {
+  outline: 2px solid #1f1f22;
+  outline-offset: -2px;
 }
 
 .tab-active {

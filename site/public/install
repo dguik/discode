@@ -49,34 +49,85 @@ if [[ "$platform" == "linux" ]]; then
   archive_ext="tar.gz"
 fi
 
+urlencode_path_segment() {
+  local value="$1"
+  value="${value//@/%40}"
+  value="${value//\//%2f}"
+  printf '%s' "$value"
+}
+
+json_extract_first_string() {
+  local key="$1"
+  sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
+}
+
+npm_latest_version() {
+  local meta_pkg
+  meta_pkg="$(urlencode_path_segment "@$OWNER/$REPO")"
+  curl -fsSL "https://registry.npmjs.org/$meta_pkg/latest" | json_extract_first_string "version"
+}
+
+npm_tarball_url() {
+  local package_name="$1"
+  local package_version="$2"
+  local encoded_name
+  encoded_name="$(urlencode_path_segment "$package_name")"
+  curl -fsSL "https://registry.npmjs.org/$encoded_name/$package_version" | json_extract_first_string "tarball"
+}
+
+github_latest_version() {
+  curl -fsSL "https://api.github.com/repos/$OWNER/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p'
+}
+
 version="${VERSION:-}"
 if [[ -z "$version" ]]; then
-  version=$(curl -fsSL "https://api.github.com/repos/$OWNER/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+  version="$(npm_latest_version || true)"
+fi
+
+if [[ -z "$version" ]]; then
+  version="$(github_latest_version || true)"
+fi
+
+if [[ -z "$version" ]]; then
+  echo "Unable to determine release version from npm or GitHub."
+  exit 1
 fi
 
 filename="$APP-$suffix.$archive_ext"
 url="https://github.com/$OWNER/$REPO/releases/download/v$version/$filename"
+package_name="@$OWNER/$APP-$suffix"
 
 tmp_dir="${TMPDIR:-/tmp}/discode-install-$$"
 mkdir -p "$tmp_dir"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-echo "Installing $APP v$version ($suffix)"
-curl -fL "$url" -o "$tmp_dir/$filename"
+binary=""
+tarball_url="$(npm_tarball_url "$package_name" "$version" || true)"
 
-if [[ "$archive_ext" == "zip" ]]; then
-  unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
+if [[ -n "$tarball_url" ]]; then
+  echo "Installing $APP v$version ($suffix) from npm package $package_name"
+  curl -fL "$tarball_url" -o "$tmp_dir/package.tgz"
+  tar -xzf "$tmp_dir/package.tgz" -C "$tmp_dir"
+  binary="$tmp_dir/package/bin/$APP"
+  if [[ "$platform" == "windows" && -f "$tmp_dir/package/bin/$APP.exe" ]]; then
+    binary="$tmp_dir/package/bin/$APP.exe"
+  fi
 else
-  tar -xzf "$tmp_dir/$filename" -C "$tmp_dir"
-fi
-
-binary="$tmp_dir/$APP"
-if [[ "$platform" == "windows" ]]; then
-  binary="$tmp_dir/$APP.exe"
+  echo "npm package $package_name@$version not available; falling back to GitHub releases"
+  curl -fL "$url" -o "$tmp_dir/$filename"
+  if [[ "$archive_ext" == "zip" ]]; then
+    unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
+  else
+    tar -xzf "$tmp_dir/$filename" -C "$tmp_dir"
+  fi
+  binary="$tmp_dir/$APP"
+  if [[ "$platform" == "windows" ]]; then
+    binary="$tmp_dir/$APP.exe"
+  fi
 fi
 
 if [[ ! -f "$binary" ]]; then
-  echo "Downloaded archive did not contain $APP binary"
+  echo "Downloaded package did not contain $APP binary"
   exit 1
 fi
 
