@@ -555,7 +555,7 @@ async function startCommand(options: TmuxCliOptions & { project?: string; attach
 
     if (projects.length === 0) {
       console.log(chalk.yellow('⚠️  No projects configured.'));
-      console.log(chalk.gray('   Run `discode init` in a project directory first.'));
+      console.log(chalk.gray('   Run `discode new` in a project directory first.'));
       process.exit(1);
     }
 
@@ -615,68 +615,6 @@ async function startCommand(options: TmuxCliOptions & { project?: string; attach
     await bridge.start();
   } catch (error) {
     console.error(chalk.red('Error starting bridge:'), error);
-    process.exit(1);
-  }
-}
-
-async function initCommand(agentName: string, description: string, options: TmuxCliOptions & { name?: string }) {
-  try {
-    validateConfig();
-    const effectiveConfig = applyTmuxCliOverrides(config, options);
-
-      // Check server ID
-    if (!stateManager.getGuildId()) {
-      console.error(chalk.red('Server ID not configured.'));
-      console.log(chalk.gray('Run: discode config --server <your-server-id>'));
-      process.exit(1);
-    }
-
-      // Validate agent
-    const adapter = agentRegistry.get(agentName.toLowerCase());
-    if (!adapter) {
-      console.error(chalk.red(`Unknown agent: ${agentName}`));
-      console.log(chalk.gray('Available agents:'));
-      for (const a of agentRegistry.getAll()) {
-        console.log(chalk.gray(`  - ${a.config.name} (${a.config.displayName})`));
-      }
-      process.exit(1);
-    }
-
-    const projectPath = process.cwd();
-    const projectName = options.name || basename(projectPath);
-    await ensureOpencodePermissionChoice({ shouldPrompt: adapter.config.name === 'opencode' });
-
-      // Channel name format: "Agent - description"
-    const channelDisplayName = `${adapter.config.displayName} - ${description}`;
-
-    console.log(chalk.cyan(`\n📦 Initializing project: ${projectName}\n`));
-
-    const bridge = new AgentBridge({ config: effectiveConfig });
-    console.log(chalk.gray('   Connecting to Discord...'));
-    await bridge.connect();
-
-      // Only enable the selected agent
-    const agents = { [adapter.config.name]: true };
-    const result = await bridge.setupProject(projectName, projectPath, agents, channelDisplayName);
-
-    console.log(chalk.green('\n✅ Project initialized!\n'));
-
-    console.log(chalk.white('📋 Setup Summary:'));
-    console.log(chalk.gray(`   Project:    ${projectName}`));
-    console.log(chalk.gray(`   Path:       ${projectPath}`));
-    console.log(chalk.gray(`   Agent:      ${result.agentName}`));
-    console.log(chalk.cyan(`   Channel:    #${result.channelName}`));
-    console.log(chalk.gray(`   tmux:       ${result.tmuxSession}`));
-
-    console.log(chalk.green('✅ Environment variables auto-configured in tmux session'));
-
-    console.log(chalk.white('\n🚀 Next step:\n'));
-    console.log(chalk.gray('   discode new'));
-    console.log(chalk.cyan(`   Then send messages in Discord #${result.channelName}\n`));
-
-    await bridge.stop();
-  } catch (error) {
-    console.error(chalk.red('Error initializing project:'), error);
     process.exit(1);
   }
 }
@@ -962,7 +900,7 @@ function statusCommand(options: TmuxCliOptions) {
     console.log(chalk.cyan('\n📂 Projects:\n'));
 
     if (projects.length === 0) {
-      console.log(chalk.gray('   No projects configured. Run `discode init` in a project directory.'));
+      console.log(chalk.gray('   No projects configured. Run `discode new` in a project directory.'));
     } else {
       for (const project of projects) {
         const sessionActive = sessions.some(s => s.name === project.tmuxSession);
@@ -1261,20 +1199,6 @@ await yargs(hideBin(process.argv))
       startCommand({
         project: argv.project,
         attach: argv.attach,
-        tmuxSessionMode: argv.tmuxSessionMode,
-        tmuxSharedSessionName: argv.tmuxSharedSessionName,
-      })
-  )
-  .command(
-    'init <agent> <description>',
-    'Initialize Discord bridge for current project',
-    (y: Argv) => addTmuxOptions(y)
-      .positional('agent', { type: 'string', describe: 'Agent to use (claude, codex, or opencode)', demandOption: true })
-      .positional('description', { type: 'string', describe: 'Channel description (e.g., "내 프로젝트 작업")', demandOption: true })
-      .option('name', { alias: 'n', type: 'string', describe: 'Project name (defaults to directory name)' }),
-    async (argv: any) =>
-      initCommand(argv.agent, argv.description, {
-        name: argv.name,
         tmuxSessionMode: argv.tmuxSessionMode,
         tmuxSharedSessionName: argv.tmuxSharedSessionName,
       })
