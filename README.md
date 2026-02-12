@@ -25,8 +25,6 @@ The bridge uses a polling-based architecture that captures tmux pane content eve
 - **Project Isolation**: Each project gets a dedicated Discord channel
 - **Single Daemon**: One Discord bot connection manages all projects
 - **Session Management**: Persistent tmux sessions survive disconnections
-- **YOLO Mode**: Optional `--yolo` flag runs Claude Code with `--dangerously-skip-permissions`
-- **Sandbox Mode**: Optional `--sandbox` flag runs Claude Code in isolated Docker container
 - **Rich CLI**: Intuitive commands for setup, control, and monitoring
 - **Type-Safe**: Written in TypeScript with dependency injection pattern
 - **Well-Tested**: 129 unit tests with Vitest
@@ -113,8 +111,6 @@ discode new
 
 ```bash
 discode new claude        # Specify an agent explicitly
-discode new --yolo        # YOLO mode (skip permissions, Claude Code only)
-discode new --sandbox     # Sandbox mode (Docker isolation, Claude Code only)
 ```
 
 Your AI agent is now running in tmux, with output streaming to Discord every 30 seconds.
@@ -236,18 +232,16 @@ Quick start: start daemon, set up project if needed, and attach to tmux. Auto-de
 ```bash
 discode new              # Auto-detect agent, setup & attach
 discode new claude       # Use a specific agent
-discode new --yolo       # YOLO mode (skip permissions, Claude Code only)
-discode new --sandbox    # Sandbox mode (Docker isolation, Claude Code only)
 discode new --no-attach  # Start without attaching to tmux
 ```
 
 ## Supported Agents
 
-| Agent | Binary | Auto-Detect | YOLO Support | Sandbox Support | Notes |
-|-------|--------|-------------|--------------|-----------------|-------|
-| **Claude Code** | `claude` | Yes | Yes | Yes | Official Anthropic CLI |
-| **Codex** | `codex` | Yes | No | No | OpenAI Codex CLI |
-| **OpenCode** | `opencode` | Yes | No | No | Open-source alternative |
+| Agent | Binary | Auto-Detect | Notes |
+|-------|--------|-------------|-------|
+| **Claude Code** | `claude` | Yes | Official Anthropic CLI |
+| **Codex** | `codex` | Yes | OpenAI Codex CLI |
+| **OpenCode** | `opencode` | Yes | Open-source alternative |
 
 ### Agent Detection
 

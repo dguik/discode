@@ -14,7 +14,7 @@ describe('ClaudeAdapter', () => {
     expect(adapter.config.channelSuffix).toBe('claude');
   });
 
-  it('should return basic command without yolo flag', () => {
+  it('should return basic command', () => {
     const adapter = new ClaudeAdapter();
 
     const command = adapter.getStartCommand('/path/to/project');
@@ -22,28 +22,12 @@ describe('ClaudeAdapter', () => {
     expect(command).toBe('cd "/path/to/project" && claude');
   });
 
-  it('should add --dangerously-skip-permissions flag when yolo is true', () => {
+  it('should add --dangerously-skip-permissions when permission allow is true', () => {
     const adapter = new ClaudeAdapter();
 
     const command = adapter.getStartCommand('/path/to/project', true);
 
     expect(command).toBe('cd "/path/to/project" && claude --dangerously-skip-permissions');
-  });
-
-  it('should add --sandbox flag when sandbox is true', () => {
-    const adapter = new ClaudeAdapter();
-
-    const command = adapter.getStartCommand('/path/to/project', false, true);
-
-    expect(command).toBe('cd "/path/to/project" && claude --sandbox');
-  });
-
-  it('should add both --sandbox and --dangerously-skip-permissions flags', () => {
-    const adapter = new ClaudeAdapter();
-
-    const command = adapter.getStartCommand('/path/to/project', true, true);
-
-    expect(command).toBe('cd "/path/to/project" && claude --sandbox --dangerously-skip-permissions');
   });
 
   it('should correctly match channel name', () => {

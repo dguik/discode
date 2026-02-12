@@ -326,9 +326,7 @@ export class AgentBridge {
     projectPath: string,
     agents: ProjectAgents,
     channelDisplayName?: string,
-    overridePort?: number,
-    yolo = false,
-    sandbox = false
+    overridePort?: number
   ): Promise<{ channelName: string; channelId: string; agentName: string; tmuxSession: string }> {
     const guildId = this.stateManager.getGuildId();
     if (!guildId) {
@@ -387,9 +385,8 @@ export class AgentBridge {
           ? { OPENCODE_PERMISSION: '"allow"' }
           : {}
       ),
-      ...(yolo ? { AGENT_DISCORD_YOLO: '1' } : {}),
-      ...(sandbox ? { AGENT_DISCORD_SANDBOX: '1' } : {}),
     });
+    const permissionAllow = this.bridgeConfig.opencode?.permissionMode === 'allow';
 
     if (adapter.config.name === 'opencode') {
       try {
@@ -400,7 +397,11 @@ export class AgentBridge {
       }
     }
 
-    this.tmux.startAgentInWindow(tmuxSession, windowName, `${exportPrefix}${adapter.getStartCommand(projectPath, yolo, sandbox)}`);
+    this.tmux.startAgentInWindow(
+      tmuxSession,
+      windowName,
+      `${exportPrefix}${adapter.getStartCommand(projectPath, permissionAllow)}`
+    );
 
     // Save state
     const projectState = {

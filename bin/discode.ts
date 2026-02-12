@@ -244,17 +244,13 @@ function parseSessionNew(raw: string): {
   projectName?: string;
   agentName?: string;
   attach: boolean;
-  yolo: boolean;
-  sandbox: boolean;
 } {
   const parts = raw.split(/\s+/).filter(Boolean);
   const attach = parts.includes('--attach');
-  const yolo = parts.includes('--yolo');
-  const sandbox = parts.includes('--sandbox');
   const values = parts.filter((item) => !item.startsWith('--'));
   const projectName = values[1];
   const agentName = values[2];
-  return { projectName, agentName, attach, yolo, sandbox };
+  return { projectName, agentName, attach };
 }
 
 async function tuiCommand(options: TmuxCliOptions): Promise<void> {
@@ -265,7 +261,7 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     }
 
     if (command === '/help') {
-      append('Commands: /session_new [name] [agent] [--yolo] [--sandbox] [--attach], /list, /projects, /help, /exit');
+      append('Commands: /session_new [name] [agent] [--attach], /list, /projects, /help, /exit');
       return false;
     }
 
@@ -351,8 +347,6 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
         await goCommand(selected.config.name, {
           name: projectName,
           attach: parsed.attach,
-          yolo: parsed.yolo,
-          sandbox: parsed.sandbox,
           tmuxSessionMode: options.tmuxSessionMode,
           tmuxSharedSessionName: options.tmuxSharedSessionName,
         });
@@ -689,7 +683,7 @@ async function initCommand(agentName: string, description: string, options: Tmux
 
 async function goCommand(
   agentArg: string | undefined,
-  options: TmuxCliOptions & { name?: string; attach?: boolean; yolo?: boolean; sandbox?: boolean }
+  options: TmuxCliOptions & { name?: string; attach?: boolean }
 ) {
   try {
     validateConfig();
@@ -786,16 +780,6 @@ async function goCommand(
     }
 
     const tmux = new TmuxManager(effectiveConfig.tmux.sessionPrefix);
-    const yolo = !!options.yolo;
-    const sandbox = !!options.sandbox;
-
-    if (sandbox) {
-      console.log(chalk.cyan('   🐳 Sandbox mode: --sandbox (Docker container)'));
-    }
-    if (yolo) {
-      console.log(chalk.yellow('   ⚡ YOLO mode: --dangerously-skip-permissions'));
-    }
-
     if (!existingProject) {
         // New project: full setup via bridge
         console.log(chalk.gray('   Setting up new project...'));
@@ -805,7 +789,7 @@ async function goCommand(
         const adapter = agentRegistry.get(agentName)!;
         const channelDisplayName = `${adapter.config.displayName} - ${projectName}`;
         const agents = { [agentName]: true };
-        const result = await bridge.setupProject(projectName, projectPath, agents, channelDisplayName, undefined, yolo, sandbox);
+        const result = await bridge.setupProject(projectName, projectPath, agents, channelDisplayName);
 
         console.log(chalk.green(`✅ Project created`));
         console.log(chalk.cyan(`   Channel: #${result.channelName}`));
@@ -1301,15 +1285,11 @@ await yargs(hideBin(process.argv))
     (y: Argv) => addTmuxOptions(y)
       .positional('agent', { type: 'string', describe: 'Agent to use (claude, codex, opencode)' })
       .option('name', { alias: 'n', type: 'string', describe: 'Project name (defaults to directory name)' })
-      .option('attach', { type: 'boolean', default: true, describe: 'Attach to tmux session after setup' })
-      .option('yolo', { type: 'boolean', describe: 'YOLO mode: run agent with --dangerously-skip-permissions (no approval needed)' })
-      .option('sandbox', { type: 'boolean', describe: 'Sandbox mode: run Claude Code in a sandboxed Docker container' }),
+      .option('attach', { type: 'boolean', default: true, describe: 'Attach to tmux session after setup' }),
     async (argv: any) =>
       goCommand(argv.agent, {
         name: argv.name,
         attach: argv.attach,
-        yolo: argv.yolo,
-        sandbox: argv.sandbox,
         tmuxSessionMode: argv.tmuxSessionMode,
         tmuxSharedSessionName: argv.tmuxSharedSessionName,
       })

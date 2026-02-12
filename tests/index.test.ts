@@ -475,6 +475,23 @@ describe('AgentBridge', () => {
       );
     });
 
+    it('adds claude skip-permissions flag when permission mode is allow', async () => {
+      bridge = new AgentBridge({
+        discord: mockDiscord,
+        tmux: mockTmux,
+        stateManager: mockStateManager,
+        registry: mockRegistry,
+        config: {
+          ...createMockConfig(),
+          opencode: { permissionMode: 'allow' },
+        },
+      });
+
+      await bridge.setupProject('test-project', '/test/path', { claude: true });
+
+      expect(mockRegistry._mockAdapter.getStartCommand).toHaveBeenCalledWith('/test/path', true);
+    });
+
     it('throws when no guild ID configured', async () => {
       mockStateManager.getGuildId.mockReturnValue(undefined);
 
