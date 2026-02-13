@@ -87,6 +87,38 @@ a {
   font-weight: 600;
 }
 
+.language-picker {
+  display: inline-flex;
+  align-items: center;
+}
+
+.language-picker select {
+  padding: 0.32rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: var(--surface);
+  color: #26262b;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.86rem;
+}
+
+.language-picker select:focus-visible {
+  outline: 2px solid #1f1f22;
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .docs-main {
   padding: 3.6rem 0 5.5rem;
 }

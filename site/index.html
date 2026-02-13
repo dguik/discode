@@ -25,8 +25,15 @@
           <span class="brand-label">Discode</span>
         </a>
         <nav class="topnav" aria-label="Primary">
-          <a href="./docs/">Docs</a>
+          <a href="./docs/" data-docs-link data-href-en="./docs/" data-href-ko="./docs/ko/">Docs</a>
           <a href="https://github.com/siisee11/discode" target="_blank" rel="noreferrer">GitHub</a>
+          <label class="language-picker">
+            <span class="sr-only">Language</span>
+            <select data-language-select aria-label="Select language">
+              <option value="en">English</option>
+              <option value="ko">Korean</option>
+            </select>
+          </label>
         </nav>
       </header>
 
@@ -86,7 +93,13 @@
                 <span>Streams tmux output to Discord at a steady interval</span>
               </li>
             </ul>
-            <a class="about-cta" href="./docs/">
+            <a
+              class="about-cta"
+              href="./docs/"
+              data-docs-link
+              data-href-en="./docs/"
+              data-href-ko="./docs/ko/"
+            >
               Read docs
               <span aria-hidden="true">&rarr;</span>
             </a>
@@ -94,6 +107,7 @@
         </section>
       </main>
     </div>
+    <script src="/language.js"></script>
     <script>
       const installCommands = {
         bun: "bun add -g @siisee11/discode",
