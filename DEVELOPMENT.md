@@ -2,7 +2,7 @@
 
 ## Switching Discode Runtime (Local vs Release)
 
-By default, `discode` should point to your local binary during development.
+By default, `discode` should point to your local TypeScript source runtime during development.
 
 Add this patch to `~/.zshrc`:
 
@@ -26,13 +26,13 @@ discode-src() {
   (cd "$DISCODE_REPO" && bun run tsx ./bin/discode.ts "$@")
 }
 
-# Default `discode` to local runtime
-alias discode='discode-local'
+# Default `discode` to local source runtime
+alias discode='discode-src'
 ```
 
 Helpers:
 
-- `discode`: local compiled binary (default alias)
+- `discode`: local TypeScript source runtime (default alias)
 - `discode-local`: local compiled binary from this repo
 - `discode-rel`: global installed release runtime (ignores `DISCODE_BIN_PATH`)
 - `discode-src`: local TypeScript source runtime
@@ -60,6 +60,7 @@ discode-src onboard
 
 ```bash
 cd /Users/dev/git/discode
+npm run build
 npm run build:release:binaries:single
 ```
 
@@ -68,3 +69,32 @@ The `discode-local` helper expects:
 ```text
 /Users/dev/git/discode/dist/release/discode-darwin-arm64/bin/discode
 ```
+
+### Keep `discode-local` up to date
+
+Use this workflow whenever `discode-local` behavior differs from `discode-src`, or after changing CLI code:
+
+```bash
+cd /Users/dev/git/discode
+npm run build
+npm run build:release:binaries:single
+```
+
+Quick verification:
+
+```bash
+# 1) Check the helper target path
+echo "$DISCODE_LOCAL_BIN"
+
+# 2) Confirm the binary is freshly updated
+ls -l /Users/dev/git/discode/dist/release/discode-darwin-arm64/bin/discode
+
+# 3) Smoke test onboarding behavior
+discode-local onboard
+```
+
+If `discode-local` still behaves differently:
+
+- Confirm your shell function is loaded from `~/.zshrc` (`type discode-local`).
+- Confirm `DISCODE_LOCAL_BIN` points to the repo build output path above.
+- Re-run `source ~/.zshrc` and test again.
