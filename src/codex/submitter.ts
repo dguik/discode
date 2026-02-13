@@ -82,19 +82,19 @@ export class CodexSubmitter {
     const retries = this.getEnvInt('AGENT_DISCORD_SUBMIT_RETRIES', 4);
 
     // Type first so retries can be Enter-only (avoid duplicating text).
-    this.tmux.typeKeysToWindow(tmuxSession, windowName, trimmed);
+    this.tmux.typeKeysToWindow(tmuxSession, windowName, trimmed, 'codex');
     await this.sleep(submitDelayMs);
 
     // For slash commands, record a capture after typing so we can detect disappearance.
     let typedCapture = '';
     if (isSlash) {
-      typedCapture = this.tmux.capturePaneFromWindow(tmuxSession, windowName);
+      typedCapture = this.tmux.capturePaneFromWindow(tmuxSession, windowName, 'codex');
     }
 
-    this.tmux.sendEnterToWindow(tmuxSession, windowName);
+    this.tmux.sendEnterToWindow(tmuxSession, windowName, 'codex');
     await this.sleep(checkDelayMs);
 
-    let after = this.tmux.capturePaneFromWindow(tmuxSession, windowName);
+    let after = this.tmux.capturePaneFromWindow(tmuxSession, windowName, 'codex');
     if (isSlash) {
       const typedHad = typedCapture ? this.captureContainsNeedle(typedCapture, trimmed) : false;
       const afterHas = this.captureContainsNeedle(after, trimmed);
@@ -109,9 +109,9 @@ export class CodexSubmitter {
 
     // Retry: only press Enter again (no re-typing).
     for (let i = 0; i < Math.max(0, retries); i++) {
-      this.tmux.sendEnterToWindow(tmuxSession, windowName);
+      this.tmux.sendEnterToWindow(tmuxSession, windowName, 'codex');
       await this.sleep(retryDelayMs);
-      after = this.tmux.capturePaneFromWindow(tmuxSession, windowName);
+      after = this.tmux.capturePaneFromWindow(tmuxSession, windowName, 'codex');
 
       if (isSlash) {
         const afterHas = this.captureContainsNeedle(after, trimmed);

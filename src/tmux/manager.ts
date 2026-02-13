@@ -12,6 +12,14 @@ const TUI_PANE_COMMAND_MARKERS = ['discode.js tui', 'discode tui'];
 const TUI_PANE_MAX_WIDTH = 60;
 const TUI_PANE_DELAY_SECONDS = 0.35;
 
+type AgentPaneHint = 'opencode' | 'claude' | 'codex';
+
+const AGENT_PANE_MARKERS: Record<AgentPaneHint, string[]> = {
+  opencode: ['opencode'],
+  claude: ['claude'],
+  codex: ['codex'],
+};
+
 type PaneMetadata = {
   index: number;
   title: string;
@@ -224,7 +232,7 @@ export class TmuxManager {
    * Otherwise, resolve the lowest existing pane index for the target window.
    * This avoids active-pane drift while also working when tmux pane-base-index is 1.
    */
-  private resolveWindowTarget(sessionName: string, windowName: string): string {
+  private resolveWindowTarget(sessionName: string, windowName: string, paneHint?: string): string {
     const hasExplicitPane = /\.\d+$/.test(windowName);
     if (hasExplicitPane) {
       return `${sessionName}:${windowName}`;
@@ -234,6 +242,17 @@ export class TmuxManager {
 
     try {
       const panes = this.listPaneMetadata(sessionName, windowName);
+
+      const hintedAgent = this.resolveAgentPaneHint(paneHint || windowName);
+      if (hintedAgent) {
+        const hintedPaneIndexes = panes
+          .filter((pane) => this.matchesAgentPane(pane, hintedAgent))
+          .map((pane) => pane.index);
+        if (hintedPaneIndexes.length > 0) {
+          const firstHintedPane = Math.min(...hintedPaneIndexes);
+          return `${baseTarget}.${firstHintedPane}`;
+        }
+      }
 
       const nonTuiPaneIndexes = panes
         .filter((pane) => pane.title !== TUI_PANE_TITLE)
@@ -255,6 +274,21 @@ export class TmuxManager {
     }
 
     return baseTarget;
+  }
+
+  private resolveAgentPaneHint(targetHint: string): AgentPaneHint | null {
+    const normalized = targetHint.trim().toLowerCase();
+    if (normalized.length === 0) return null;
+    if (/\bopencode\b/.test(normalized)) return 'opencode';
+    if (/\bcodex\b/.test(normalized)) return 'codex';
+    if (/\bclaude\b/.test(normalized)) return 'claude';
+    return null;
+  }
+
+  private matchesAgentPane(pane: PaneMetadata, hint: AgentPaneHint): boolean {
+    if (pane.title === TUI_PANE_TITLE) return false;
+    const haystack = `${pane.title}\n${pane.startCommand}`.toLowerCase();
+    return AGENT_PANE_MARKERS[hint].some((marker) => haystack.includes(marker));
   }
 
   private listPaneMetadata(sessionName: string, windowName: string): PaneMetadata[] {
@@ -415,8 +449,8 @@ export class TmuxManager {
    * Send keys to a specific window
    * @param sessionName Full session name (already includes prefix)
    */
-  sendKeysToWindow(sessionName: string, windowName: string, keys: string): void {
-    const target = this.resolveWindowTarget(sessionName, windowName);
+  sendKeysToWindow(sessionName: string, windowName: string, keys: string, paneHint?: string): void {
+    const target = this.resolveWindowTarget(sessionName, windowName, paneHint);
     const escapedTarget = escapeShellArg(target);
     const escapedKeys = escapeShellArg(keys);
 
@@ -433,8 +467,8 @@ export class TmuxManager {
    * Type keys into a specific window without pressing Enter.
    * Useful when we want to control submission separately (e.g., Codex retries).
    */
-  typeKeysToWindow(sessionName: string, windowName: string, keys: string): void {
-    const target = this.resolveWindowTarget(sessionName, windowName);
+  typeKeysToWindow(sessionName: string, windowName: string, keys: string, paneHint?: string): void {
+    const target = this.resolveWindowTarget(sessionName, windowName, paneHint);
     const escapedTarget = escapeShellArg(target);
     const escapedKeys = escapeShellArg(keys);
 
@@ -449,8 +483,8 @@ export class TmuxManager {
    * Send an Enter keypress to a specific window.
    * Useful for TUIs that may drop a submit when busy.
    */
-  sendEnterToWindow(sessionName: string, windowName: string): void {
-    const target = this.resolveWindowTarget(sessionName, windowName);
+  sendEnterToWindow(sessionName: string, windowName: string, paneHint?: string): void {
+    const target = this.resolveWindowTarget(sessionName, windowName, paneHint);
     const escapedTarget = escapeShellArg(target);
     try {
       this.executor.exec(`tmux send-keys -t ${escapedTarget} Enter`);
@@ -463,8 +497,8 @@ export class TmuxManager {
    * Capture pane output from a specific window
    * @param sessionName Full session name (already includes prefix)
    */
-  capturePaneFromWindow(sessionName: string, windowName: string): string {
-    const target = this.resolveWindowTarget(sessionName, windowName);
+  capturePaneFromWindow(sessionName: string, windowName: string, paneHint?: string): string {
+    const target = this.resolveWindowTarget(sessionName, windowName, paneHint);
     const escapedTarget = escapeShellArg(target);
 
     try {

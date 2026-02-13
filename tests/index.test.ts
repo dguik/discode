@@ -351,8 +351,8 @@ describe('AgentBridge', () => {
 
       await cb('codex', 'hello', 'test-project', 'ch-123');
 
-      expect(mockTmux.typeKeysToWindow).toHaveBeenCalledWith('agent-test', 'codex', 'hello');
-      expect(mockTmux.sendEnterToWindow).toHaveBeenCalled();
+      expect(mockTmux.typeKeysToWindow).toHaveBeenCalledWith('agent-test', 'codex', 'hello', 'codex');
+      expect(mockTmux.sendEnterToWindow).toHaveBeenCalledWith('agent-test', 'codex', 'codex');
 
       // Should not send failure warning
       const warningCalls = mockDiscord.sendToChannel.mock.calls
@@ -396,8 +396,8 @@ describe('AgentBridge', () => {
 
       await cb('codex', '/help', 'test-project', 'ch-123');
 
-      expect(mockTmux.typeKeysToWindow).toHaveBeenCalledWith('agent-test', 'codex', '/help');
-      expect(mockTmux.sendEnterToWindow).toHaveBeenCalled();
+      expect(mockTmux.typeKeysToWindow).toHaveBeenCalledWith('agent-test', 'codex', '/help', 'codex');
+      expect(mockTmux.sendEnterToWindow).toHaveBeenCalledWith('agent-test', 'codex', 'codex');
 
       const warningCalls = mockDiscord.sendToChannel.mock.calls
         .map((c: any[]) => String(c[1] ?? ''))
@@ -432,8 +432,8 @@ describe('AgentBridge', () => {
       const cb = mockDiscord.onMessage.mock.calls[0][0];
       await cb('opencode', 'hello opencode', 'test-project', 'ch-123');
 
-      expect(mockTmux.typeKeysToWindow).toHaveBeenCalledWith('agent-test', 'test-project-opencode', 'hello opencode');
-      expect(mockTmux.sendEnterToWindow).toHaveBeenCalledWith('agent-test', 'test-project-opencode');
+      expect(mockTmux.typeKeysToWindow).toHaveBeenCalledWith('agent-test', 'test-project-opencode', 'hello opencode', 'opencode');
+      expect(mockTmux.sendEnterToWindow).toHaveBeenCalledWith('agent-test', 'test-project-opencode', 'opencode');
       expect(mockTmux.sendKeysToWindow).not.toHaveBeenCalled();
     });
   });

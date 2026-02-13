@@ -88,7 +88,7 @@ export class CapturePoller {
     let rawCapture: string;
     try {
       const windowName = project.tmuxWindows?.[agentType] || agentType;
-      rawCapture = this.tmux.capturePaneFromWindow(project.tmuxSession, windowName);
+      rawCapture = this.tmux.capturePaneFromWindow(project.tmuxSession, windowName, agentType);
     } catch {
       // Session or window doesn't exist
       if (state.notifiedWorking) {

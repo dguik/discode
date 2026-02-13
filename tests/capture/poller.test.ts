@@ -124,8 +124,8 @@ describe('CapturePoller', () => {
     const poller = new CapturePoller(tmux, discord, 30000, stateManager);
     await (poller as any).pollAll();
 
-    expect(tmux.capturePaneFromWindow).toHaveBeenCalledWith('agent-proj1', 'claude');
-    expect(tmux.capturePaneFromWindow).toHaveBeenCalledWith('agent-proj2', 'claude');
+    expect(tmux.capturePaneFromWindow).toHaveBeenCalledWith('agent-proj1', 'claude', 'claude');
+    expect(tmux.capturePaneFromWindow).toHaveBeenCalledWith('agent-proj2', 'claude', 'claude');
   });
 
   it('skips disabled agents', async () => {
@@ -140,8 +140,8 @@ describe('CapturePoller', () => {
     const poller = new CapturePoller(tmux, discord, 30000, stateManager);
     await (poller as any).pollAll();
 
-    expect(tmux.capturePaneFromWindow).not.toHaveBeenCalledWith('agent-proj1', 'claude');
-    expect(tmux.capturePaneFromWindow).toHaveBeenCalledWith('agent-proj1', 'gemini');
+    expect(tmux.capturePaneFromWindow).not.toHaveBeenCalledWith('agent-proj1', 'claude', 'claude');
+    expect(tmux.capturePaneFromWindow).toHaveBeenCalledWith('agent-proj1', 'gemini', 'gemini');
   });
 
   it('does not send "working" notification on first capture', async () => {

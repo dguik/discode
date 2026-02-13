@@ -240,6 +240,15 @@ describe('TmuxManager', () => {
       expect(executor.calls[1].command).toContain("tmux send-keys -t 'agent-session:window1.1'");
     });
 
+    it('routes to pane matching agent hint in target name', () => {
+      executor.nextResult =
+        '0\topencode\topencode\n1\tclaude\tclaude\n2\tcodex\tcodex\n3\tdiscode-tui\tbun /repo/dist/bin/discode.js tui';
+      tmux.sendKeysToWindow('agent-session', 'myproj-codex', 'echo hello');
+
+      expect(executor.calls[1].command).toContain("tmux send-keys -t 'agent-session:myproj-codex.2'");
+      expect(executor.calls[2].command).toContain("tmux send-keys -t 'agent-session:myproj-codex.2' Enter");
+    });
+
   });
 
   describe('typeKeysToWindow', () => {
