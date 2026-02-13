@@ -128,7 +128,7 @@ body {
   font-size: 1.04rem;
 }
 
-.news span {
+.news span:first-child {
   display: inline-block;
   margin-right: 0.58rem;
   padding: 0.16rem 0.48rem;
