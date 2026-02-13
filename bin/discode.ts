@@ -9,7 +9,7 @@ import { hideBin } from 'yargs/helpers';
 import type { Argv } from 'yargs';
 import { AgentBridge } from '../src/index.js';
 import { stateManager } from '../src/state/index.js';
-import { validateConfig, config, saveConfig, getConfigPath } from '../src/config/index.js';
+import { validateConfig, config, saveConfig, getConfigPath, getConfigValue } from '../src/config/index.js';
 import { TmuxManager } from '../src/tmux/manager.js';
 import { agentRegistry } from '../src/agents/index.js';
 import { DiscordClient } from '../src/discord/client.js';
@@ -487,15 +487,35 @@ async function onboardCommand(options: { token?: string }) {
   try {
     console.log(chalk.cyan('\n🚀 Discode Onboarding\n'));
 
+    const existingToken = getConfigValue('token')?.trim();
     let token = options.token?.trim();
     if (!token) {
-      if (!isInteractiveShell()) {
+      if (existingToken) {
+        if (isInteractiveShell()) {
+          const maskedToken = `****${existingToken.slice(-4)}`;
+          const reuseToken = await confirmYesNo(
+            chalk.white(`Previously saved Discord bot token found (${maskedToken}). Use it? [Y/n]: `),
+            true
+          );
+          if (reuseToken) {
+            token = existingToken;
+            console.log(chalk.green(`✅ Reusing saved bot token (${maskedToken})`));
+          }
+        } else {
+          token = existingToken;
+          console.log(chalk.yellow(`⚠️ Non-interactive shell: using previously saved bot token (****${existingToken.slice(-4)}).`));
+        }
+      }
+
+      if (!token && !isInteractiveShell()) {
         console.error(chalk.red('Token is required in non-interactive mode.'));
         console.log(chalk.gray('Run: discode onboard --token YOUR_DISCORD_BOT_TOKEN'));
         process.exit(1);
       }
 
-      token = await prompt(chalk.white('Discord bot token: '));
+      if (!token) {
+        token = await prompt(chalk.white('Discord bot token: '));
+      }
       if (!token) {
         console.error(chalk.red('Bot token is required.'));
         process.exit(1);
