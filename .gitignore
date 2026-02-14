@@ -10,4 +10,4 @@ dist-site/
 coverage/
 *.tgz
 
-opencode/
+opencode-ref/

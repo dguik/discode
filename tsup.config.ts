@@ -1,3 +1,4 @@
+import { cpSync } from 'fs';
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
@@ -7,4 +8,8 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   shims: true,
+  onSuccess: async () => {
+    cpSync('src/claude/plugin', 'dist/claude/plugin', { recursive: true });
+    cpSync('src/opencode/plugin', 'dist/opencode/plugin', { recursive: true });
+  },
 });
