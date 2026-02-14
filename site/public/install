@@ -5,6 +5,30 @@ APP="discode"
 OWNER="siisee11"
 REPO="discode"
 INSTALL_DIR="$HOME/.discode/bin"
+NO_MODIFY_PATH=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-modify-path)
+      NO_MODIFY_PATH=true
+      shift
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Discode installer
+
+Usage:
+  curl -fsSL https://discode.chat/install | bash
+  curl -fsSL https://discode.chat/install | bash -s -- --no-modify-path
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Warning: Unknown option '$1' (ignored)" >&2
+      shift
+      ;;
+  esac
+done
 
 mkdir -p "$INSTALL_DIR"
 
@@ -134,5 +158,68 @@ fi
 cp "$binary" "$INSTALL_DIR/$APP"
 chmod 755 "$INSTALL_DIR/$APP"
 
+add_to_path() {
+  local shell_name="$1"
+  local command_line
+  local config_file=""
+
+  case "$shell_name" in
+    fish) command_line="fish_add_path $INSTALL_DIR" ;;
+    *) command_line="export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
+  esac
+
+  local candidates=()
+  case "$shell_name" in
+    zsh)
+      candidates=("${ZDOTDIR:-$HOME}/.zshrc" "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/.zshrc")
+      ;;
+    bash)
+      candidates=("$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile")
+      ;;
+    fish)
+      candidates=("$HOME/.config/fish/config.fish")
+      ;;
+    *)
+      candidates=("$HOME/.profile")
+      ;;
+  esac
+
+  # Prefer an existing writable config file.
+  for file in "${candidates[@]}"; do
+    if [[ -f "$file" && -w "$file" ]]; then
+      config_file="$file"
+      break
+    fi
+  done
+
+  # Fall back to creating the first candidate in home config.
+  if [[ -z "$config_file" ]]; then
+    config_file="${candidates[0]}"
+    mkdir -p "$(dirname "$config_file")"
+    touch "$config_file"
+  fi
+
+  if grep -Fq "$INSTALL_DIR" "$config_file"; then
+    echo "PATH already configured in: $config_file"
+    return
+  fi
+
+  {
+    echo
+    echo "# discode"
+    echo "$command_line"
+  } >> "$config_file"
+  echo "Added PATH entry to: $config_file"
+}
+
 echo "Installed to: $INSTALL_DIR/$APP"
-echo "Add to PATH if needed: export PATH=$INSTALL_DIR:\$PATH"
+
+if [[ "$NO_MODIFY_PATH" == "true" ]]; then
+  echo "Skipped PATH update (--no-modify-path)."
+  echo "Add to PATH manually: export PATH=\"$INSTALL_DIR:\$PATH\""
+else
+  current_shell="$(basename "${SHELL:-sh}")"
+  add_to_path "$current_shell"
+fi
+
+echo "Run now: export PATH=\"$INSTALL_DIR:\$PATH\""

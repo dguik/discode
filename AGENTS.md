@@ -5,6 +5,7 @@
 Release 작업 시 아래 항목은 필수입니다.
 
 - 웹사이트 landing page의 `new` 문구를 최신 릴리즈 내용으로 업데이트한다. (`site/index.html`)
+- npm에 릴리즈 버전을 반드시 publish한다. (메타 패키지 `@siisee11/discode`와 플랫폼 패키지 `@siisee11/discode-*` 모두)
 - GitHub Releases 페이지에 릴리즈를 등록하고, changelog를 포함해 배포 아티팩트를 업로드한다.
 
 ## Web 배포
