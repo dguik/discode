@@ -103,4 +103,33 @@ export interface ProjectState {
   lastActive: Date;
 }
 
+/**
+ * Represents a Discord message attachment (image, file, etc.)
+ */
+export interface DiscordAttachment {
+  /** Discord CDN URL for the attachment */
+  url: string;
+  /** Original filename (e.g. "screenshot.png") */
+  filename: string;
+  /** MIME content type (e.g. "image/png") */
+  contentType: string | null;
+  /** File size in bytes */
+  size: number;
+}
+
+/** File MIME types that agents can process */
+export const SUPPORTED_FILE_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'application/json',
+  'text/plain',
+] as const;
+
 export type AgentType = string;
