@@ -321,6 +321,7 @@ export class AgentBridge {
     if (!channelId) return false;
 
     const text = this.getEventText(event);
+    console.log(`🔍 [${projectName}/${agentType}] event=${eventType} text=${text ? `(${text.length} chars) ${text.substring(0, 100)}` : '(empty)'}`);
 
     if (eventType === 'session.error') {
       await this.markAgentMessageError(projectName, agentType);

@@ -163,6 +163,7 @@ async function main() {
   const port = process.env.AGENT_DISCORD_PORT || "18470";
   const transcriptPath = typeof input.transcript_path === "string" ? input.transcript_path : "";
   const text = readLastAssistantText(transcriptPath);
+  console.error(`[discode-stop-hook] project=${projectName} transcript=${transcriptPath} text_len=${text.length} text_preview=${JSON.stringify(text.substring(0, 100))}`);
 
   try {
     await postToBridge(port, {
