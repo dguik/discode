@@ -12,6 +12,7 @@ import { splitForDiscord } from './capture/parser.js';
 import { CodexSubmitter } from './codex/submitter.js';
 import { installOpencodePlugin } from './opencode/plugin-installer.js';
 import { installClaudePlugin } from './claude/plugin-installer.js';
+import { installGeminiHook } from './gemini/hook-installer.js';
 import { createServer } from 'http';
 import { parse } from 'url';
 import type { ProjectAgents } from './types/index.js';
@@ -94,12 +95,15 @@ export class AgentBridge {
     const projects = this.stateManager.listProjects().map((project) => {
       const isOpencode = !!project.agents?.opencode;
       const isClaude = !!project.agents?.claude;
+      const isGemini = !!project.agents?.gemini;
       const alreadyHookedOpencode = !!project.eventHooks?.opencode;
       const alreadyHookedClaude = !!project.eventHooks?.claude;
-      if (!isOpencode && !isClaude) return project;
+      const alreadyHookedGemini = !!project.eventHooks?.gemini;
+      if (!isOpencode && !isClaude && !isGemini) return project;
 
       let opencodeInstalled = alreadyHookedOpencode;
       let claudeInstalled = alreadyHookedClaude;
+      let geminiHookInstalled = alreadyHookedGemini;
 
       if (isOpencode) {
         try {
@@ -121,9 +125,20 @@ export class AgentBridge {
         }
       }
 
+      if (isGemini) {
+        try {
+          const hookPath = installGeminiHook(project.projectPath);
+          console.log(`🪝 Installed Gemini CLI hook: ${hookPath}`);
+          geminiHookInstalled = true;
+        } catch (error) {
+          console.warn(`Failed to install Gemini CLI hook: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
       const shouldSetOpencodeHook = isOpencode && opencodeInstalled && !alreadyHookedOpencode;
       const shouldSetClaudeHook = isClaude && claudeInstalled && !alreadyHookedClaude;
-      if (!shouldSetOpencodeHook && !shouldSetClaudeHook) return project;
+      const shouldSetGeminiHook = isGemini && geminiHookInstalled && !alreadyHookedGemini;
+      if (!shouldSetOpencodeHook && !shouldSetClaudeHook && !shouldSetGeminiHook) return project;
 
       const next = {
         ...project,
@@ -131,6 +146,7 @@ export class AgentBridge {
           ...(project.eventHooks || {}),
           ...(shouldSetOpencodeHook ? { opencode: true } : {}),
           ...(shouldSetClaudeHook ? { claude: true } : {}),
+          ...(shouldSetGeminiHook ? { gemini: true } : {}),
         },
       };
       this.stateManager.setProject(next);
@@ -412,6 +428,7 @@ export class AgentBridge {
     const permissionAllow = this.bridgeConfig.opencode?.permissionMode === 'allow';
     let claudePluginDir: string | undefined;
     let claudeHookEnabled = false;
+    let geminiHookEnabled = false;
 
     if (adapter.config.name === 'opencode') {
       try {
@@ -432,6 +449,16 @@ export class AgentBridge {
       }
     }
 
+    if (adapter.config.name === 'gemini') {
+      try {
+        const hookPath = installGeminiHook(projectPath);
+        geminiHookEnabled = true;
+        console.log(`🪝 Installed Gemini CLI hook: ${hookPath}`);
+      } catch (error) {
+        console.warn(`Failed to install Gemini CLI hook: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
     const startCommand = this.withClaudePluginDir(adapter.getStartCommand(projectPath, permissionAllow), claudePluginDir);
 
     this.tmux.startAgentInWindow(
@@ -449,7 +476,7 @@ export class AgentBridge {
         [adapter.config.name]: windowName,
       },
       eventHooks: {
-        [adapter.config.name]: adapter.config.name === 'opencode' || claudeHookEnabled,
+        [adapter.config.name]: adapter.config.name === 'opencode' || claudeHookEnabled || geminiHookEnabled,
       },
       discordChannels,
       agents,

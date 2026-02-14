@@ -5,6 +5,7 @@
 const pluginInstallerMocks = vi.hoisted(() => ({
   installOpencodePlugin: vi.fn().mockReturnValue('/mock/opencode/plugin.ts'),
   installClaudePlugin: vi.fn().mockReturnValue('/mock/claude/plugin'),
+  installGeminiHook: vi.fn().mockReturnValue('/mock/gemini/hook.js'),
 }));
 
 vi.mock('../src/opencode/plugin-installer.js', () => ({
@@ -13,6 +14,10 @@ vi.mock('../src/opencode/plugin-installer.js', () => ({
 
 vi.mock('../src/claude/plugin-installer.js', () => ({
   installClaudePlugin: pluginInstallerMocks.installClaudePlugin,
+}));
+
+vi.mock('../src/gemini/hook-installer.js', () => ({
+  installGeminiHook: pluginInstallerMocks.installGeminiHook,
 }));
 
 import { AgentBridge } from '../src/index.js';
@@ -104,6 +109,7 @@ describe('AgentBridge', () => {
   beforeEach(() => {
     pluginInstallerMocks.installOpencodePlugin.mockClear();
     pluginInstallerMocks.installClaudePlugin.mockClear();
+    pluginInstallerMocks.installGeminiHook.mockClear();
   });
 
   describe('sanitizeInput', () => {
@@ -276,6 +282,30 @@ describe('AgentBridge', () => {
       expect(mockStateManager.setProject).toHaveBeenCalledWith(
         expect.objectContaining({
           eventHooks: expect.objectContaining({ claude: true }),
+        })
+      );
+    });
+
+    it('marks gemini projects as event-hook driven after hook install', async () => {
+      const projects: ProjectState[] = [
+        {
+          projectName: 'test-project',
+          projectPath: '/test',
+          tmuxSession: 'agent-test',
+          discordChannels: { gemini: 'ch-123' },
+          agents: { gemini: true },
+          createdAt: new Date(),
+          lastActive: new Date(),
+        },
+      ];
+      mockStateManager.listProjects.mockReturnValue(projects);
+
+      await bridge.start();
+
+      expect(pluginInstallerMocks.installGeminiHook).toHaveBeenCalledWith('/test');
+      expect(mockStateManager.setProject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventHooks: expect.objectContaining({ gemini: true }),
         })
       );
     });

@@ -23,6 +23,7 @@ import chalk from 'chalk';
 import type { BridgeConfig } from '../src/types/index.js';
 import { installOpencodePlugin } from '../src/opencode/plugin-installer.js';
 import { installClaudePlugin } from '../src/claude/plugin-installer.js';
+import { installGeminiHook, removeGeminiHook } from '../src/gemini/hook-installer.js';
 
 declare const DISCODE_VERSION: string | undefined;
 
@@ -566,7 +567,7 @@ async function ensureOpencodePermissionChoice(options: {
 
 async function chooseDefaultAgentCli(installedAgents: RegisteredAgentAdapter[]): Promise<string | undefined> {
   if (installedAgents.length === 0) {
-    console.log(chalk.yellow('⚠️ No installed AI CLI detected. Install one of: claude, codex, opencode.'));
+    console.log(chalk.yellow('⚠️ No installed AI CLI detected. Install one of: claude, codex, gemini, opencode.'));
     return undefined;
   }
 
@@ -697,7 +698,7 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
 
         const installed = agentRegistry.getAll().filter((agent) => agent.isInstalled());
         if (installed.length === 0) {
-          append('⚠️ No agent CLIs found. Install one first (claude, codex, opencode).');
+          append('⚠️ No agent CLIs found. Install one first (claude, codex, gemini, opencode).');
           return false;
         }
 
@@ -712,7 +713,7 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
           : installed.find((agent) => agent.config.name === config.defaultAgentCli) || installed[0];
 
         if (!selected) {
-          append(`⚠️ Unknown agent '${parsed.agentName}'. Try claude, codex, or opencode.`);
+          append(`⚠️ Unknown agent '${parsed.agentName}'. Try claude, codex, gemini, or opencode.`);
           return false;
         }
 
@@ -1071,7 +1072,7 @@ async function newCommand(
         // Auto-detect installed agents
         const installed = agentRegistry.getAll().filter(a => a.isInstalled());
         if (installed.length === 0) {
-          console.error(chalk.red('No agent CLIs found. Install one first (claude, opencode).'));
+          console.error(chalk.red('No agent CLIs found. Install one first (claude, codex, gemini, opencode).'));
           process.exit(1);
         } else if (installed.length === 1) {
           agentName = installed[0].config.name;
@@ -1204,6 +1205,16 @@ async function newCommand(
                 console.log(chalk.gray(`   Reinstalled Claude Code plugin: ${claudePluginDir}`));
               } catch (error) {
                 console.log(chalk.yellow(`⚠️ Could not reinstall Claude Code plugin: ${error instanceof Error ? error.message : String(error)}`));
+              }
+            }
+
+            if (agentName === 'gemini') {
+              try {
+                const hookPath = installGeminiHook(existingProject.projectPath);
+                hookEnabled = true;
+                console.log(chalk.gray(`   Reinstalled Gemini CLI hook: ${hookPath}`));
+              } catch (error) {
+                console.log(chalk.yellow(`⚠️ Could not reinstall Gemini CLI hook: ${error instanceof Error ? error.message : String(error)}`));
               }
             }
 
@@ -1647,6 +1658,7 @@ async function uninstallCommand(options: {
     const removedState = removePathIfExists(join(homedir(), '.discode'));
     const removedOpencodePlugin = removePathIfExists(join(homedir(), '.opencode', 'plugins', 'agent-opencode-bridge-plugin.ts'));
     const removedClaudePlugin = removePathIfExists(join(homedir(), '.claude', 'plugins', 'discode-claude-bridge'));
+    const removedGeminiHook = removeGeminiHook();
 
     if (removedState) {
       console.log(chalk.green('✅ Removed ~/.discode (state/config/logs)'));
@@ -1656,6 +1668,9 @@ async function uninstallCommand(options: {
     }
     if (removedClaudePlugin) {
       console.log(chalk.green('✅ Removed Claude bridge plugin'));
+    }
+    if (removedGeminiHook) {
+      console.log(chalk.green('✅ Removed Gemini bridge hook'));
     }
   }
 
@@ -1798,7 +1813,7 @@ await yargs(rawArgs)
     'new [agent]',
     'Quick start: launch daemon, setup project, attach tmux',
     (y: Argv) => addTmuxOptions(y)
-      .positional('agent', { type: 'string', describe: 'Agent to use (claude, codex, opencode)' })
+      .positional('agent', { type: 'string', describe: 'Agent to use (claude, codex, gemini, opencode)' })
       .option('name', { alias: 'n', type: 'string', describe: 'Project name (defaults to directory name)' })
       .option('attach', { type: 'boolean', default: true, describe: 'Attach to tmux session after setup' }),
     async (argv: any) =>
