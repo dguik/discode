@@ -14,7 +14,6 @@ export function getClaudePluginManifestSource(): string {
     {
       name: CLAUDE_PLUGIN_NAME,
       description: 'Bridge Claude Code stop events to discode',
-      hooks: './hooks/hooks.json',
     },
     null,
     2

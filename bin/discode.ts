@@ -8,7 +8,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import type { Argv } from 'yargs';
 import { AgentBridge } from '../src/index.js';
-import { stateManager } from '../src/state/index.js';
+import { stateManager, type ProjectState } from '../src/state/index.js';
 import { validateConfig, config, saveConfig, getConfigPath, getConfigValue } from '../src/config/index.js';
 import { TmuxManager } from '../src/tmux/manager.js';
 import { agentRegistry } from '../src/agents/index.js';
@@ -303,6 +303,54 @@ function applyTmuxCliOverrides(base: BridgeConfig, options: TmuxCliOptions): Bri
   };
 }
 
+function toSharedWindowName(projectName: string, agentType: string): string {
+  const raw = `${projectName}-${agentType}`;
+  const safe = raw
+    .replace(/[:\n\r\t]/g, '-')
+    .replace(/[^a-zA-Z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+  return safe.length > 0 ? safe : agentType;
+}
+
+function getEnabledAgentName(project?: ProjectState): string | undefined {
+  if (!project) return undefined;
+  return Object.entries(project.agents).find(([_, enabled]) => enabled)?.[0];
+}
+
+function resolveProjectWindowName(project: ProjectState, agentName: string, tmuxConfig: BridgeConfig['tmux']): string {
+  const mapped = project.tmuxWindows?.[agentName];
+  if (mapped && mapped.length > 0) return mapped;
+
+  const sharedSession = `${tmuxConfig.sessionPrefix}${tmuxConfig.sharedSessionName || 'bridge'}`;
+  if (project.tmuxSession === sharedSession) {
+    return toSharedWindowName(project.projectName, agentName);
+  }
+  return agentName;
+}
+
+function pruneStaleProjects(tmux: TmuxManager, tmuxConfig: BridgeConfig['tmux']): string[] {
+  const removed: string[] = [];
+  for (const project of stateManager.listProjects()) {
+    const agentName = getEnabledAgentName(project);
+    if (!agentName) {
+      stateManager.removeProject(project.projectName);
+      removed.push(project.projectName);
+      continue;
+    }
+
+    const windowName = resolveProjectWindowName(project, agentName, tmuxConfig);
+    const sessionUp = tmux.sessionExistsFull(project.tmuxSession);
+    const windowUp = sessionUp && tmux.windowExists(project.tmuxSession, windowName);
+    if (windowUp) continue;
+
+    stateManager.removeProject(project.projectName);
+    removed.push(project.projectName);
+  }
+  return removed;
+}
+
 function ensureProjectTuiPane(
   tmux: TmuxManager,
   sessionName: string,
@@ -578,6 +626,7 @@ function parseSessionNew(raw: string): {
 }
 
 async function tuiCommand(options: TmuxCliOptions): Promise<void> {
+  const effectiveConfig = applyTmuxCliOverrides(config, options);
   const handler = async (command: string, append: (line: string) => void): Promise<boolean> => {
     if (command === '/exit' || command === '/quit') {
       append('Bye!');
@@ -763,9 +812,9 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       },
       getProjects: () =>
         stateManager.listProjects().map((project) => {
-          const agentName = Object.entries(project.agents).find(([_, enabled]) => enabled)?.[0] || 'none';
+          const agentName = getEnabledAgentName(project) || 'none';
           const adapter = agentRegistry.get(agentName);
-          const window = project.tmuxWindows?.[agentName] || agentName;
+          const window = resolveProjectWindowName(project, agentName, effectiveConfig.tmux);
           const channelId = project.discordChannels[agentName];
           const channelBase = channelId ? `discord#${agentName}-${project.projectName}` : 'not connected';
           const sessionUp = tmux.sessionExistsFull(project.tmuxSession);
@@ -948,8 +997,8 @@ async function startCommand(options: TmuxCliOptions & { project?: string; attach
     if (options.attach) {
       const project = activeProjects[0];
         const sessionName = project.tmuxSession;
-        const agentType = Object.entries(project.agents).find(([_, enabled]) => enabled)?.[0];
-        const windowName = agentType ? (project.tmuxWindows?.[agentType] || agentType) : undefined;
+        const agentType = getEnabledAgentName(project);
+        const windowName = agentType ? resolveProjectWindowName(project, agentType, effectiveConfig.tmux) : undefined;
         const attachTarget = windowName ? `${sessionName}:${windowName}` : sessionName;
 
         // Start bridge, then attach
@@ -990,6 +1039,12 @@ async function newCommand(
     }
 
     console.log(chalk.cyan(`\n🚀 discode new — ${projectName}\n`));
+
+    const tmux = new TmuxManager(effectiveConfig.tmux.sessionPrefix);
+    const prunedProjects = pruneStaleProjects(tmux, effectiveConfig.tmux);
+    if (prunedProjects.length > 0) {
+      console.log(chalk.yellow(`⚠️ Pruned stale project state: ${prunedProjects.join(', ')}`));
+    }
 
       // Determine agent
     let agentName: string;
@@ -1052,6 +1107,15 @@ async function newCommand(
         }
       }
 
+    const existingAgentName = getEnabledAgentName(existingProject);
+    if (existingProject && existingAgentName && existingAgentName !== agentName) {
+      console.error(chalk.red(`Project '${projectName}' is already configured with '${existingAgentName}'.`));
+      console.log(chalk.gray(`To switch agent to '${agentName}', run:`));
+      console.log(chalk.gray(`  discode stop ${projectName} --keep-channel`));
+      console.log(chalk.gray(`  discode new ${agentName}`));
+      process.exit(1);
+    }
+
     await ensureOpencodePermissionChoice({ shouldPrompt: agentName === 'opencode' });
 
       // Ensure global daemon is running
@@ -1070,7 +1134,6 @@ async function newCommand(
       console.log(chalk.green(`✅ Bridge daemon already running (port ${port})`));
     }
 
-    const tmux = new TmuxManager(effectiveConfig.tmux.sessionPrefix);
     if (!existingProject) {
         // New project: full setup via bridge
         console.log(chalk.gray('   Setting up new project...'));
@@ -1117,7 +1180,7 @@ async function newCommand(
         }
         tmux.setSessionEnv(fullSessionName, 'AGENT_DISCORD_PORT', String(port));
 
-        const resumeWindowName = existingProject.tmuxWindows?.[agentName] || agentName;
+        const resumeWindowName = resolveProjectWindowName(existingProject, agentName, effectiveConfig.tmux);
         if (!tmux.windowExists(fullSessionName, resumeWindowName)) {
           const adapter = agentRegistry.get(agentName);
           if (adapter) {
@@ -1182,7 +1245,9 @@ async function newCommand(
       // Summary
     const projectState = stateManager.getProject(projectName);
     const sessionName = projectState?.tmuxSession || `${effectiveConfig.tmux.sessionPrefix}${projectName}`;
-    const statusWindowName = projectState?.tmuxWindows?.[agentName] || agentName;
+    const statusWindowName = projectState
+      ? resolveProjectWindowName(projectState, agentName, effectiveConfig.tmux)
+      : (effectiveConfig.tmux.sessionMode === 'shared' ? toSharedWindowName(projectName, agentName) : agentName);
     const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
     if (isInteractive) {
       try {
@@ -1355,10 +1420,9 @@ function listCommand(options?: { prune?: boolean }) {
     const pruned: string[] = [];
     console.log(chalk.cyan('\n📂 Configured Projects:\n'));
     for (const project of projects) {
-      const agentName = Object.entries(project.agents)
-        .find(([_, enabled]) => enabled)?.[0];
+      const agentName = getEnabledAgentName(project);
       const adapter = agentName ? agentRegistry.get(agentName) : null;
-      const windowName = agentName ? (project.tmuxWindows?.[agentName] || agentName) : undefined;
+      const windowName = agentName ? resolveProjectWindowName(project, agentName, config.tmux) : undefined;
       const sessionUp = tmux.sessionExistsFull(project.tmuxSession);
       const windowUp = sessionUp && !!windowName ? tmux.windowExists(project.tmuxSession, windowName) : false;
       const status = windowUp ? 'running' : sessionUp ? 'session only' : 'stale';
@@ -1410,10 +1474,8 @@ function attachCommand(projectName: string | undefined, options: TmuxCliOptions)
 
     const project = stateManager.getProject(projectName);
     const sessionName = project?.tmuxSession || `${effectiveConfig.tmux.sessionPrefix}${projectName}`;
-    const agentType = project
-      ? Object.entries(project.agents).find(([_, enabled]) => enabled)?.[0]
-      : undefined;
-    const windowName = agentType ? (project?.tmuxWindows?.[agentType] || agentType) : undefined;
+    const agentType = getEnabledAgentName(project);
+    const windowName = project && agentType ? resolveProjectWindowName(project, agentType, effectiveConfig.tmux) : undefined;
     const attachTarget = windowName ? `${sessionName}:${windowName}` : sessionName;
 
     if (!tmux.sessionExistsFull(sessionName)) {
@@ -1470,7 +1532,7 @@ async function stopCommand(
         console.log(chalk.gray(`   No enabled agents in state; not killing tmux windows`));
       } else {
         for (const agentType of enabledAgentTypes) {
-          const windowName = project.tmuxWindows?.[agentType] || agentType;
+          const windowName = resolveProjectWindowName(project, agentType, effectiveConfig.tmux);
           const target = `${sessionName}:${windowName}`;
           const forcedKillCount = await terminateTmuxPaneProcesses(target);
           if (forcedKillCount > 0) {

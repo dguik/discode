@@ -10,7 +10,7 @@ describe('claude plugin installer', () => {
   it('emits valid manifest and hook config JSON', () => {
     const manifest = JSON.parse(getClaudePluginManifestSource()) as Record<string, unknown>;
     expect(manifest.name).toBe(CLAUDE_PLUGIN_NAME);
-    expect(manifest.hooks).toBe('./hooks/hooks.json');
+    expect(manifest.hooks).toBeUndefined();
 
     const hooks = JSON.parse(getClaudePluginHooksSource()) as {
       hooks: {
