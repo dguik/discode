@@ -109,6 +109,18 @@ function isTmuxPaneAlive(paneTarget?: string): boolean {
   }
 }
 
+async function waitForTmuxPaneAlive(paneTarget: string, timeoutMs: number = 1200, intervalMs: number = 100): Promise<boolean> {
+  if (!paneTarget || paneTarget.trim().length === 0) return false;
+  if (isTmuxPaneAlive(paneTarget)) return true;
+
+  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / intervalMs));
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    if (isTmuxPaneAlive(paneTarget)) return true;
+  }
+  return false;
+}
+
 const TUI_PROCESS_COMMAND_MARKERS = ['/dist/bin/discode.js tui', '/bin/discode.js tui', 'discode.js tui'];
 
 function isDiscodeTuiProcess(command: string): boolean {
@@ -366,12 +378,22 @@ function ensureProjectTuiPane(
   options: TmuxCliOptions,
 ): void {
   const discodeRunner = resolve(import.meta.dirname, './discode.js');
-  const commandParts = ['bun', discodeRunner, 'tui'];
+  let commandParts: string[];
+  if (existsSync(discodeRunner)) {
+    commandParts = ['bun', discodeRunner, 'tui'];
+  } else {
+    const argvRunner = process.argv[1] ? resolve(process.argv[1]) : undefined;
+    if (argvRunner && existsSync(argvRunner) && /\.[cm]?[jt]sx?$/.test(argvRunner)) {
+      commandParts = ['bun', argvRunner, 'tui'];
+    } else {
+      // Single-binary release builds do not include discode.js next to the executable.
+      commandParts = [process.execPath, 'tui'];
+    }
+  }
   if (options.tmuxSharedSessionName) {
     commandParts.push('--tmux-shared-session-name', options.tmuxSharedSessionName);
   }
-  const tuiCommand = commandParts.map((part) => escapeShellArg(part)).join(' ');
-  tmux.ensureTuiPane(sessionName, windowName, tuiCommand);
+  tmux.ensureTuiPane(sessionName, windowName, commandParts);
 }
 
 function prompt(question: string): Promise<string> {
@@ -794,9 +816,12 @@ async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   await import(preloadModule);
   const tmuxPaneTarget = process.env.TMUX_PANE;
   const startedFromTmux = !!process.env.TMUX;
-  if (startedFromTmux && !isTmuxPaneAlive(tmuxPaneTarget)) {
-    console.log(chalk.yellow('⚠️ Stale tmux environment detected; skipping TUI startup to avoid orphaned process.'));
-    return;
+  if (startedFromTmux) {
+    const paneReady = tmuxPaneTarget ? await waitForTmuxPaneAlive(tmuxPaneTarget) : false;
+    if (!paneReady) {
+      console.log(chalk.yellow('⚠️ Stale tmux environment detected; skipping TUI startup to avoid orphaned process.'));
+      return;
+    }
   }
 
   let tmuxHealthTimer: ReturnType<typeof setInterval> | undefined;

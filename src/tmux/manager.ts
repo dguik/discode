@@ -407,7 +407,9 @@ export class TmuxManager {
     const delayedScript =
       `sleep ${TUI_PANE_DELAY_SECONDS}; ` +
       `tmux set-window-option -t ${escapeShellArg(windowTarget)} window-size latest >/dev/null 2>&1; ` +
-      `tmux resize-pane -t ${escapeShellArg(tuiTarget)} -x ${width} >/dev/null 2>&1`;
+      `tmux display-message -p -t ${escapeShellArg(tuiTarget)} "#{pane_id}" >/dev/null 2>&1 && ` +
+      `tmux resize-pane -t ${escapeShellArg(tuiTarget)} -x ${width} >/dev/null 2>&1; ` +
+      `true`;
     try {
       this.executor.exec(`tmux run-shell -b ${escapeShellArg(delayedScript)}`);
     } catch {
@@ -415,9 +417,10 @@ export class TmuxManager {
     }
   }
 
-  ensureTuiPane(sessionName: string, windowName: string, tuiCommand: string): void {
+  ensureTuiPane(sessionName: string, windowName: string, tuiCommand: string[]): void {
     const baseTarget = `${sessionName}:${windowName}`;
     const splitWidth = this.getTuiPaneWidth(baseTarget);
+    const escapedTuiCommand = tuiCommand.map((part) => escapeShellArg(part)).join(' ');
 
     const existingTuiTargets = this.findTuiPaneTargets(sessionName, windowName);
     if (existingTuiTargets.length > 0) {
@@ -435,7 +438,7 @@ export class TmuxManager {
 
     const activeTarget = this.resolveWindowTarget(sessionName, windowName);
     const paneIndexOutput = this.executor.exec(
-      `tmux split-window -P -F "#{pane_index}" -t ${escapeShellArg(activeTarget)} -h -l ${splitWidth} ${escapeShellArg(tuiCommand)}`,
+      `tmux split-window -P -F "#{pane_index}" -t ${escapeShellArg(activeTarget)} -h -l ${splitWidth} ${escapedTuiCommand}`,
     );
     const paneIndex = paneIndexOutput.trim();
     if (/^\d+$/.test(paneIndex)) {
