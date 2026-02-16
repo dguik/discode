@@ -34,7 +34,7 @@ export function attachToTmux(sessionName: string, windowName?: string): void {
   }
 }
 
-const TUI_PROCESS_COMMAND_MARKERS = ['/dist/bin/discode.js tui', '/bin/discode.js tui', 'discode.js tui'];
+const TUI_PROCESS_COMMAND_MARKERS = ['/dist/bin/discode.js tui', '/bin/discode.js tui', 'discode.js tui', '/bin/discode tui', 'discode tui'];
 
 function isDiscodeTuiProcess(command: string): boolean {
   return TUI_PROCESS_COMMAND_MARKERS.some((marker) => command.includes(marker));
@@ -257,16 +257,17 @@ export function ensureProjectTuiPane(
   options: TmuxCliOptions,
 ): void {
   const discodeRunner = resolve(import.meta.dirname, '../../../bin/discode.js');
+  const argvRunner = process.argv[1] ? resolve(process.argv[1]) : undefined;
+  const isScriptRunner = (path: string): boolean => /\.[cm]?[jt]sx?$/.test(path);
   let commandParts: string[];
   if (existsSync(discodeRunner)) {
     commandParts = ['bun', discodeRunner, 'tui'];
+  } else if (argvRunner && existsSync(argvRunner)) {
+    commandParts = isScriptRunner(argvRunner)
+      ? ['bun', argvRunner, 'tui']
+      : [argvRunner, 'tui'];
   } else {
-    const argvRunner = process.argv[1] ? resolve(process.argv[1]) : undefined;
-    if (argvRunner && existsSync(argvRunner) && /\.[cm]?[jt]sx?$/.test(argvRunner)) {
-      commandParts = ['bun', argvRunner, 'tui'];
-    } else {
-      commandParts = [process.execPath, 'tui'];
-    }
+    commandParts = [process.execPath, 'tui'];
   }
   if (options.tmuxSharedSessionName) {
     commandParts.push('--tmux-shared-session-name', options.tmuxSharedSessionName);
