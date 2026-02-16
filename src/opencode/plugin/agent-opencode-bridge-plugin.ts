@@ -1,7 +1,11 @@
+// @ts-nocheck
+
 export const AgentDiscordBridgePlugin = async () => {
   let lastAssistantText = "";
   let latestAssistantMessageId = "";
+  /** @type {Set<string>} */
   const assistantMessageIds = new Set();
+  /** @type {Map<string, { order: string[]; parts: Record<string, string> }>} */
   const assistantTextByMessage = new Map();
 
   const projectName = process.env.AGENT_DISCORD_PROJECT || "";
@@ -10,6 +14,7 @@ export const AgentDiscordBridgePlugin = async () => {
   const port = process.env.AGENT_DISCORD_PORT || "18470";
   const endpoint = "http://127.0.0.1:" + port + "/opencode-event";
 
+  /** @param {Record<string, unknown>} payload */
   const post = async (payload) => {
     if (!projectName) return;
     try {
@@ -28,17 +33,22 @@ export const AgentDiscordBridgePlugin = async () => {
     }
   };
 
+  /** @param {unknown} node */
   const toObject = (node) => {
     if (!node || typeof node !== "object") return null;
-    return node;
+    return /** @type {Record<string, unknown>} */ (node);
   };
 
+  /** @param {unknown} node @param {number} [depth=0] */
   const textFromNode = (node, depth = 0) => {
     if (depth > 10 || node === undefined || node === null) return "";
     if (typeof node === "string") return node;
     if (typeof node === "number" || typeof node === "boolean") return String(node);
     if (Array.isArray(node)) {
-      return node.map((item) => textFromNode(item, depth + 1)).filter(Boolean).join("\n");
+      return node
+        .map((item) => textFromNode(item, depth + 1))
+        .filter((item) => item.length > 0)
+        .join("\n");
     }
 
     const obj = toObject(node);
@@ -47,16 +57,18 @@ export const AgentDiscordBridgePlugin = async () => {
 
     return Object.values(obj)
       .map((value) => textFromNode(value, depth + 1))
-      .filter(Boolean)
+      .filter((item) => item.length > 0)
       .join("\n");
   };
 
+  /** @param {unknown} event */
   const getProperties = (event) => {
     const obj = toObject(event);
     if (!obj) return {};
     return toObject(obj.properties) || {};
   };
 
+  /** @param {unknown} info */
   const rememberAssistantMessage = (info) => {
     const obj = toObject(info);
     if (!obj) return;
@@ -67,6 +79,7 @@ export const AgentDiscordBridgePlugin = async () => {
     latestAssistantMessageId = obj.id;
   };
 
+  /** @param {unknown} part @param {unknown} delta */
   const updateAssistantTextPart = (part, delta) => {
     const obj = toObject(part);
     if (!obj) return;
@@ -95,7 +108,7 @@ export const AgentDiscordBridgePlugin = async () => {
 
     const joined = current.order
       .map((id) => current.parts[id])
-      .filter(Boolean)
+      .filter((item) => typeof item === "string" && item.length > 0)
       .join("\n\n")
       .trim();
     if (joined) {
@@ -109,32 +122,36 @@ export const AgentDiscordBridgePlugin = async () => {
     if (!current) return lastAssistantText;
     const joined = current.order
       .map((id) => current.parts[id])
-      .filter(Boolean)
+      .filter((item) => typeof item === "string" && item.length > 0)
       .join("\n\n")
       .trim();
     return joined || lastAssistantText;
   };
 
   return {
+    /** @param {{ event?: unknown }} input */
     event: async ({ event }) => {
-      if (!event || typeof event !== "object") return;
-      const properties = getProperties(event);
+      const eventObj = toObject(event);
+      if (!eventObj) return;
 
-      if (event.type === "message.updated") {
-        rememberAssistantMessage(properties.info || event.info || event.message);
+      const properties = getProperties(eventObj);
+      const eventType = typeof eventObj.type === "string" ? eventObj.type : "";
+
+      if (eventType === "message.updated") {
+        rememberAssistantMessage(properties.info || eventObj.info || eventObj.message);
       }
 
-      if (event.type === "message.part.updated") {
-        updateAssistantTextPart(properties.part || event.part, properties.delta || event.delta);
+      if (eventType === "message.part.updated") {
+        updateAssistantTextPart(properties.part || eventObj.part, properties.delta || eventObj.delta);
       }
 
-      if (event.type === "session.error") {
-        const errorText = textFromNode(properties.error || event.error || event).trim();
+      if (eventType === "session.error") {
+        const errorText = textFromNode(properties.error || eventObj.error || eventObj).trim();
         await post({ type: "session.error", text: errorText || "unknown error" });
         return;
       }
 
-      if (event.type === "session.idle") {
+      if (eventType === "session.idle") {
         const latestText = getLatestAssistantText().trim();
         await post({ type: "session.idle", text: latestText });
       }

@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import ts from 'typescript';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import {
   OPENCODE_PLUGIN_FILENAME,
@@ -15,6 +16,12 @@ function createPluginHarness() {
     'export const AgentDiscordBridgePlugin',
     'const AgentDiscordBridgePlugin'
   );
+  const transpiledSource = ts.transpileModule(source, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+    },
+  }).outputText;
   const calls: FetchCall[] = [];
 
   const fetchMock = async (url: string, init: any) => {
@@ -25,7 +32,7 @@ function createPluginHarness() {
   const buildPlugin = new Function(
     'fetch',
     'process',
-    `${source}\nreturn AgentDiscordBridgePlugin;`
+    `${transpiledSource}\nreturn AgentDiscordBridgePlugin;`
   ) as (fetch: typeof fetchMock, process: { env: Record<string, string> }) => () => Promise<any>;
 
   const processStub = {
