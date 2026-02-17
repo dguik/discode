@@ -8,6 +8,7 @@ export async function configCommand(options: {
   show?: boolean;
   server?: string;
   token?: string;
+  channel?: string;
   port?: string | number;
   defaultAgent?: string;
   opencodePermission?: 'allow' | 'default';
@@ -21,6 +22,7 @@ export async function configCommand(options: {
     console.log(chalk.gray(`   Platform: ${config.messagingPlatform || 'discord'}`));
     console.log(chalk.gray(`   Server/Workspace ID: ${stateManager.getGuildId() || '(not set)'}`));
     console.log(chalk.gray(`   Discord Token: ${config.discord.token ? '****' + config.discord.token.slice(-4) : '(not set)'}`));
+    console.log(chalk.gray(`   Default Channel ID: ${config.discord.channelId || '(not set)'}`));
     console.log(chalk.gray(`   Slack Bot Token: ${config.slack?.botToken ? '****' + config.slack.botToken.slice(-4) : '(not set)'}`));
     console.log(chalk.gray(`   Slack App Token: ${config.slack?.appToken ? '****' + config.slack.appToken.slice(-4) : '(not set)'}`));
     console.log(chalk.gray(`   Hook Port: ${config.hookServerPort || 18470}`));
@@ -59,6 +61,19 @@ export async function configCommand(options: {
     }
     saveConfig({ token });
     console.log(chalk.green(`✅ Bot token saved (****${token.slice(-4)})`));
+    updated = true;
+  }
+
+  if (options.channel !== undefined) {
+    const channel = options.channel.trim();
+    if (!channel) {
+      saveConfig({ channelId: undefined });
+      console.log(chalk.green('✅ Default channel cleared'));
+    } else {
+      const normalized = channel.replace(/^<#(\d+)>$/, '$1');
+      saveConfig({ channelId: normalized });
+      console.log(chalk.green(`✅ Default channel saved: ${normalized}`));
+    }
     updated = true;
   }
 
@@ -105,6 +120,7 @@ export async function configCommand(options: {
     console.log(chalk.gray('\nExample:'));
     console.log(chalk.gray('  discode config --token YOUR_BOT_TOKEN'));
     console.log(chalk.gray('  discode config --server YOUR_SERVER_ID'));
+    console.log(chalk.gray('  discode config --channel 123456789012345678'));
     console.log(chalk.gray('  discode config --default-agent claude'));
     console.log(chalk.gray('  discode config --platform slack'));
     console.log(chalk.gray('  discode config --slack-bot-token xoxb-...'));

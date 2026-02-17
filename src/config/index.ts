@@ -13,6 +13,7 @@ import { normalizeDiscordToken } from './token.js';
 export interface StoredConfig {
   token?: string;
   serverId?: string;
+  channelId?: string;
   hookServerPort?: number;
   defaultAgentCli?: string;
   opencodePermissionMode?: 'allow' | 'default';
@@ -67,7 +68,7 @@ export class ConfigManager {
       this._config = {
         discord: {
           token: storedToken || envToken || '',
-          channelId: this.env.get('DISCORD_CHANNEL_ID'),
+          channelId: storedConfig.channelId || this.env.get('DISCORD_CHANNEL_ID'),
           guildId: storedConfig.serverId || this.env.get('DISCORD_GUILD_ID'),
         },
         ...(slackBotToken && slackAppToken

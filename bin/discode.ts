@@ -275,6 +275,7 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
       (y: Argv) => y
         .option('server', { alias: 's', type: 'string', describe: 'Set Discord server / Slack workspace ID' })
         .option('token', { alias: 't', type: 'string', describe: 'Set Discord bot token' })
+        .option('channel', { alias: 'c', type: 'string', describe: 'Set default Discord channel ID override' })
         .option('port', { alias: 'p', type: 'string', describe: 'Set hook server port' })
         .option('default-agent', { type: 'string', describe: 'Set default AI CLI for `discode new`' })
         .option('platform', { type: 'string', choices: ['discord', 'slack'], describe: 'Set messaging platform' })
@@ -291,6 +292,7 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
           show: argv.show,
           server: argv.server,
           token: argv.token,
+          channel: argv.channel,
           port: argv.port,
           defaultAgent: argv.defaultAgent,
           opencodePermission: argv.opencodePermission,

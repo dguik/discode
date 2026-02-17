@@ -1,5 +1,5 @@
 import { basename } from 'path';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
@@ -88,6 +88,27 @@ function parseNewCommand(raw: string): {
   return { projectName, agentName, attach, instanceId };
 }
 
+function handoffToBunRuntime(): never {
+  const scriptPath = process.argv[1];
+  if (!scriptPath) {
+    throw new Error('TUI requires Bun runtime. Run with: bun dist/bin/discode.js');
+  }
+
+  const result = spawnSync('bun', [scriptPath, ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      DISCODE_TUI_BUN_HANDOFF: '1',
+    },
+  });
+
+  if (result.error) {
+    throw new Error('TUI requires Bun runtime and could not auto-run Bun. Ensure `bun` is on PATH.');
+  }
+
+  process.exit(typeof result.status === 'number' ? result.status : 1);
+}
+
 export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   const effectiveConfig = applyTmuxCliOverrides(config, options);
   let keepChannelOnStop = getConfigValue('keepChannelOnStop') === true;
@@ -99,15 +120,17 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     }
 
     if (command === '/help') {
-      append('Commands: /new [name] [agent] [--instance id] [--attach], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto]], /help, /exit');
+      append('Commands: /new [name] [agent] [--instance id] [--attach], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto]], /help, /exit');
       return false;
     }
 
     if (command === '/config' || command === 'config') {
       append(`keepChannel: ${keepChannelOnStop ? 'on' : 'off'}`);
       append(`defaultAgent: ${config.defaultAgentCli || '(auto)'}`);
+      append(`defaultChannel: ${config.discord.channelId || '(auto)'}`);
       append('Usage: /config keepChannel [on|off|toggle]');
       append('Usage: /config defaultAgent [agent|auto]');
+      append('Usage: /config defaultChannel [channelId|auto]');
       return false;
     }
 
@@ -151,9 +174,38 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
         return false;
       }
 
+      if (key === 'defaultchannel' || key === 'default-channel' || key === 'channel') {
+        const value = (parts[2] || '').trim();
+        const lowered = value.toLowerCase();
+        if (!value) {
+          append(`defaultChannel: ${config.discord.channelId || '(auto)'}`);
+          append('Use: /config defaultChannel [channelId|auto]');
+          return false;
+        }
+
+        if (lowered === 'auto' || lowered === 'clear' || lowered === 'unset') {
+          try {
+            saveConfig({ channelId: undefined });
+            append('✅ defaultChannel is now auto (per-project channel).');
+          } catch (error) {
+            append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          return false;
+        }
+
+        const normalized = value.replace(/^<#(\d+)>$/, '$1');
+        try {
+          saveConfig({ channelId: normalized });
+          append(`✅ defaultChannel is now ${normalized}`);
+        } catch (error) {
+          append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return false;
+      }
+
       if (key !== 'keepchannel' && key !== 'keep-channel') {
         append(`⚠️ Unknown config key: ${parts[1] || '(empty)'}`);
-        append('Supported keys: keepChannel, defaultAgent');
+        append('Supported keys: keepChannel, defaultAgent, defaultChannel');
         return false;
       }
 
@@ -307,7 +359,10 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
 
   const isBunRuntime = Boolean((process as { versions?: { bun?: string } }).versions?.bun);
   if (!isBunRuntime) {
-    throw new Error('TUI requires Bun runtime. Run with: bun dist/bin/discode.js');
+    if (process.env.DISCODE_TUI_BUN_HANDOFF === '1') {
+      throw new Error('TUI requires Bun runtime. Run with: bun dist/bin/discode.js');
+    }
+    handoffToBunRuntime();
   }
 
   const preloadModule = '@opentui/solid/preload';
@@ -346,10 +401,12 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   const sourceCandidates = [
     new URL('./tui.js', import.meta.url),
     new URL('./tui.tsx', import.meta.url),
+    new URL('../../bin/tui.tsx', import.meta.url),
     new URL('../../../dist/bin/tui.js', import.meta.url),
     new URL('../../../bin/tui.tsx', import.meta.url),
   ];
   let mod: any;
+  let lastImportError: unknown;
   for (const candidate of sourceCandidates) {
     const candidatePath = fileURLToPath(candidate);
     if (!existsSync(candidatePath)) continue;
@@ -359,14 +416,16 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
         mod = loaded;
         break;
       }
-    } catch {
-      // try next candidate
+    } catch (error) {
+      lastImportError = error;
+      // Try next candidate.
     }
   }
   if (!mod) {
     clearTmuxHealthTimer();
     process.off('exit', clearTmuxHealthTimer);
-    throw new Error('OpenTUI entry not found: bin/tui.tsx or dist/bin/tui.js');
+    const suffix = lastImportError instanceof Error ? ` (last import error: ${lastImportError.message})` : '';
+    throw new Error(`OpenTUI entry not found: bin/tui.tsx or dist/bin/tui.js${suffix}`);
   }
 
   try {

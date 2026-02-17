@@ -91,6 +91,7 @@ describe('ConfigManager', () => {
       const env = new MockEnvironment();
       const storedConfig: StoredConfig = {
         token: 'stored-token-123',
+        channelId: 'stored-channel-123',
         serverId: 'stored-guild-456',
         hookServerPort: 9999,
         defaultAgentCli: 'codex',
@@ -102,6 +103,7 @@ describe('ConfigManager', () => {
       const config = manager.config;
 
       expect(config.discord.token).toBe('stored-token-123');
+      expect(config.discord.channelId).toBe('stored-channel-123');
       expect(config.discord.guildId).toBe('stored-guild-456');
       expect(config.hookServerPort).toBe(9999);
       expect(config.defaultAgentCli).toBe('codex');
@@ -112,6 +114,7 @@ describe('ConfigManager', () => {
       const storage = new MockStorage();
       const env = new MockEnvironment();
       env.set('DISCORD_BOT_TOKEN', 'env-token-789');
+      env.set('DISCORD_CHANNEL_ID', 'env-channel-789');
       env.set('DISCORD_GUILD_ID', 'env-guild-abc');
       env.set('HOOK_SERVER_PORT', '7777');
 
@@ -119,6 +122,7 @@ describe('ConfigManager', () => {
       const config = manager.config;
 
       expect(config.discord.token).toBe('env-token-789');
+      expect(config.discord.channelId).toBe('env-channel-789');
       expect(config.discord.guildId).toBe('env-guild-abc');
       expect(config.hookServerPort).toBe(7777);
     });
@@ -129,11 +133,13 @@ describe('ConfigManager', () => {
 
       // Set env vars
       env.set('DISCORD_BOT_TOKEN', 'env-token');
+      env.set('DISCORD_CHANNEL_ID', 'env-channel');
       env.set('DISCORD_GUILD_ID', 'env-guild');
 
       // Set stored config (should win)
       const storedConfig: StoredConfig = {
         token: 'stored-token-wins',
+        channelId: 'stored-channel-wins',
         serverId: 'stored-guild-wins',
       };
       storage.setFile(configFile, JSON.stringify(storedConfig));
@@ -142,6 +148,7 @@ describe('ConfigManager', () => {
       const config = manager.config;
 
       expect(config.discord.token).toBe('stored-token-wins');
+      expect(config.discord.channelId).toBe('stored-channel-wins');
       expect(config.discord.guildId).toBe('stored-guild-wins');
     });
 
@@ -196,6 +203,7 @@ describe('ConfigManager', () => {
       const env = new MockEnvironment();
       const storedConfig: StoredConfig = {
         token: 'my-token',
+        channelId: 'my-channel',
         serverId: 'my-server',
         hookServerPort: 8888,
         opencodePermissionMode: 'default',
@@ -205,6 +213,7 @@ describe('ConfigManager', () => {
       const manager = new ConfigManager(storage, env, configDir);
 
       expect(manager.getConfigValue('token')).toBe('my-token');
+      expect(manager.getConfigValue('channelId')).toBe('my-channel');
       expect(manager.getConfigValue('serverId')).toBe('my-server');
       expect(manager.getConfigValue('hookServerPort')).toBe(8888);
       expect(manager.getConfigValue('opencodePermissionMode')).toBe('default');
