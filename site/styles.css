@@ -80,6 +80,28 @@ body {
   font-size: 1.02rem;
 }
 
+.topnav .topnav-discord {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid #4f5ae8;
+  background: #5865f2;
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.topnav .topnav-discord:hover {
+  background: #4f5ae8;
+}
+
+.topnav .topnav-discord:focus-visible {
+  outline: 2px solid #1f1f22;
+  outline-offset: 2px;
+}
+
 .language-picker {
   display: inline-flex;
   align-items: center;
@@ -421,6 +443,12 @@ pre {
     font-size: 0.9rem;
   }
 
+  .topnav a.topnav-discord {
+    border-color: #4f5ae8;
+    background: #5865f2;
+    color: #ffffff;
+  }
+
   .language-picker {
     margin-left: auto;
   }
@@ -583,6 +611,10 @@ pre {
 
   .topnav a {
     padding: 0.38rem 0.54rem;
+  }
+
+  .topnav a.topnav-discord {
+    padding: 0.38rem 0.62rem;
   }
 
   .tabs {
