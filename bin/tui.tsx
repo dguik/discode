@@ -6,7 +6,7 @@ import { render, useKeyboard, useRenderer, useTerminalDimensions } from '@opentu
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import type { TerminalStyledLine } from '../src/runtime/vt-screen.js';
+import type { TerminalSegment, TerminalStyledLine } from '../src/runtime/vt-screen.js';
 
 declare const DISCODE_VERSION: string | undefined;
 
@@ -43,7 +43,14 @@ type TuiInput = {
   onAttachProject: (project: string) => Promise<{ currentSession?: string; currentWindow?: string } | void>;
   onRuntimeKey?: (sessionName: string, windowName: string, raw: string) => Promise<void>;
   onRuntimeResize?: (sessionName: string, windowName: string, width: number, height: number) => Promise<void> | void;
-  onRuntimeFrame?: (listener: (frame: { sessionName: string; windowName: string; output: string; styled?: TerminalStyledLine[] }) => void) => () => void;
+  onRuntimeFrame?: (listener: (frame: {
+    sessionName: string;
+    windowName: string;
+    output: string;
+    styled?: TerminalStyledLine[];
+    cursorRow?: number;
+    cursorCol?: number;
+  }) => void) => () => void;
   getRuntimeStatus?: () =>
     | {
       mode: 'stream';
@@ -81,6 +88,7 @@ const palette = {
   bg: '#0a0a0a',
   panel: '#141414',
   border: '#484848',
+  focus: '#4caf50',
   text: '#eeeeee',
   muted: '#9a9a9a',
   primary: '#fab283',
@@ -110,6 +118,92 @@ const paletteCommands = [
   { command: '/quit', description: 'Exit TUI' },
 ];
 
+type TerminalCursor = {
+  row: number;
+  col: number;
+};
+
+type StyledCell = {
+  text: string;
+  fg?: string;
+  bg?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+};
+
+function toStyledCells(line: TerminalStyledLine): StyledCell[] {
+  const cells: StyledCell[] = [];
+  for (const segment of line.segments) {
+    const chars = Array.from(segment.text);
+    for (const ch of chars) {
+      cells.push({
+        text: ch,
+        fg: segment.fg,
+        bg: segment.bg,
+        bold: segment.bold,
+        italic: segment.italic,
+        underline: segment.underline,
+      });
+    }
+  }
+  return cells;
+}
+
+function toStyledLine(cells: StyledCell[]): TerminalStyledLine {
+  if (cells.length === 0) return { segments: [{ text: ' ' }] };
+
+  const segments: TerminalSegment[] = [];
+  let current: TerminalSegment | null = null;
+
+  for (const cell of cells) {
+    if (!current || current.fg !== cell.fg || current.bg !== cell.bg || current.bold !== cell.bold || current.italic !== cell.italic || current.underline !== cell.underline) {
+      if (current) segments.push(current);
+      current = {
+        text: cell.text,
+        fg: cell.fg,
+        bg: cell.bg,
+        bold: cell.bold,
+        italic: cell.italic,
+        underline: cell.underline,
+      };
+      continue;
+    }
+    current.text += cell.text;
+  }
+
+  if (current) segments.push(current);
+  return { segments };
+}
+
+function withCursorStyledLine(line: TerminalStyledLine, col: number): TerminalStyledLine {
+  const cells = toStyledCells(line);
+  const cursorCol = Math.max(0, col);
+  while (cells.length <= cursorCol) {
+    cells.push({ text: ' ' });
+  }
+
+  const current = cells[cursorCol] || { text: ' ' };
+  cells[cursorCol] = {
+    ...current,
+    text: '█',
+    fg: '#ffffff',
+    bold: true,
+  };
+
+  return toStyledLine(cells);
+}
+
+function withCursorPlainLine(line: string, col: number): string {
+  const cursorCol = Math.max(0, col);
+  const chars = Array.from(line || '');
+  while (chars.length <= cursorCol) {
+    chars.push(' ');
+  }
+  chars[cursorCol] = '█';
+  return chars.join('');
+}
+
 function TuiApp(props: { input: TuiInput; close: () => void }) {
   const dims = useTerminalDimensions();
   const renderer = useRenderer();
@@ -137,8 +231,11 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [currentWindow, setCurrentWindow] = createSignal(props.input.currentWindow);
   const [windowOutput, setWindowOutput] = createSignal('');
   const [windowStyledLines, setWindowStyledLines] = createSignal<TerminalStyledLine[] | undefined>(undefined);
+  const [windowCursor, setWindowCursor] = createSignal<TerminalCursor | undefined>(undefined);
+  const [cursorBlinkOn, setCursorBlinkOn] = createSignal(true);
   const [runtimeInputMode, setRuntimeInputMode] = createSignal(true);
   const [runtimeStatusLine, setRuntimeStatusLine] = createSignal('transport: stream');
+  const [composerReady, setComposerReady] = createSignal(false);
   const [projects, setProjects] = createSignal<Array<{
     project: string;
     session: string;
@@ -189,6 +286,42 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     return openProjects()
       .filter((item) => item.session === currentSession() && item.window === currentWindow())
       .sort((a, b) => a.project.localeCompare(b.project));
+  });
+
+  const shouldShowRuntimeCursor = createMemo(() => {
+    const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen();
+    const runtimeActive = runtimeInputMode() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
+    return runtimeActive && !dialogOpen && cursorBlinkOn();
+  });
+
+  const renderedStyledLines = createMemo(() => {
+    const allLines = windowStyledLines() || [];
+    const visibleHeight = terminalPanelHeight();
+    const visible = allLines.slice(-visibleHeight);
+    const cursor = windowCursor();
+    if (!cursor || !shouldShowRuntimeCursor()) return visible;
+
+    const start = Math.max(0, allLines.length - visibleHeight);
+    const row = cursor.row - start;
+    if (row < 0 || row >= visible.length) return visible;
+
+    return visible.map((line, index) => (index === row ? withCursorStyledLine(line, cursor.col) : line));
+  });
+
+  const renderedPlainLines = createMemo(() => {
+    const allLines = windowOutput().split('\n');
+    const visibleHeight = terminalPanelHeight();
+    const visible = allLines.slice(-visibleHeight);
+    const cursor = windowCursor();
+    if (!cursor || !shouldShowRuntimeCursor()) return visible;
+
+    const start = Math.max(0, allLines.length - visibleHeight);
+    const row = cursor.row - start;
+    if (row < 0 || row >= visible.length) return visible;
+
+    const next = visible.slice();
+    next[row] = withCursorPlainLine(next[row] || '', cursor.col);
+    return next;
   });
   const sessionList = createMemo(() => {
     const groups = new Map<string, { windows: Set<string>; projects: Set<string> }>();
@@ -311,10 +444,6 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const closeConfigDialog = () => {
     setConfigOpen(false);
     setConfigSelected(0);
-    setTimeout(() => {
-      if (!textarea || textarea.isDestroyed) return;
-      textarea.focus();
-    }, 1);
   };
 
   const openConfigDialog = () => {
@@ -407,10 +536,6 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     setPaletteOpen(false);
     setPaletteQuery('');
     setPaletteSelected(0);
-    setTimeout(() => {
-      if (!textarea || textarea.isDestroyed) return;
-      textarea.focus();
-    }, 1);
   };
 
   const clampPaletteSelection = (offset: number) => {
@@ -457,28 +582,16 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const closeStopDialog = () => {
     setStopOpen(false);
     setStopSelected(0);
-    setTimeout(() => {
-      if (!textarea || textarea.isDestroyed) return;
-      textarea.focus();
-    }, 1);
   };
 
   const closeNewDialog = () => {
     setNewOpen(false);
     setNewSelected(0);
-    setTimeout(() => {
-      if (!textarea || textarea.isDestroyed) return;
-      textarea.focus();
-    }, 1);
   };
 
   const closeListDialog = () => {
     setListOpen(false);
     setListSelected(0);
-    setTimeout(() => {
-      if (!textarea || textarea.isDestroyed) return;
-      textarea.focus();
-    }, 1);
   };
 
   const clampListSelection = (offset: number) => {
@@ -512,6 +625,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const focusProject = async (project: string) => {
     const focused = await props.input.onAttachProject(project);
     if (!focused) return;
+    setWindowCursor(undefined);
     if (focused.currentSession) setCurrentSession(focused.currentSession);
     if (focused.currentWindow) setCurrentWindow(focused.currentWindow);
   };
@@ -588,6 +702,24 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const canHandleRuntimeInput = () => {
     return runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
   };
+
+  createEffect(() => {
+    if (!composerReady()) return;
+    if (!textarea || textarea.isDestroyed) return;
+
+    const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen();
+    if (dialogOpen) {
+      textarea.blur();
+      return;
+    }
+
+    if (canHandleRuntimeInput()) {
+      textarea.blur();
+      return;
+    }
+
+    textarea.focus();
+  });
 
   const toRuntimeRawKey = (evt: {
     name?: string;
@@ -795,6 +927,14 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       }
     }
 
+    if (!runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && evt.name === 'escape') {
+      evt.preventDefault();
+      textarea?.setText('');
+      setValue('');
+      setRuntimeInputMode(true);
+      return;
+    }
+
     if (evt.ctrl && evt.name === 'c') {
       evt.preventDefault();
       renderer.destroy();
@@ -803,9 +943,6 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     }
 
     if (canHandleRuntimeInput()) {
-      if (evt.sequence === '/') {
-        return;
-      }
       const raw = toRuntimeRawKey(evt);
       if (raw) {
         evt.preventDefault();
@@ -842,6 +979,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           setRuntimeStatusLine(line.length > 52 ? `${line.slice(0, 49)}...` : line);
           if (!status.connected) {
             setWindowStyledLines(undefined);
+            setWindowCursor(undefined);
           }
         }
       } catch (error) {
@@ -858,6 +996,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       if (!session || !window || !props.input.getCurrentWindowOutput) {
         setWindowOutput('');
         setWindowStyledLines(undefined);
+        setWindowCursor(undefined);
         return;
       }
 
@@ -881,8 +1020,19 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
         if (frame.sessionName !== currentSession() || frame.windowName !== currentWindow()) return;
         setWindowOutput(frame.output || '');
         setWindowStyledLines(frame.styled);
+        const hasCursor = Number.isFinite(frame.cursorRow) && Number.isFinite(frame.cursorCol);
+        setWindowCursor(hasCursor
+          ? {
+            row: Math.max(0, Math.floor(frame.cursorRow as number)),
+            col: Math.max(0, Math.floor(frame.cursorCol as number)),
+          }
+          : undefined);
       });
     }
+
+    const cursorTimer = setInterval(() => {
+      setCursorBlinkOn((value) => !value);
+    }, 520);
 
     createEffect(() => {
       const session = currentSession();
@@ -908,24 +1058,39 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       stopped = true;
       clearInterval(projectTimer);
       clearInterval(outputFallbackTimer);
+      clearInterval(cursorTimer);
       detachRuntimeFrame?.();
     });
-    setTimeout(() => textarea?.focus(), 1);
+    setTimeout(() => {
+      if (canHandleRuntimeInput()) {
+        textarea?.blur();
+      } else {
+        textarea?.focus();
+      }
+    }, 1);
   });
 
   return (
     <box width={dims().width} height={dims().height} backgroundColor={palette.bg} flexDirection="column">
       <box flexGrow={1} backgroundColor={palette.bg} flexDirection="row" paddingLeft={1} paddingRight={1} paddingTop={1}>
-        <box flexGrow={1} border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column" paddingLeft={1} paddingRight={1}>
+        <box
+          flexGrow={1}
+          border
+          borderColor={canHandleRuntimeInput() ? palette.focus : palette.border}
+          backgroundColor={palette.panel}
+          flexDirection="column"
+          paddingLeft={1}
+          paddingRight={1}
+        >
           <box flexDirection="column" flexGrow={1}>
             <Show when={currentWindow()} fallback={<text fg={palette.muted}>No active window</text>}>
               <Show when={windowOutput().length > 0} fallback={<text fg={palette.muted}>Waiting for agent output...</text>}>
                 <Show when={windowStyledLines() && windowStyledLines()!.length > 0} fallback={
-                  <For each={windowOutput().split('\n').slice(-terminalPanelHeight())}>
+                  <For each={renderedPlainLines()}>
                     {(line) => <text fg={palette.text}>{line.length > 0 ? line : ' '}</text>}
                   </For>
                 }>
-                  <For each={(windowStyledLines() || []).slice(-terminalPanelHeight())}>
+                  <For each={renderedStyledLines()}>
                     {(line) => (
                       <box flexDirection="row">
                         <For each={line.segments}>
@@ -954,8 +1119,9 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           <text fg={runtimeInputMode() ? palette.primary : palette.muted}>{runtimeInputMode() ? 'mode: runtime input' : 'mode: command input'}</text>
           <text fg={palette.muted}>{runtimeStatusLine()}</text>
           <text fg={palette.muted}>toggle: Ctrl+g</text>
+          <text fg={palette.muted}>runtime: slash passes to AI</text>
           <text fg={palette.muted}>window: Ctrl+1..9</text>
-          <text fg={palette.muted}>commands: / + Enter</text>
+          <text fg={palette.muted}>commands: Ctrl+g, then / + Enter</text>
 
           <box flexDirection="column" marginTop={1}>
             <text fg={palette.primary} attributes={TextAttributes.BOLD}>Current Sessions</text>
@@ -1009,7 +1175,14 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
             </box>
           </Show>
 
-          <box marginTop={1} marginBottom={1} border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column">
+          <box
+            marginTop={1}
+            marginBottom={1}
+            border
+            borderColor={!canHandleRuntimeInput() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() ? palette.focus : palette.border}
+            backgroundColor={palette.panel}
+            flexDirection="column"
+          >
             <box paddingLeft={1} paddingRight={1}>
               <text fg={palette.primary} attributes={TextAttributes.BOLD}>{'discode> '}</text>
             </box>
@@ -1017,12 +1190,13 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
               <textarea
                 ref={(input: TextareaRenderable) => {
                   textarea = input;
+                  setComposerReady(true);
                 }}
                 minHeight={1}
                 maxHeight={4}
                 onSubmit={submit}
                 keyBindings={[{ name: 'return', action: 'submit' }]}
-                placeholder={runtimeInputMode() ? 'Press / to enter command mode' : 'Type a command'}
+                placeholder={runtimeInputMode() ? 'Press Ctrl+g to enter command mode' : 'Type a command'}
                 textColor={palette.text}
                 focusedTextColor={palette.text}
                 cursorColor={palette.primary}
