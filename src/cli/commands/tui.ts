@@ -432,37 +432,55 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     throw new Error('Runtime stream unavailable. HTTP fallback has been removed; restart the daemon and try again.');
   }
   let lastStreamConnectAttemptAt = Date.now();
+  let reconnecting: Promise<boolean> | undefined;
 
   const ensureStreamConnected = async (): Promise<boolean> => {
     if (runtimeStreamConnected && streamClient.isConnected()) {
       return true;
     }
+
+    if (reconnecting) {
+      return reconnecting;
+    }
+
     const now = Date.now();
-    if (now - lastStreamConnectAttemptAt < 1000) {
+    if (now - lastStreamConnectAttemptAt < 250) {
       return runtimeStreamConnected;
     }
+
     lastStreamConnectAttemptAt = now;
-    runtimeStreamConnected = await streamClient.connect().catch(() => false);
-    if (runtimeStreamConnected) {
-      setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: 'stream connected',
-        lastError: undefined,
-      });
-    } else {
-      setTransportStatus({
-        mode: 'stream',
-        connected: false,
-        detail: 'stream unavailable',
-      });
+    reconnecting = streamClient.connect().catch(() => false);
+
+    try {
+      runtimeStreamConnected = await reconnecting;
+      if (runtimeStreamConnected) {
+        setTransportStatus({
+          mode: 'stream',
+          connected: true,
+          detail: 'stream reconnected',
+          lastError: undefined,
+        });
+      } else {
+        setTransportStatus({
+          mode: 'stream',
+          connected: false,
+          detail: 'stream unavailable',
+        });
+      }
+      return runtimeStreamConnected;
+    } finally {
+      reconnecting = undefined;
     }
-    return runtimeStreamConnected;
   };
 
   const requireStreamConnected = async (context: string): Promise<void> => {
-    const connected = await ensureStreamConnected();
-    if (connected && streamClient.isConnected()) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const connected = await ensureStreamConnected();
+      if (connected && streamClient.isConnected()) return;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
     const detail = transportStatus.lastError ? `${transportStatus.detail}: ${transportStatus.lastError}` : transportStatus.detail;
     throw new Error(`Runtime stream is required for ${context} (${detail}).`);
   };

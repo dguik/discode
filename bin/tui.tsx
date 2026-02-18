@@ -827,21 +827,28 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     let detachRuntimeFrame: (() => void) | undefined;
 
     const refreshProjects = async () => {
-      const next = await props.input.getProjects();
-      if (stopped) return;
-      setProjects(next);
+      try {
+        const next = await props.input.getProjects();
+        if (stopped) return;
+        setProjects(next);
 
-      if (props.input.getRuntimeStatus) {
-        const status = await props.input.getRuntimeStatus();
-        if (stopped || !status) return;
-        const suffix = status.lastError ? ` (${status.lastError})` : '';
-        const line = status.connected
-          ? `transport: stream (${status.detail})`
-          : `transport: stream error (${status.detail})${suffix}`;
-        setRuntimeStatusLine(line.length > 52 ? `${line.slice(0, 49)}...` : line);
-        if (!status.connected) {
-          setWindowStyledLines(undefined);
+        if (props.input.getRuntimeStatus) {
+          const status = await props.input.getRuntimeStatus();
+          if (stopped || !status) return;
+          const suffix = status.lastError ? ` (${status.lastError})` : '';
+          const line = status.connected
+            ? `transport: stream (${status.detail})`
+            : `transport: stream error (${status.detail})${suffix}`;
+          setRuntimeStatusLine(line.length > 52 ? `${line.slice(0, 49)}...` : line);
+          if (!status.connected) {
+            setWindowStyledLines(undefined);
+          }
         }
+      } catch (error) {
+        if (stopped) return;
+        const message = error instanceof Error ? error.message : String(error);
+        const line = `transport: stream error (${message})`;
+        setRuntimeStatusLine(line.length > 52 ? `${line.slice(0, 49)}...` : line);
       }
     };
 
@@ -856,7 +863,12 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
 
       const panelWidth = terminalPanelWidth();
       const panelHeight = terminalPanelHeight();
-      const output = await props.input.getCurrentWindowOutput(session, window, panelWidth, panelHeight);
+      let output: string | undefined;
+      try {
+        output = await props.input.getCurrentWindowOutput(session, window, panelWidth, panelHeight);
+      } catch {
+        return;
+      }
       if (stopped) return;
       setWindowOutput(output || '');
       if (!output) {
