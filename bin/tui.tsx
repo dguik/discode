@@ -5,7 +5,8 @@ import { InputRenderable, RGBA, TextAttributes, TextareaRenderable } from '@open
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/solid';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import type { TerminalStyledLine } from '../src/runtime/vt-screen.js';
 
 declare const DISCODE_VERSION: string | undefined;
 
@@ -39,15 +40,43 @@ type TuiInput = {
   currentWindow?: string;
   onCommand: (command: string, append: (line: string) => void) => Promise<boolean | void>;
   onStopProject: (project: string) => Promise<void>;
-  onAttachProject: (project: string) => Promise<void>;
-  getProjects: () => Array<{
+  onAttachProject: (project: string) => Promise<{ currentSession?: string; currentWindow?: string } | void>;
+  onRuntimeKey?: (sessionName: string, windowName: string, raw: string) => Promise<void>;
+  onRuntimeResize?: (sessionName: string, windowName: string, width: number, height: number) => Promise<void> | void;
+  onRuntimeFrame?: (listener: (frame: { sessionName: string; windowName: string; output: string; styled?: TerminalStyledLine[] }) => void) => () => void;
+  getRuntimeStatus?: () =>
+    | {
+      mode: 'stream' | 'http-fallback';
+      connected: boolean;
+      fallback: boolean;
+      detail: string;
+      lastError?: string;
+    }
+    | Promise<{
+      mode: 'stream' | 'http-fallback';
+      connected: boolean;
+      fallback: boolean;
+      detail: string;
+      lastError?: string;
+    }>;
+  getCurrentWindowOutput?: (sessionName: string, windowName: string, width?: number, height?: number) => Promise<string | undefined>;
+  getProjects: () =>
+    | Array<{
+      project: string;
+      session: string;
+      window: string;
+      ai: string;
+      channel: string;
+      open: boolean;
+    }>
+    | Promise<Array<{
     project: string;
     session: string;
     window: string;
     ai: string;
     channel: string;
     open: boolean;
-  }>;
+    }>>;
 };
 
 const palette = {
@@ -97,6 +126,12 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [listSelected, setListSelected] = createSignal(0);
   const [stopOpen, setStopOpen] = createSignal(false);
   const [stopSelected, setStopSelected] = createSignal(0);
+  const [currentSession, setCurrentSession] = createSignal(props.input.currentSession);
+  const [currentWindow, setCurrentWindow] = createSignal(props.input.currentWindow);
+  const [windowOutput, setWindowOutput] = createSignal('');
+  const [windowStyledLines, setWindowStyledLines] = createSignal<TerminalStyledLine[] | undefined>(undefined);
+  const [runtimeInputMode, setRuntimeInputMode] = createSignal(true);
+  const [runtimeStatusLine, setRuntimeStatusLine] = createSignal('transport: stream');
   const [projects, setProjects] = createSignal<Array<{
     project: string;
     session: string;
@@ -109,6 +144,19 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   let paletteInput: InputRenderable;
 
   const openProjects = createMemo(() => projects().filter((item) => item.open));
+  const sidebarWidth = createMemo(() => Math.max(34, Math.min(52, Math.floor(dims().width * 0.33))));
+  const terminalPanelWidth = createMemo(() => Math.max(24, dims().width - sidebarWidth() - 7));
+  const terminalPanelHeight = createMemo(() => Math.max(12, dims().height - 3));
+  const quickSwitchWindows = createMemo(() =>
+    openProjects()
+      .slice()
+      .sort((a, b) => {
+        const bySession = a.session.localeCompare(b.session);
+        if (bySession !== 0) return bySession;
+        return a.window.localeCompare(b.window);
+      })
+      .slice(0, 9)
+  );
   const stoppableProjects = createMemo(() => {
     const names = new Set<string>();
     openProjects().forEach((item) => names.add(item.project));
@@ -130,9 +178,9 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     ];
   });
   const currentWindowItems = createMemo(() => {
-    if (!props.input.currentSession || !props.input.currentWindow) return [];
+    if (!currentSession() || !currentWindow()) return [];
     return openProjects()
-      .filter((item) => item.session === props.input.currentSession && item.window === props.input.currentWindow)
+      .filter((item) => item.session === currentSession() && item.window === currentWindow())
       .sort((a, b) => a.project.localeCompare(b.project));
   });
   const sessionList = createMemo(() => {
@@ -290,7 +338,28 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     const selectedSession = sessionList()[listSelected()];
     if (!selectedSession?.attachProject) return;
     closeListDialog();
-    await props.input.onAttachProject(selectedSession.attachProject);
+    await focusProject(selectedSession.attachProject);
+  };
+
+  const resolveCtrlNumberIndex = (evt: { ctrl?: boolean; name?: string }): number | null => {
+    if (!evt.ctrl) return null;
+    if (!evt.name || !/^[1-9]$/.test(evt.name)) return null;
+    const index = parseInt(evt.name, 10) - 1;
+    if (!Number.isFinite(index) || index < 0) return null;
+    return index;
+  };
+
+  const quickSwitchToIndex = async (index: number) => {
+    const item = quickSwitchWindows()[index];
+    if (!item) return;
+    await focusProject(item.project);
+  };
+
+  const focusProject = async (project: string) => {
+    const focused = await props.input.onAttachProject(project);
+    if (!focused) return;
+    if (focused.currentSession) setCurrentSession(focused.currentSession);
+    if (focused.currentWindow) setCurrentWindow(focused.currentWindow);
   };
 
   const clampNewSelection = (offset: number) => {
@@ -308,7 +377,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       await props.input.onCommand('/new', () => {});
       return;
     }
-    await props.input.onAttachProject(choice.project);
+    await focusProject(choice.project);
   };
 
   const clampStopSelection = (offset: number) => {
@@ -357,7 +426,69 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     }
   };
 
+  const canHandleRuntimeInput = () => {
+    return runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
+  };
+
+  const toRuntimeRawKey = (evt: {
+    name?: string;
+    sequence?: string;
+    ctrl?: boolean;
+    meta?: boolean;
+    shift?: boolean;
+  }): string | null => {
+    const name = evt.name || '';
+    if (name === 'return' || name === 'enter') return '\r';
+    if (name === 'backspace') return '\x7f';
+    if (name === 'tab') return '\t';
+    if (name === 'escape') return '\x1b';
+    if (name === 'up') return '\x1b[A';
+    if (name === 'down') return '\x1b[B';
+    if (name === 'right') return '\x1b[C';
+    if (name === 'left') return '\x1b[D';
+    if (name === 'home') return '\x1b[H';
+    if (name === 'end') return '\x1b[F';
+    if (name === 'delete') return '\x1b[3~';
+    if (name === 'pageup') return '\x1b[5~';
+    if (name === 'pagedown') return '\x1b[6~';
+
+    if (evt.ctrl && name.length === 1 && /^[a-z]$/i.test(name)) {
+      const code = name.toLowerCase().charCodeAt(0) - 96;
+      if (code >= 1 && code <= 26) return String.fromCharCode(code);
+    }
+
+    const sequence = evt.sequence || '';
+    if (!evt.ctrl && !evt.meta && sequence.length > 0) {
+      return sequence;
+    }
+
+    return null;
+  };
+
+  const toTextAttributes = (segment: { bold?: boolean; italic?: boolean; underline?: boolean }): number => {
+    let attr = 0;
+    if (segment.bold) attr |= TextAttributes.BOLD;
+    if (segment.italic) attr |= TextAttributes.ITALIC;
+    if (segment.underline) attr |= TextAttributes.UNDERLINE;
+    return attr;
+  };
+
   useKeyboard((evt) => {
+    if (evt.ctrl && evt.name === 'g') {
+      evt.preventDefault();
+      setRuntimeInputMode(!runtimeInputMode());
+      return;
+    }
+
+    const ctrlNumberIndex = resolveCtrlNumberIndex(evt);
+    if (ctrlNumberIndex !== null) {
+      if (!paletteOpen() && !stopOpen() && !newOpen() && !listOpen()) {
+        evt.preventDefault();
+        void quickSwitchToIndex(ctrlNumberIndex);
+      }
+      return;
+    }
+
     if (evt.ctrl && evt.name === 'p') {
       evt.preventDefault();
       if (!paletteOpen()) {
@@ -486,90 +617,262 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       evt.preventDefault();
       renderer.destroy();
       props.close();
+      return;
+    }
+
+    if (canHandleRuntimeInput()) {
+      if (evt.sequence === '/') {
+        return;
+      }
+      const raw = toRuntimeRawKey(evt);
+      if (raw) {
+        evt.preventDefault();
+        const session = currentSession();
+        const window = currentWindow();
+        if (session && window && props.input.onRuntimeKey) {
+          void props.input.onRuntimeKey(session, window, raw);
+        }
+        if (value() && !value().startsWith('/')) {
+          textarea?.setText('');
+          setValue('');
+        }
+      }
     }
   });
 
   onMount(() => {
-    const refresh = () => {
-      setProjects(props.input.getProjects());
+    let stopped = false;
+    let detachRuntimeFrame: (() => void) | undefined;
+
+    const refreshProjects = async () => {
+      const next = await props.input.getProjects();
+      if (stopped) return;
+      setProjects(next);
+
+      if (props.input.getRuntimeStatus) {
+        const status = await props.input.getRuntimeStatus();
+        if (stopped || !status) return;
+        const suffix = status.lastError ? ` (${status.lastError})` : '';
+        const line =
+          status.mode === 'stream' && status.connected
+            ? `transport: stream (${status.detail})`
+            : `transport: http fallback (${status.detail})${suffix}`;
+        setRuntimeStatusLine(line.length > 52 ? `${line.slice(0, 49)}...` : line);
+        if (status.mode === 'http-fallback') {
+          setWindowStyledLines(undefined);
+        }
+      }
     };
-    refresh();
-    const timer = setInterval(refresh, 2000);
-    onCleanup(() => clearInterval(timer));
+
+    const syncOutput = async () => {
+      const session = currentSession();
+      const window = currentWindow();
+      if (!session || !window || !props.input.getCurrentWindowOutput) {
+        setWindowOutput('');
+        setWindowStyledLines(undefined);
+        return;
+      }
+
+      const panelWidth = terminalPanelWidth();
+      const panelHeight = terminalPanelHeight();
+      const output = await props.input.getCurrentWindowOutput(session, window, panelWidth, panelHeight);
+      if (stopped) return;
+      setWindowOutput(output || '');
+      if (!output) {
+        setWindowStyledLines(undefined);
+      }
+    };
+
+    if (props.input.onRuntimeFrame) {
+      detachRuntimeFrame = props.input.onRuntimeFrame((frame) => {
+        if (frame.sessionName !== currentSession() || frame.windowName !== currentWindow()) return;
+        setWindowOutput(frame.output || '');
+        setWindowStyledLines(frame.styled);
+      });
+    }
+
+    createEffect(() => {
+      const session = currentSession();
+      const window = currentWindow();
+      const width = terminalPanelWidth();
+      const height = terminalPanelHeight();
+      if (session && window && props.input.onRuntimeResize) {
+        void props.input.onRuntimeResize(session, window, width, height);
+      }
+      void syncOutput();
+    });
+
+    void refreshProjects();
+    void syncOutput();
+    const projectTimer = setInterval(() => {
+      void refreshProjects();
+    }, 2000);
+    const outputFallbackTimer = setInterval(() => {
+      void syncOutput();
+    }, 1200);
+
+    onCleanup(() => {
+      stopped = true;
+      clearInterval(projectTimer);
+      clearInterval(outputFallbackTimer);
+      detachRuntimeFrame?.();
+    });
     setTimeout(() => textarea?.focus(), 1);
   });
 
   return (
     <box width={dims().width} height={dims().height} backgroundColor={palette.bg} flexDirection="column">
-      <box flexGrow={1} backgroundColor={palette.bg} alignItems="center" justifyContent="center" paddingLeft={2} paddingRight={2}>
-        <box width={Math.max(40, Math.min(90, Math.floor(dims().width * 0.7)))} flexDirection="column">
-          <Show when={props.input.currentSession || props.input.currentWindow}>
-            <box border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column">
-              <box paddingLeft={1} paddingRight={1}>
-                <text fg={palette.primary} attributes={TextAttributes.BOLD}>Current window</text>
-              </box>
-              <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}>
-                <Show when={props.input.currentSession}>
-                  <text fg={palette.text}>{`session: ${props.input.currentSession}`}</text>
-                </Show>
-                <Show when={props.input.currentWindow} fallback={<text fg={palette.muted}>window: unavailable</text>}>
-                  <text fg={palette.text}>{`window: ${props.input.currentWindow}`}</text>
-                </Show>
-                <Show
-                  when={props.input.currentWindow && currentWindowItems().length > 0}
-                  fallback={<text fg={palette.muted}>{props.input.currentWindow ? 'No running projects in this window' : 'Could not resolve current window'}</text>}
-                >
-                  <For each={currentWindowItems().slice(0, 6)}>
-                    {(item, index) => (
-                      <>
-                        <text fg={palette.text}>{`${index() === currentWindowItems().length - 1 ? '`--' : '|--'} project: ${item.project}`}</text>
-                        <text fg={palette.text}>{`${index() === currentWindowItems().length - 1 ? '    ' : '|   '}ai: ${item.ai}`}</text>
-                        <text fg={palette.text}>{`${index() === currentWindowItems().length - 1 ? '    ' : '|   '}channel: ${item.channel}`}</text>
-                      </>
+      <box flexGrow={1} backgroundColor={palette.bg} flexDirection="row" paddingLeft={1} paddingRight={1} paddingTop={1}>
+        <box flexGrow={1} border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column" paddingLeft={1} paddingRight={1}>
+          <box flexDirection="column" flexGrow={1}>
+            <Show when={currentWindow()} fallback={<text fg={palette.muted}>No active window</text>}>
+              <Show when={windowOutput().length > 0} fallback={<text fg={palette.muted}>Waiting for agent output...</text>}>
+                <Show when={windowStyledLines() && windowStyledLines()!.length > 0} fallback={
+                  <For each={windowOutput().split('\n').slice(-terminalPanelHeight())}>
+                    {(line) => <text fg={palette.text}>{line.length > 0 ? line : ' '}</text>}
+                  </For>
+                }>
+                  <For each={(windowStyledLines() || []).slice(-terminalPanelHeight())}>
+                    {(line) => (
+                      <box flexDirection="row">
+                        <For each={line.segments}>
+                          {(segment) => (
+                            <text
+                              fg={segment.fg || palette.text}
+                              bg={segment.bg || palette.panel}
+                              attributes={toTextAttributes(segment)}
+                            >{segment.text.length > 0 ? segment.text : ' '}</text>
+                          )}
+                        </For>
+                      </box>
                     )}
                   </For>
                 </Show>
-              </box>
+              </Show>
+            </Show>
+          </box>
+        </box>
+
+        <box width={sidebarWidth()} marginLeft={1} border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column" paddingLeft={1} paddingRight={1}>
+          <box flexDirection="row" justifyContent="space-between">
+            <text fg={palette.primary} attributes={TextAttributes.BOLD}>discode</text>
+            <text fg={palette.muted}>{TUI_VERSION_LABEL}</text>
+          </box>
+          <text fg={runtimeInputMode() ? palette.primary : palette.muted}>{runtimeInputMode() ? 'mode: runtime input' : 'mode: command input'}</text>
+          <text fg={palette.muted}>{runtimeStatusLine()}</text>
+          <text fg={palette.muted}>toggle: Ctrl+g</text>
+          <text fg={palette.muted}>window: Ctrl+1..9</text>
+          <text fg={palette.muted}>commands: / + Enter</text>
+
+          <box flexDirection="column" marginTop={1}>
+            <text fg={palette.primary} attributes={TextAttributes.BOLD}>Current Sessions</text>
+            <Show when={sessionList().length > 0} fallback={<text fg={palette.muted}>No running sessions</text>}>
+              <For each={sessionList().slice(0, 10)}>
+                {(item) => <text fg={palette.text}>{`- ${item.session} (${item.windows})`}</text>}
+              </For>
+            </Show>
+          </box>
+
+          <box flexDirection="column" marginTop={1}>
+            <text fg={palette.primary} attributes={TextAttributes.BOLD}>Quick Switch</text>
+            <Show when={quickSwitchWindows().length > 0} fallback={<text fg={palette.muted}>No mapped windows</text>}>
+              <For each={quickSwitchWindows()}>
+                {(item, index) => <text fg={palette.muted}>{`Ctrl+${index() + 1} ${item.project}`}</text>}
+              </For>
+            </Show>
+          </box>
+
+          <box flexDirection="column" marginTop={1}>
+            <text fg={palette.primary} attributes={TextAttributes.BOLD}>Window Info</text>
+            <Show when={currentWindowItems().length > 0} fallback={<text fg={palette.muted}>No project mapped</text>}>
+              <For each={currentWindowItems().slice(0, 3)}>
+                {(item) => (
+                  <>
+                    <text fg={palette.text}>{item.project}</text>
+                    <text fg={palette.muted}>{`ai: ${item.ai}`}</text>
+                    <text fg={palette.muted}>{`channel: ${item.channel}`}</text>
+                  </>
+                )}
+              </For>
+            </Show>
+          </box>
+
+          <box flexGrow={1} />
+
+          <Show when={matches().length > 0}>
+            <box marginTop={1} border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column">
+              <For each={matches().slice(0, 6)}>
+                {(item, index) => (
+                  <box
+                    paddingLeft={1}
+                    paddingRight={1}
+                    backgroundColor={selected() === index() ? palette.selectedBg : palette.panel}
+                  >
+                    <text fg={selected() === index() ? palette.selectedFg : palette.text}>{item.command}</text>
+                    <text fg={palette.muted}>{`  ${item.description}`}</text>
+                  </box>
+                )}
+              </For>
             </box>
           </Show>
 
-          <box border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column" marginTop={1}>
-            <box paddingLeft={1} paddingRight={1} flexDirection="row" justifyContent="space-between">
-              <text fg={palette.primary} attributes={TextAttributes.BOLD}>Current sessions</text>
-              <text fg={palette.muted}>{TUI_VERSION_LABEL}</text>
+          <box marginTop={1} marginBottom={1} border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column">
+            <box paddingLeft={1} paddingRight={1}>
+              <text fg={palette.primary} attributes={TextAttributes.BOLD}>{'discode> '}</text>
             </box>
-            <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}>
-              <Show when={sessionList().length > 0} fallback={<text fg={palette.muted}>No running sessions</text>}>
-                <For each={sessionList().slice(0, 8)}>
-                  {(item) => (
-                    <text fg={palette.text}>{`- ${item.session} (${item.windows} windows)`}</text>
-                  )}
-                </For>
-              </Show>
-              <text fg={palette.muted}>Use /list to attach quickly</text>
+            <box paddingLeft={1} paddingRight={1}>
+              <textarea
+                ref={(input: TextareaRenderable) => {
+                  textarea = input;
+                }}
+                minHeight={1}
+                maxHeight={4}
+                onSubmit={submit}
+                keyBindings={[{ name: 'return', action: 'submit' }]}
+                placeholder={runtimeInputMode() ? 'Press / to enter command mode' : 'Type a command'}
+                textColor={palette.text}
+                focusedTextColor={palette.text}
+                cursorColor={palette.primary}
+                onContentChange={() => {
+                  const next = textarea.plainText;
+                  setValue(next);
+                  setSelected(0);
+                }}
+                onKeyDown={(event) => {
+                  if (paletteOpen() || stopOpen() || newOpen() || listOpen()) {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (runtimeInputMode() && !value().startsWith('/') && event.sequence !== '/') {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (matches().length === 0) return;
+                  if (event.name === 'up') {
+                    event.preventDefault();
+                    clampSelection(-1);
+                    return;
+                  }
+                  if (event.name === 'down') {
+                    event.preventDefault();
+                    clampSelection(1);
+                    return;
+                  }
+                  if (event.name === 'tab') {
+                    event.preventDefault();
+                    applySelection();
+                    return;
+                  }
+                  if (event.name === 'return' && query() !== null) {
+                    event.preventDefault();
+                    applySelection();
+                  }
+                }}
+              />
             </box>
           </box>
         </box>
       </box>
-
-      <Show when={matches().length > 0}>
-        <box backgroundColor={palette.bg} paddingLeft={2} paddingRight={2} paddingBottom={1}>
-          <box border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column">
-            <For each={matches().slice(0, 6)}>
-              {(item, index) => (
-                <box
-                  paddingLeft={1}
-                  paddingRight={1}
-                  backgroundColor={selected() === index() ? palette.selectedBg : palette.panel}
-                >
-                  <text fg={selected() === index() ? palette.selectedFg : palette.text}>{item.command}</text>
-                  <text fg={palette.muted}>{`  ${item.description}`}</text>
-                </box>
-              )}
-            </For>
-          </box>
-        </box>
-      </Show>
 
       <Show when={newOpen()}>
         <box
@@ -763,60 +1066,6 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           </box>
         </box>
       </Show>
-
-      <box backgroundColor={palette.bg} paddingLeft={2} paddingRight={2} paddingBottom={1}>
-        <box border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column">
-          <box paddingLeft={1} paddingRight={1}>
-            <text fg={palette.primary} attributes={TextAttributes.BOLD}>{'discode> '}</text>
-          </box>
-          <box paddingLeft={1} paddingRight={1}>
-            <textarea
-              ref={(input: TextareaRenderable) => {
-                textarea = input;
-              }}
-              minHeight={1}
-              maxHeight={4}
-              onSubmit={submit}
-              keyBindings={[{ name: 'return', action: 'submit' }]}
-              placeholder="Type a command"
-              textColor={palette.text}
-              focusedTextColor={palette.text}
-              cursorColor={palette.primary}
-              onContentChange={() => {
-                const next = textarea.plainText;
-                setValue(next);
-                setSelected(0);
-              }}
-              onKeyDown={(event) => {
-                if (paletteOpen() || stopOpen() || newOpen() || listOpen()) {
-                  event.preventDefault();
-                  return;
-                }
-                if (matches().length === 0) return;
-                if (event.name === 'up') {
-                  event.preventDefault();
-                  clampSelection(-1);
-                  return;
-                }
-                if (event.name === 'down') {
-                  event.preventDefault();
-                  clampSelection(1);
-                  return;
-                }
-                if (event.name === 'tab') {
-                  event.preventDefault();
-                  applySelection();
-                  return;
-                }
-                if (event.name === 'return' && query() !== null) {
-                  event.preventDefault();
-                  applySelection();
-                }
-              }}
-            />
-          </box>
-        </box>
-      </box>
     </box>
   );
 }

@@ -56,6 +56,46 @@ function postJSON(port: number, path: string, body: unknown): Promise<{ status: 
   });
 }
 
+function getRequest(port: number, path: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { hostname: '127.0.0.1', port, path, method: 'GET' },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode || 0, body: data }));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function postRaw(port: number, path: string, body: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode || 0, body: data }));
+      },
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 describe('BridgeHookServer', () => {
   let tempDir: string;
   let server: BridgeHookServer;
@@ -442,6 +482,17 @@ describe('BridgeHookServer', () => {
     });
   });
 
+  describe('request limits', () => {
+    it('returns 413 when body is too large', async () => {
+      startServer();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const huge = JSON.stringify({ text: 'x'.repeat(300_000) });
+      const res = await postRaw(port, '/runtime/input', huge);
+      expect(res.status).toBe(413);
+    });
+  });
+
   describe('unknown routes', () => {
     it('returns 404 for unknown paths', async () => {
       startServer();
@@ -449,6 +500,122 @@ describe('BridgeHookServer', () => {
 
       const res = await postJSON(port, '/unknown', {});
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('runtime control API', () => {
+    function createMockRuntime() {
+      const windows = [
+        {
+          sessionName: 'bridge',
+          windowName: 'project-claude',
+          status: 'running',
+          pid: 1234,
+        },
+      ];
+
+      return {
+        getOrCreateSession: vi.fn().mockReturnValue('bridge'),
+        setSessionEnv: vi.fn(),
+        windowExists: vi.fn((sessionName: string, windowName: string) => sessionName === 'bridge' && windowName === 'project-claude'),
+        startAgentInWindow: vi.fn(),
+        sendKeysToWindow: vi.fn(),
+        typeKeysToWindow: vi.fn(),
+        sendEnterToWindow: vi.fn(),
+        stopWindow: vi.fn().mockReturnValue(true),
+        listWindows: vi.fn().mockReturnValue(windows),
+        getWindowBuffer: vi.fn().mockReturnValue('hello-runtime'),
+      };
+    }
+
+    it('returns runtime windows via GET /runtime/windows', async () => {
+      startServer({ runtime: createMockRuntime() as any });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const res = await getRequest(port, '/runtime/windows');
+      expect(res.status).toBe(200);
+      const parsed = JSON.parse(res.body) as { windows: Array<{ windowId: string }> };
+      expect(parsed.windows[0].windowId).toBe('bridge:project-claude');
+    });
+
+    it('focuses and sends input to runtime window', async () => {
+      const runtime = createMockRuntime();
+      startServer({ runtime: runtime as any });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const focusRes = await postJSON(port, '/runtime/focus', { windowId: 'bridge:project-claude' });
+      expect(focusRes.status).toBe(200);
+
+      const inputRes = await postJSON(port, '/runtime/input', {
+        text: 'hello',
+        submit: true,
+      });
+      expect(inputRes.status).toBe(200);
+      expect(runtime.typeKeysToWindow).toHaveBeenCalledWith('bridge', 'project-claude', 'hello');
+      expect(runtime.sendEnterToWindow).toHaveBeenCalledWith('bridge', 'project-claude');
+    });
+
+    it('returns buffer slices via GET /runtime/buffer', async () => {
+      startServer({ runtime: createMockRuntime() as any });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const res = await getRequest(port, '/runtime/buffer?windowId=bridge:project-claude&since=5');
+      expect(res.status).toBe(200);
+      const parsed = JSON.parse(res.body) as { chunk: string; next: number };
+      expect(parsed.chunk).toBe('-runtime');
+      expect(parsed.next).toBe(13);
+    });
+
+    it('returns 501 when runtime control is unavailable', async () => {
+      startServer();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const res = await getRequest(port, '/runtime/windows');
+      expect(res.status).toBe(501);
+    });
+
+    it('stops runtime window via POST /runtime/stop', async () => {
+      const runtime = createMockRuntime();
+      startServer({ runtime: runtime as any });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const res = await postJSON(port, '/runtime/stop', { windowId: 'bridge:project-claude' });
+      expect(res.status).toBe(200);
+      expect(runtime.stopWindow).toHaveBeenCalledWith('bridge', 'project-claude');
+    });
+
+    it('ensures runtime window via POST /runtime/ensure', async () => {
+      const runtime = createMockRuntime();
+      runtime.windowExists = vi.fn().mockReturnValue(false);
+
+      const stateManager = createMockStateManager({
+        test: {
+          projectName: 'test',
+          projectPath: tempDir,
+          tmuxSession: 'bridge',
+          createdAt: new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          instances: {
+            opencode: {
+              instanceId: 'opencode',
+              agentType: 'opencode',
+              tmuxWindow: 'test-opencode',
+              channelId: 'C123',
+            },
+          },
+        },
+      });
+
+      startServer({ runtime: runtime as any, stateManager: stateManager as any });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const res = await postJSON(port, '/runtime/ensure', { projectName: 'test', instanceId: 'opencode' });
+      expect(res.status).toBe(200);
+      expect(runtime.startAgentInWindow).toHaveBeenCalledWith(
+        'bridge',
+        'test-opencode',
+        expect.stringContaining('opencode'),
+      );
     });
   });
 });
