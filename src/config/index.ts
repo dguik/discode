@@ -25,6 +25,9 @@ export interface StoredConfig {
   containerEnabled?: boolean;
   containerSocketPath?: string;
   containerSyncIntervalMs?: number;
+  telemetryEnabled?: boolean;
+  telemetryEndpoint?: string;
+  telemetryInstallId?: string;
 }
 
 export class ConfigManager {

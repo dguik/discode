@@ -249,7 +249,6 @@ export class RuntimeStreamServer {
     client.windowMissingNotified = false;
 
     const raw = this.runtime.getWindowBuffer(parsed.sessionName, parsed.windowName);
-    if (raw.length === client.lastBufferLength) return;
 
     const now = Date.now();
     // Coalesce bursts to reduce CPU/load and improve input responsiveness.

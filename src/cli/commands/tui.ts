@@ -20,6 +20,7 @@ import { RuntimeStreamClient, getDefaultRuntimeSocketPath } from '../common/runt
 import { attachCommand } from './attach.js';
 import { newCommand } from './new.js';
 import { stopCommand } from './stop.js';
+import { onboardCommand } from './onboard.js';
 import type { TerminalStyledLine } from '../../runtime/vt-screen.js';
 
 type RuntimeWindowPayload = {
@@ -189,6 +190,128 @@ function parseNewCommand(raw: string): {
   return { projectName, agentName, attach, instanceId };
 }
 
+type ParsedOnboardCommand = {
+  options: {
+    platform?: 'discord' | 'slack';
+    runtimeMode?: 'tmux' | 'pty';
+    token?: string;
+    slackBotToken?: string;
+    slackAppToken?: string;
+    defaultAgentCli?: string;
+    telemetryEnabled?: boolean;
+    opencodePermissionMode?: 'allow' | 'default';
+  };
+  showUsage?: boolean;
+  error?: string;
+};
+
+function parseOnboardCommand(raw: string): ParsedOnboardCommand {
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const options: ParsedOnboardCommand['options'] = {};
+  const toBoolean = (value: string): boolean | undefined => {
+    const lowered = value.trim().toLowerCase();
+    if (lowered === 'on' || lowered === 'true' || lowered === '1' || lowered === 'yes' || lowered === 'y') return true;
+    if (lowered === 'off' || lowered === 'false' || lowered === '0' || lowered === 'no' || lowered === 'n') return false;
+    return undefined;
+  };
+
+  for (let i = 1; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (part === '--help' || part === '-h') {
+      return { options, showUsage: true };
+    }
+
+    const eqIndex = part.indexOf('=');
+    const flag = eqIndex >= 0 ? part.slice(0, eqIndex) : part;
+    const inlineValue = eqIndex >= 0 ? part.slice(eqIndex + 1) : undefined;
+    const readValue = (): string | undefined => {
+      if (inlineValue !== undefined) return inlineValue;
+      const next = parts[i + 1];
+      if (!next || next.startsWith('--')) return undefined;
+      i += 1;
+      return next;
+    };
+
+    if (!part.startsWith('--')) {
+      if (!options.platform && (part === 'discord' || part === 'slack')) {
+        options.platform = part;
+        continue;
+      }
+      return { options, error: `Unknown option: ${part}` };
+    }
+
+    if (flag === '--platform') {
+      const value = (readValue() || '').toLowerCase();
+      if (value !== 'discord' && value !== 'slack') {
+        return { options, error: 'platform must be discord or slack.' };
+      }
+      options.platform = value;
+      continue;
+    }
+
+    if (flag === '--runtime-mode') {
+      const value = (readValue() || '').toLowerCase();
+      if (value !== 'tmux' && value !== 'pty') {
+        return { options, error: 'runtime mode must be tmux or pty.' };
+      }
+      options.runtimeMode = value;
+      continue;
+    }
+
+    if (flag === '--token') {
+      const value = readValue();
+      if (!value) return { options, error: 'token requires a value.' };
+      options.token = value;
+      continue;
+    }
+
+    if (flag === '--slack-bot-token') {
+      const value = readValue();
+      if (!value) return { options, error: 'slack-bot-token requires a value.' };
+      options.slackBotToken = value;
+      continue;
+    }
+
+    if (flag === '--slack-app-token') {
+      const value = readValue();
+      if (!value) return { options, error: 'slack-app-token requires a value.' };
+      options.slackAppToken = value;
+      continue;
+    }
+
+    if (flag === '--default-agent') {
+      const value = readValue();
+      if (!value) return { options, error: 'default-agent requires a value.' };
+      options.defaultAgentCli = value;
+      continue;
+    }
+
+    if (flag === '--telemetry') {
+      const value = readValue();
+      if (!value) return { options, error: 'telemetry requires a value (on/off).' };
+      const telemetryEnabled = toBoolean(value);
+      if (telemetryEnabled === undefined) {
+        return { options, error: 'telemetry must be on/off/true/false.' };
+      }
+      options.telemetryEnabled = telemetryEnabled;
+      continue;
+    }
+
+    if (flag === '--opencode-permission') {
+      const value = (readValue() || '').toLowerCase();
+      if (value !== 'allow' && value !== 'default') {
+        return { options, error: 'opencode-permission must be allow or default.' };
+      }
+      options.opencodePermissionMode = value;
+      continue;
+    }
+
+    return { options, error: `Unknown option: ${flag}` };
+  }
+
+  return { options };
+}
+
 function handoffToBunRuntime(): never {
   const scriptPath = process.argv[1];
   if (!scriptPath) {
@@ -224,7 +347,14 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   const runtimeFrameCache = new Map<string, string>();
   const runtimeFrameLines = new Map<string, string[]>();
   const runtimeStyledCache = new Map<string, TerminalStyledLine[]>();
-  const runtimeFrameListeners = new Set<(frame: { sessionName: string; windowName: string; output: string; styled?: TerminalStyledLine[] }) => void>();
+  const runtimeFrameListeners = new Set<(frame: {
+    sessionName: string;
+    windowName: string;
+    output: string;
+    styled?: TerminalStyledLine[];
+    cursorRow?: number;
+    cursorCol?: number;
+  }) => void>();
   const streamSubscriptions = new Map<string, { cols: number; rows: number; subscribedAt: number }>();
 
   const setTransportStatus = (next: Partial<RuntimeTransportStatus>) => {
@@ -258,6 +388,8 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             windowName: parsed.windowName,
             output,
             styled: undefined,
+            cursorRow: undefined,
+            cursorCol: undefined,
           });
         }
       }
@@ -277,6 +409,8 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             windowName: parsed.windowName,
             output,
             styled: frame.lines,
+            cursorRow: frame.cursorRow,
+            cursorCol: frame.cursorCol,
           });
         }
       }
@@ -336,6 +470,8 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             windowName: parsed.windowName,
             output,
             styled: next,
+            cursorRow: patch.cursorRow,
+            cursorCol: patch.cursorCol,
           });
         }
       }
@@ -364,6 +500,8 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             windowName: parsed.windowName,
             output,
             styled: undefined,
+            cursorRow: undefined,
+            cursorCol: undefined,
           });
         }
       }
@@ -382,6 +520,8 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             windowName: parsed.windowName,
             output: '',
             styled: undefined,
+            cursorRow: undefined,
+            cursorCol: undefined,
           });
         }
       }
@@ -432,37 +572,55 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     throw new Error('Runtime stream unavailable. HTTP fallback has been removed; restart the daemon and try again.');
   }
   let lastStreamConnectAttemptAt = Date.now();
+  let reconnecting: Promise<boolean> | undefined;
 
   const ensureStreamConnected = async (): Promise<boolean> => {
     if (runtimeStreamConnected && streamClient.isConnected()) {
       return true;
     }
+
+    if (reconnecting) {
+      return reconnecting;
+    }
+
     const now = Date.now();
-    if (now - lastStreamConnectAttemptAt < 1000) {
+    if (now - lastStreamConnectAttemptAt < 250) {
       return runtimeStreamConnected;
     }
+
     lastStreamConnectAttemptAt = now;
-    runtimeStreamConnected = await streamClient.connect().catch(() => false);
-    if (runtimeStreamConnected) {
-      setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: 'stream connected',
-        lastError: undefined,
-      });
-    } else {
-      setTransportStatus({
-        mode: 'stream',
-        connected: false,
-        detail: 'stream unavailable',
-      });
+    reconnecting = streamClient.connect().catch(() => false);
+
+    try {
+      runtimeStreamConnected = await reconnecting;
+      if (runtimeStreamConnected) {
+        setTransportStatus({
+          mode: 'stream',
+          connected: true,
+          detail: 'stream reconnected',
+          lastError: undefined,
+        });
+      } else {
+        setTransportStatus({
+          mode: 'stream',
+          connected: false,
+          detail: 'stream unavailable',
+        });
+      }
+      return runtimeStreamConnected;
+    } finally {
+      reconnecting = undefined;
     }
-    return runtimeStreamConnected;
   };
 
   const requireStreamConnected = async (context: string): Promise<void> => {
-    const connected = await ensureStreamConnected();
-    if (connected && streamClient.isConnected()) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const connected = await ensureStreamConnected();
+      if (connected && streamClient.isConnected()) return;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
     const detail = transportStatus.lastError ? `${transportStatus.detail}: ${transportStatus.lastError}` : transportStatus.detail;
     throw new Error(`Runtime stream is required for ${context} (${detail}).`);
   };
@@ -621,7 +779,14 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     ensureStreamSubscribed(windowId, width, height);
   };
 
-  const registerRuntimeFrameListener = (listener: (frame: { sessionName: string; windowName: string; output: string; styled?: TerminalStyledLine[] }) => void): (() => void) => {
+  const registerRuntimeFrameListener = (listener: (frame: {
+    sessionName: string;
+    windowName: string;
+    output: string;
+    styled?: TerminalStyledLine[];
+    cursorRow?: number;
+    cursorCol?: number;
+  }) => void): (() => void) => {
     runtimeFrameListeners.add(listener);
     return () => {
       runtimeFrameListeners.delete(listener);
@@ -635,7 +800,39 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     }
 
     if (command === '/help') {
-      append('Commands: /new [name] [agent] [--instance id] [--attach], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty|toggle]], /help, /exit');
+      append('Commands: /new [name] [agent] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty|toggle]], /help, /exit');
+      append('Onboard options: --platform [discord|slack], --runtime-mode [tmux|pty], --token, --slack-bot-token, --slack-app-token, --default-agent [name|auto], --telemetry [on|off], --opencode-permission [allow|default]');
+      return false;
+    }
+
+    if (command === '/onboard' || command === 'onboard' || command.startsWith('/onboard ') || command.startsWith('onboard ')) {
+      const parsed = parseOnboardCommand(command);
+      if (parsed.showUsage) {
+        append('Usage: /onboard [discord|slack] [--platform discord|slack] [--runtime-mode tmux|pty]');
+        append('       [--token TOKEN] [--slack-bot-token TOKEN] [--slack-app-token TOKEN]');
+        append('       [--default-agent claude|gemini|opencode|auto] [--telemetry on|off]');
+        append('       [--opencode-permission allow|default]');
+        append('Discord bot token guide: https://discode.chat/docs/discord-bot');
+        append('TUI onboard runs in non-interactive mode and uses saved values when omitted.');
+        return false;
+      }
+      if (parsed.error) {
+        append(`⚠️ ${parsed.error}`);
+        append('Try: /onboard --help');
+        return false;
+      }
+
+      try {
+        append('Running onboarding inside TUI...');
+        await onboardCommand({
+          ...parsed.options,
+          nonInteractive: true,
+          exitOnError: false,
+        });
+        append('✅ Onboarding complete.');
+      } catch (error) {
+        append(`⚠️ Onboarding failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
       return false;
     }
 
@@ -874,8 +1071,11 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       try {
         reloadStateFromDisk();
         validateConfig();
-        if (!stateManager.getGuildId()) {
-          append('⚠️ Not set up yet. Run: discode onboard');
+        const workspaceId = typeof stateManager.getWorkspaceId === 'function'
+          ? stateManager.getWorkspaceId()
+          : stateManager.getGuildId();
+        if (!workspaceId) {
+          append('⚠️ Not set up yet. Run /onboard in TUI.');
           return false;
         }
 
@@ -1013,6 +1213,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     await mod.runTui({
       currentSession: currentSession || undefined,
       currentWindow: currentWindow || undefined,
+      initialCommand: options.initialTuiCommand,
       onCommand: handler,
       onAttachProject: async (project: string) => {
         reloadStateFromDisk();
@@ -1098,7 +1299,14 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       onRuntimeResize: async (sessionName: string, windowName: string, width: number, height: number) => {
         await sendRuntimeResize(sessionName, windowName, width, height);
       },
-      onRuntimeFrame: (listener: (frame: { sessionName: string; windowName: string; output: string; styled?: TerminalStyledLine[] }) => void) => {
+      onRuntimeFrame: (listener: (frame: {
+        sessionName: string;
+        windowName: string;
+        output: string;
+        styled?: TerminalStyledLine[];
+        cursorRow?: number;
+        cursorCol?: number;
+      }) => void) => {
         return registerRuntimeFrameListener(listener);
       },
       getRuntimeStatus: async () => {
