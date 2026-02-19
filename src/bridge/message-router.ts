@@ -189,6 +189,11 @@ export class BridgeMessageRouter {
         // Buffer is stable — likely an interactive prompt waiting for user input
         if (snapshot.trim().length > 0) {
           const relevant = this.extractLastCommandBlock(snapshot);
+          if (relevant.trim().length === 0) {
+            // Extracted block is empty (idle prompt with status bar only) — skip
+            console.log(`${tag} fallback: buffer stable but idle prompt detected, skipping`);
+            return;
+          }
           console.log(`${tag} fallback: buffer stable (${snapshot.length} chars → ${relevant.length} chars), sending to channel`);
           try {
             await this.deps.messaging.sendToChannel(channelId, `\`\`\`\n${relevant}\n\`\`\``);
@@ -261,6 +266,10 @@ export class BridgeMessageRouter {
    * Extract the last command block from terminal output.
    * Looks for the last `❯` prompt and returns everything from that line onward,
    * so only the relevant command + its output is sent to the channel.
+   *
+   * Returns empty string when the extracted block is just an idle prompt with
+   * status bar chrome (separator lines + status text) and no meaningful agent
+   * output — this avoids sending useless terminal UI to the channel.
    */
   private extractLastCommandBlock(text: string): string {
     const lines = text.split('\n');
@@ -283,7 +292,72 @@ export class BridgeMessageRouter {
       block.pop();
     }
 
+    // Check if the block is just an idle prompt + UI chrome (separator lines, status bar).
+    // If so, suppress — the Stop hook should handle the response delivery.
+    if (this.isIdlePromptBlock(block)) {
+      return '';
+    }
+
     return block.join('\n');
+  }
+
+  /**
+   * Detect whether a block of lines is just an idle Claude Code prompt with
+   * status bar chrome — no meaningful agent output.
+   *
+   * An idle block has this structure:
+   *   ❯ [optional user text]
+   *   ─────────────────────  (separator — immediately after prompt)
+   *   status bar text...     (1-2 lines)
+   *
+   * The key signal is a separator line immediately after the prompt (skipping blanks).
+   * When a separator follows the prompt, subsequent lines are status bar chrome.
+   * If the first non-blank line after the prompt is NOT a separator, the content
+   * is agent output (help text, error messages, etc.) and should not be suppressed.
+   *
+   * Interactive menus (e.g. /model) also start with a separator, but they have
+   * 3+ substantive lines after it (menu items, instructions). Idle prompts have
+   * at most 2 status bar lines.
+   */
+  private isIdlePromptBlock(block: string[]): boolean {
+    if (block.length === 0) return true;
+
+    // A separator line is mostly box-drawing or dash characters
+    const isSeparator = (line: string) => {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) return false;
+      const chromeChars = trimmed.replace(/[─━─—–\-=═╌╍┄┅┈┉]/gu, '');
+      return chromeChars.length === 0 || chromeChars.length / trimmed.length < 0.1;
+    };
+
+    // Find the first non-blank line after the prompt
+    let firstContentIdx = -1;
+    for (let i = 1; i < block.length; i++) {
+      if (block[i].trim().length > 0) {
+        firstContentIdx = i;
+        break;
+      }
+    }
+
+    // Nothing after prompt — idle
+    if (firstContentIdx < 0) return true;
+
+    // If the first non-blank line after the prompt is NOT a separator,
+    // this is command output (help text, error messages, etc.) — not idle.
+    if (!isSeparator(block[firstContentIdx])) return false;
+
+    // Separator found right after the prompt. Count substantive lines after
+    // the separator to distinguish idle (1-2 status lines) from interactive
+    // menus (3+ content lines).
+    let substantiveLines = 0;
+    for (let i = firstContentIdx + 1; i < block.length; i++) {
+      const trimmed = block[i].trim();
+      if (trimmed.length === 0) continue;
+      if (isSeparator(block[i])) continue;
+      substantiveLines++;
+    }
+
+    return substantiveLines <= 2;
   }
 
   private buildDeliveryFailureGuidance(projectName: string, error: unknown): string {

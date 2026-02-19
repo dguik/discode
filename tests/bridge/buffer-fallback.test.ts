@@ -838,4 +838,119 @@ describe('buffer fallback for interactive prompts', () => {
       expect(sent).not.toContain('Claude Code');
     }
   });
+
+  // ── Idle prompt suppression ───────────────────────────────────
+
+  it('does not send idle prompt with status bar (empty ❯ + separator + status)', async () => {
+    const idleScreen = [
+      '● 안녕하세요! 무엇을 도와드릴까요?',
+      '',
+      '──────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+      '❯ ',
+      '──────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+      '  ⏵⏵ bypass permissions on (… ✗ Auto-update failed · Try claude doctor or npm i -g @anthropic-ai/claude-code',
+    ].join('\n');
+
+    runtime.getWindowBuffer.mockReturnValue(idleScreen);
+
+    await messageCallback('claude', 'ㅎㅇ', 'myapp', 'ch-1', 'msg-1', undefined);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // The fallback should NOT send the idle prompt + status bar
+    expect(messaging.sendToChannel).not.toHaveBeenCalled();
+  });
+
+  it('does not send idle prompt with different status bar text', async () => {
+    const idleScreen = [
+      '● Hello! How can I help you?',
+      '',
+      '──────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+      '❯ ',
+      '──────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+      '   Claude Code has switched from npm to native installer. Run `claude install` or see https://docs.anthropic…',
+      '                               ✗ Auto-update failed · Try claude doctor or npm i -g @anthropic-ai/claude-code',
+    ].join('\n');
+
+    runtime.getWindowBuffer.mockReturnValue(idleScreen);
+
+    await messageCallback('claude', 'hello', 'myapp', 'ch-1', 'msg-1', undefined);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(messaging.sendToChannel).not.toHaveBeenCalled();
+  });
+
+  it('does not send idle prompt when next message is being typed', async () => {
+    const idleWithTyping = [
+      '● Previous response here',
+      '',
+      '──────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+      '❯ 이 프로젝트 구조 좀 알려줘',
+      '──────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+      '  ⏵⏵ bypass permissions on (… ✗ Auto-update failed',
+    ].join('\n');
+
+    runtime.getWindowBuffer.mockReturnValue(idleWithTyping);
+
+    await messageCallback('claude', 'test', 'myapp', 'ch-1', 'msg-1', undefined);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // There IS text after ❯, but the block is just user input + status bar — no agent output
+    // This should also be suppressed since it contains only prompt chrome
+    expect(messaging.sendToChannel).not.toHaveBeenCalled();
+  });
+
+  it('still sends interactive menu content (not suppressed)', async () => {
+    const modelMenu = [
+      '● Previous response',
+      '',
+      '❯ /model',
+      '──────────────────────────────────────────────────────────',
+      ' Select model',
+      '',
+      '   1. Default (recommended)',
+      ' ❯ 4. opus ✔',
+      '',
+      ' Enter to confirm · Esc to exit',
+    ].join('\n');
+
+    runtime.getWindowBuffer.mockReturnValue(modelMenu);
+
+    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // Interactive menu content should still be sent
+    expect(messaging.sendToChannel).toHaveBeenCalledWith(
+      'ch-1',
+      expect.stringContaining('Select model'),
+    );
+  });
+
+  it('still sends help command output (not suppressed)', async () => {
+    const helpOutput = [
+      '❯ /help',
+      'Available commands:',
+      '  /model   - Switch models',
+      '  /help    - Show this help',
+    ].join('\n');
+
+    runtime.getWindowBuffer.mockReturnValue(helpOutput);
+
+    await messageCallback('claude', '/help', 'myapp', 'ch-1', 'msg-1', undefined);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(messaging.sendToChannel).toHaveBeenCalledWith(
+      'ch-1',
+      expect.stringContaining('Available commands'),
+    );
+  });
 });

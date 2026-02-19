@@ -1,5 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
-import { join } from 'path';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import ts from 'typescript';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
@@ -117,6 +117,58 @@ describe('opencode plugin installer', () => {
     expect(payload.text).toBe('결과 본문');
     expect(payload.projectName).toBe('demo-project');
     expect(payload.agentType).toBe('opencode');
+  });
+
+  describe('compiled binary resource resolution', () => {
+    let originalExecPath: string;
+
+    beforeEach(() => {
+      originalExecPath = process.execPath;
+    });
+
+    afterEach(() => {
+      process.execPath = originalExecPath;
+    });
+
+    it('resolves plugin source from process.execPath-based resources path', () => {
+      // Simulate compiled binary layout: bin/discode + resources/opencode-plugin/
+      const binaryRoot = join(tempDir, 'binary-root');
+      const binDir = join(binaryRoot, 'bin');
+      const resourcesDir = join(binaryRoot, 'resources', 'opencode-plugin');
+
+      mkdirSync(binDir, { recursive: true });
+      mkdirSync(resourcesDir, { recursive: true });
+      copyFileSync(getPluginSourcePath(), join(resourcesDir, OPENCODE_PLUGIN_FILENAME));
+      writeFileSync(join(binDir, 'discode'), '');
+
+      process.execPath = join(binDir, 'discode');
+
+      const candidate = join(dirname(process.execPath), '..', 'resources', 'opencode-plugin', OPENCODE_PLUGIN_FILENAME);
+      expect(existsSync(candidate)).toBe(true);
+
+      const content = readFileSync(candidate, 'utf-8');
+      expect(content).toContain('AgentDiscordBridgePlugin');
+    });
+
+    it('installOpencodePlugin works from binary resources layout', () => {
+      const binaryRoot = join(tempDir, 'binary-root');
+      const binDir = join(binaryRoot, 'bin');
+      const resourcesDir = join(binaryRoot, 'resources', 'opencode-plugin');
+      const targetDir = join(tempDir, 'installed-plugin');
+
+      mkdirSync(binDir, { recursive: true });
+      mkdirSync(resourcesDir, { recursive: true });
+      copyFileSync(getPluginSourcePath(), join(resourcesDir, OPENCODE_PLUGIN_FILENAME));
+      writeFileSync(join(binDir, 'discode'), '');
+
+      process.execPath = join(binDir, 'discode');
+
+      const result = installOpencodePlugin(undefined, targetDir);
+      expect(existsSync(result)).toBe(true);
+
+      const content = readFileSync(result, 'utf-8');
+      expect(content).toContain('AgentDiscordBridgePlugin');
+    });
   });
 
   it('builds assistant text from delta updates when part text is empty', async () => {

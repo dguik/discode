@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import solidPlugin from '../node_modules/@opentui/solid/scripts/solid-plugin';
 
@@ -119,6 +119,12 @@ for (const target of targets) {
     )}\n`,
     'utf-8',
   );
+
+  // Copy resource files (plugin scripts, hooks) alongside the binary
+  const resourcesDir = join(packageDir, 'resources');
+  cpSync(join(root, 'src', 'claude', 'plugin'), join(resourcesDir, 'claude-plugin'), { recursive: true });
+  cpSync(join(root, 'src', 'opencode', 'plugin'), join(resourcesDir, 'opencode-plugin'), { recursive: true });
+  cpSync(join(root, 'src', 'gemini', 'hook'), join(resourcesDir, 'gemini-hook'), { recursive: true });
 
   binaries[packageName] = pkgJson.version;
 }
