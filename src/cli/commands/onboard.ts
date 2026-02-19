@@ -11,7 +11,10 @@ import { ensureTelemetryInstallId, resolveTelemetrySettings } from '../../teleme
 
 type RegisteredAgentAdapter = ReturnType<typeof agentRegistry.getAll>[number];
 
-async function chooseDefaultAgentCli(installedAgents: RegisteredAgentAdapter[]): Promise<string | undefined> {
+async function chooseDefaultAgentCli(
+  installedAgents: RegisteredAgentAdapter[],
+  interactive: boolean = isInteractiveShell()
+): Promise<string | undefined> {
   if (installedAgents.length === 0) {
     console.log(chalk.yellow('⚠️ No installed AI CLI detected. Install one of: claude, gemini, opencode.'));
     return undefined;
@@ -23,7 +26,7 @@ async function chooseDefaultAgentCli(installedAgents: RegisteredAgentAdapter[]):
     : -1;
   const defaultIndex = configuredIndex >= 0 ? configuredIndex : 0;
 
-  if (!isInteractiveShell()) {
+  if (!interactive) {
     const selected = installedAgents[defaultIndex];
     console.log(chalk.yellow(`⚠️ Non-interactive shell: default AI CLI set to ${selected.config.name}.`));
     return selected.config.name;
@@ -50,9 +53,9 @@ async function chooseDefaultAgentCli(installedAgents: RegisteredAgentAdapter[]):
   }
 }
 
-async function choosePlatform(): Promise<'discord' | 'slack'> {
+async function choosePlatform(interactive: boolean = isInteractiveShell()): Promise<'discord' | 'slack'> {
   const configured = getConfigValue('messagingPlatform');
-  if (!isInteractiveShell()) {
+  if (!interactive) {
     const platform = configured || 'discord';
     console.log(chalk.yellow(`⚠️ Non-interactive shell: using platform ${platform}.`));
     return platform;
@@ -68,12 +71,15 @@ async function choosePlatform(): Promise<'discord' | 'slack'> {
   return 'discord';
 }
 
-async function chooseRuntimeMode(explicitMode?: string): Promise<'tmux' | 'pty'> {
+async function chooseRuntimeMode(
+  explicitMode?: string,
+  interactive: boolean = isInteractiveShell()
+): Promise<'tmux' | 'pty'> {
   if (explicitMode === 'tmux' || explicitMode === 'pty') {
     return explicitMode;
   }
 
-  if (!isInteractiveShell()) {
+  if (!interactive) {
     console.log(chalk.yellow('⚠️ Non-interactive shell: using runtime mode pty.'));
     return 'pty';
   }
@@ -90,11 +96,11 @@ async function chooseRuntimeMode(explicitMode?: string): Promise<'tmux' | 'pty'>
   }
 }
 
-async function chooseTelemetryOptIn(): Promise<boolean> {
+async function chooseTelemetryOptIn(interactive: boolean = isInteractiveShell()): Promise<boolean> {
   const configured = getConfigValue('telemetryEnabled');
   const defaultEnabled = configured === true;
 
-  if (!isInteractiveShell()) {
+  if (!interactive) {
     const enabled = configured === true;
     console.log(chalk.yellow(`⚠️ Non-interactive shell: telemetry ${enabled ? 'on' : 'off'}.`));
     return enabled;
@@ -107,12 +113,12 @@ async function chooseTelemetryOptIn(): Promise<boolean> {
   return confirmYesNo(chalk.white('Enable anonymous CLI telemetry? [y/N]: '), defaultEnabled);
 }
 
-async function onboardDiscord(token?: string): Promise<void> {
+async function onboardDiscord(token?: string, interactive: boolean = isInteractiveShell()): Promise<void> {
   const existingToken = normalizeDiscordToken(getConfigValue('token'));
   token = normalizeDiscordToken(token);
   if (!token) {
     if (existingToken) {
-      if (isInteractiveShell()) {
+      if (interactive) {
         const maskedToken = `****${existingToken.slice(-4)}`;
         const reuseToken = await confirmYesNo(
           chalk.white(`Previously saved Discord bot token found (${maskedToken}). Use it? [Y/n]: `),
@@ -128,18 +134,20 @@ async function onboardDiscord(token?: string): Promise<void> {
       }
     }
 
-    if (!token && !isInteractiveShell()) {
+    if (!token && !interactive) {
       console.error(chalk.red('Token is required in non-interactive mode.'));
       console.log(chalk.gray('Run: discode onboard --token YOUR_DISCORD_BOT_TOKEN'));
-      process.exit(1);
+      console.log(chalk.gray('How to create a Discord bot token: https://discode.chat/docs/discord-bot'));
+      throw new Error('Discord bot token is required in non-interactive mode.');
     }
 
     if (!token) {
+      console.log(chalk.gray('Need a bot token? See: https://discode.chat/docs/discord-bot'));
       token = normalizeDiscordToken(await prompt(chalk.white('Discord bot token: ')));
     }
     if (!token) {
-      console.error(chalk.red('Bot token is required.'));
-      process.exit(1);
+      console.log(chalk.gray('How to create a Discord bot token: https://discode.chat/docs/discord-bot'));
+      throw new Error('Discord bot token is required.');
     }
   }
 
@@ -158,7 +166,7 @@ async function onboardDiscord(token?: string): Promise<void> {
     console.log(chalk.gray('   Invite your bot to a server first:'));
     console.log(chalk.gray('   https://discord.com/developers/applications → OAuth2 → URL Generator'));
     await client.disconnect();
-    process.exit(1);
+    throw new Error('Bot is not in any Discord server.');
   }
 
   if (guilds.length === 1) {
@@ -170,16 +178,15 @@ async function onboardDiscord(token?: string): Promise<void> {
       console.log(chalk.gray(`   ${i + 1}. ${g.name} (${g.id})`));
     });
 
-    if (!isInteractiveShell()) {
+    if (!interactive) {
       selectedGuild = guilds[0];
       console.log(chalk.yellow(`⚠️ Non-interactive shell: selecting first server ${selectedGuild.name} (${selectedGuild.id}).`));
     } else {
       const answer = await prompt(chalk.white(`\n   Select server [1-${guilds.length}]: `));
       const idx = parseInt(answer, 10) - 1;
       if (idx < 0 || idx >= guilds.length) {
-        console.error(chalk.red('Invalid selection.'));
         await client.disconnect();
-        process.exit(1);
+        throw new Error('Invalid server selection.');
       }
       selectedGuild = guilds[idx];
       console.log(chalk.green(`✅ Server selected: ${selectedGuild.name}`));
@@ -191,7 +198,10 @@ async function onboardDiscord(token?: string): Promise<void> {
   await client.disconnect();
 }
 
-async function onboardSlack(options?: { botToken?: string; appToken?: string }): Promise<void> {
+async function onboardSlack(
+  options?: { botToken?: string; appToken?: string },
+  interactive: boolean = isInteractiveShell()
+): Promise<void> {
   const existingBotToken = getConfigValue('slackBotToken')?.trim();
   const existingAppToken = getConfigValue('slackAppToken')?.trim();
 
@@ -200,7 +210,7 @@ async function onboardSlack(options?: { botToken?: string; appToken?: string }):
 
   if (botToken && appToken) {
     // Tokens provided via CLI flags — skip interactive prompts.
-  } else if (existingBotToken && existingAppToken && isInteractiveShell()) {
+  } else if (existingBotToken && existingAppToken && interactive) {
     const maskedBot = `****${existingBotToken.slice(-4)}`;
     const reuse = await confirmYesNo(
       chalk.white(`Previously saved Slack tokens found (Bot: ${maskedBot}). Use them? [Y/n]: `),
@@ -211,33 +221,31 @@ async function onboardSlack(options?: { botToken?: string; appToken?: string }):
       appToken = existingAppToken;
       console.log(chalk.green(`✅ Reusing saved Slack tokens`));
     }
-  } else if (existingBotToken && existingAppToken && !isInteractiveShell()) {
+  } else if (existingBotToken && existingAppToken && !interactive) {
     botToken = existingBotToken;
     appToken = existingAppToken;
     console.log(chalk.yellow(`⚠️ Non-interactive shell: using previously saved Slack tokens.`));
   }
 
   if (!botToken) {
-    if (!isInteractiveShell()) {
+    if (!interactive) {
       console.error(chalk.red('Slack tokens are required in non-interactive mode.'));
       console.log(chalk.gray('Run: discode config --slack-bot-token TOKEN --slack-app-token TOKEN --platform slack'));
-      process.exit(1);
+      throw new Error('Slack bot token is required in non-interactive mode.');
     }
     botToken = await prompt(chalk.white('Slack Bot Token (xoxb-...): '));
     if (!botToken) {
-      console.error(chalk.red('Bot token is required.'));
-      process.exit(1);
+      throw new Error('Slack bot token is required.');
     }
   }
 
   if (!appToken) {
-    if (!isInteractiveShell()) {
-      process.exit(1);
+    if (!interactive) {
+      throw new Error('Slack app-level token is required in non-interactive mode.');
     }
     appToken = await prompt(chalk.white('Slack App-Level Token (xapp-...): '));
     if (!appToken) {
-      console.error(chalk.red('App-level token is required.'));
-      process.exit(1);
+      throw new Error('Slack app-level token is required.');
     }
   }
 
@@ -266,34 +274,71 @@ export async function onboardCommand(options: {
   slackBotToken?: string;
   slackAppToken?: string;
   runtimeMode?: string;
+  defaultAgentCli?: string;
+  telemetryEnabled?: boolean;
+  opencodePermissionMode?: 'allow' | 'default';
+  nonInteractive?: boolean;
+  exitOnError?: boolean;
 }) {
   try {
-    console.log(chalk.cyan('\n🚀 Discode Onboarding\n'));
+    const interactive = options.nonInteractive ? false : isInteractiveShell();
+    console.log(chalk.cyan('\n🚀 Discode Onboarding!\n'));
 
-    const platform = (options.platform as 'discord' | 'slack') || await choosePlatform();
+    const platform = (options.platform as 'discord' | 'slack')
+      || (interactive ? await choosePlatform(interactive) : await choosePlatform(false));
     saveConfig({ messagingPlatform: platform });
     console.log(chalk.green(`✅ Platform: ${platform}`));
 
     if (platform === 'slack') {
-      await onboardSlack({ botToken: options.slackBotToken, appToken: options.slackAppToken });
+      const botToken = options.slackBotToken || (interactive ? undefined : getConfigValue('slackBotToken'));
+      const appToken = options.slackAppToken || (interactive ? undefined : getConfigValue('slackAppToken'));
+      await onboardSlack({ botToken, appToken }, interactive);
     } else {
-      await onboardDiscord(options.token);
+      const token = options.token || (interactive ? undefined : normalizeDiscordToken(getConfigValue('token')));
+      await onboardDiscord(token, interactive);
     }
 
-    const runtimeMode = await chooseRuntimeMode(options.runtimeMode);
+    const runtimeMode = await chooseRuntimeMode(
+      options.runtimeMode || (!interactive ? getConfigValue('runtimeMode') : undefined),
+      interactive
+    );
     saveConfig({ runtimeMode });
     console.log(chalk.green(`✅ Runtime mode saved: ${runtimeMode}`));
 
     const installedAgents = agentRegistry.getAll().filter((a) => a.isInstalled());
-    const defaultAgentCli = await chooseDefaultAgentCli(installedAgents);
+    let defaultAgentCli: string | undefined;
+    if (typeof options.defaultAgentCli === 'string' && options.defaultAgentCli.trim().toLowerCase() === 'auto') {
+      saveConfig({ defaultAgentCli: undefined });
+      console.log(chalk.green('✅ Default AI CLI saved: auto'));
+    } else if (typeof options.defaultAgentCli === 'string' && options.defaultAgentCli.trim().length > 0) {
+      const requested = options.defaultAgentCli.trim().toLowerCase();
+      const matched = installedAgents.find((agent) => agent.config.name === requested);
+      if (!matched) {
+        throw new Error(`Unknown or not-installed default agent: ${requested}`);
+      }
+      defaultAgentCli = matched.config.name;
+    } else {
+      defaultAgentCli = await chooseDefaultAgentCli(installedAgents, interactive);
+    }
+
     if (defaultAgentCli) {
       saveConfig({ defaultAgentCli });
       console.log(chalk.green(`✅ Default AI CLI saved: ${defaultAgentCli}`));
     }
 
-    await ensureOpencodePermissionChoice({ shouldPrompt: true, forcePrompt: true });
+    if (options.opencodePermissionMode) {
+      saveConfig({ opencodePermissionMode: options.opencodePermissionMode });
+      console.log(chalk.green(`✅ OpenCode permission mode saved: ${options.opencodePermissionMode}`));
+    } else if (interactive) {
+      await ensureOpencodePermissionChoice({ shouldPrompt: true, forcePrompt: true });
+    } else if (!getConfigValue('opencodePermissionMode')) {
+      saveConfig({ opencodePermissionMode: 'default' });
+      console.log(chalk.yellow('⚠️ Non-interactive shell: OpenCode permission mode set to default.'));
+    }
 
-    const telemetryEnabled = await chooseTelemetryOptIn();
+    const telemetryEnabled = typeof options.telemetryEnabled === 'boolean'
+      ? options.telemetryEnabled
+      : await chooseTelemetryOptIn(interactive);
     saveConfig({ telemetryEnabled });
     if (telemetryEnabled) {
       const installId = ensureTelemetryInstallId();
@@ -315,7 +360,11 @@ export async function onboardCommand(options: {
     console.log(chalk.gray('   cd <your-project>'));
     console.log(chalk.gray('   discode new\n'));
   } catch (error) {
-    console.error(chalk.red('Onboarding failed:'), error);
+    if (options.exitOnError === false) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(chalk.red('Onboarding failed:'), message);
     process.exit(1);
   }
 }

@@ -2,10 +2,11 @@
 /** @jsxRuntime automatic */
 
 import { InputRenderable, RGBA, TextAttributes, TextareaRenderable } from '@opentui/core';
-import { render, useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/solid';
+import { render, useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/solid';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { copyTextToClipboard } from '../src/cli/common/clipboard.js';
 import type { TerminalSegment, TerminalStyledLine } from '../src/runtime/vt-screen.js';
 
 declare const DISCODE_VERSION: string | undefined;
@@ -36,10 +37,12 @@ const TUI_VERSION = resolveTuiVersion();
 const TUI_VERSION_LABEL = TUI_VERSION.startsWith('v') ? TUI_VERSION : `v${TUI_VERSION}`;
 const PREFIX_KEY_NAME = 'b';
 const PREFIX_LABEL = 'Ctrl+b';
+const DEBUG_SELECTION = process.env.DISCODE_TUI_DEBUG_SELECTION === '1';
 
 type TuiInput = {
   currentSession?: string;
   currentWindow?: string;
+  initialCommand?: string;
   onCommand: (command: string, append: (line: string) => void) => Promise<boolean | void>;
   onStopProject: (project: string) => Promise<void>;
   onAttachProject: (project: string) => Promise<{ currentSession?: string; currentWindow?: string } | void>;
@@ -100,6 +103,7 @@ const palette = {
 
 const slashCommands = [
   { command: '/new', description: 'create new session' },
+  { command: '/onboard', description: 'run onboarding inside TUI' },
   { command: '/list', description: 'show current session list' },
   { command: '/stop', description: 'select and stop a project' },
   { command: '/projects', description: 'list configured projects' },
@@ -111,6 +115,7 @@ const slashCommands = [
 
 const paletteCommands = [
   { command: '/new', description: 'Create a new session' },
+  { command: '/onboard', description: 'Run onboarding inside TUI' },
   { command: '/list', description: 'Show current session list' },
   { command: '/stop', description: 'Select and stop a project' },
   { command: '/projects', description: 'List configured projects' },
@@ -238,6 +243,8 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [prefixPending, setPrefixPending] = createSignal(false);
   const [runtimeInputMode, setRuntimeInputMode] = createSignal(true);
   const [runtimeStatusLine, setRuntimeStatusLine] = createSignal('transport: stream');
+  const [commandStatusLine, setCommandStatusLine] = createSignal('status: ready');
+  const [clipboardToast, setClipboardToast] = createSignal<string | undefined>(undefined);
   const [composerReady, setComposerReady] = createSignal(false);
   const [projects, setProjects] = createSignal<Array<{
     project: string;
@@ -249,6 +256,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   }>>([]);
   let textarea: TextareaRenderable;
   let paletteInput: InputRenderable;
+  let clipboardToastTimer: ReturnType<typeof setTimeout> | undefined;
 
   const openProjects = createMemo(() => projects().filter((item) => item.open));
   const sidebarWidth = createMemo(() => Math.max(34, Math.min(52, Math.floor(dims().width * 0.33))));
@@ -395,18 +403,80 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     return line.slice(idx + 1).trim();
   };
 
-  const runCommandCapture = async (command: string): Promise<string[]> => {
+  const runCommandCapture = async (command: string): Promise<{ lines: string[]; shouldClose: boolean }> => {
     const lines: string[] = [];
-    await props.input.onCommand(command, (line) => {
+    const shouldClose = await props.input.onCommand(command, (line) => {
       lines.push(line);
     });
-    return lines;
+    return { lines, shouldClose: shouldClose === true };
   };
+
+  const setCompactStatus = (line: string) => {
+    const text = line.trim().length > 0 ? line.trim() : 'status: done';
+    setCommandStatusLine(text.length > 52 ? `${text.slice(0, 49)}...` : text);
+  };
+
+  const executeCommand = async (command: string) => {
+    const { lines, shouldClose } = await runCommandCapture(command);
+    const status = lines.find((line) => line.startsWith('⚠️')) || lines.find((line) => line.startsWith('✅')) || lines[lines.length - 1];
+    setCompactStatus(status || 'status: command executed');
+    if (shouldClose) {
+      renderer.destroy();
+      props.close();
+    }
+  };
+
+  const showClipboardToast = (message: string) => {
+    setClipboardToast(message);
+    if (clipboardToastTimer) {
+      clearTimeout(clipboardToastTimer);
+      clipboardToastTimer = undefined;
+    }
+    clipboardToastTimer = setTimeout(() => {
+      setClipboardToast(undefined);
+      clipboardToastTimer = undefined;
+    }, 1600);
+  };
+
+  const copySelectionToClipboard = async (selectedText?: string) => {
+    const selected = selectedText ?? renderer.getSelection()?.getSelectedText();
+    if (!selected || selected.length === 0) return;
+
+    try {
+      if (DEBUG_SELECTION) {
+        setCompactStatus(`[selection] copy start chars=${selected.length}`);
+      }
+      await copyTextToClipboard(selected, renderer);
+      showClipboardToast('Copied to clipboard');
+      if (DEBUG_SELECTION) {
+        setCompactStatus(`[selection] copy success chars=${selected.length}`);
+      }
+    } catch (error) {
+      showClipboardToast(`Copy failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (DEBUG_SELECTION) {
+        setCompactStatus(`[selection] copy error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } finally {
+      renderer.clearSelection();
+    }
+  };
+
+  useSelectionHandler((selection) => {
+    if (DEBUG_SELECTION) {
+      const preview = selection.getSelectedText();
+      setCompactStatus(`[selection] event dragging=${selection.isDragging ? '1' : '0'} chars=${preview.length}`);
+    }
+    if (selection.isDragging) return;
+    const selected = selection.getSelectedText();
+    if (!selected || selected.length === 0) return;
+    void copySelectionToClipboard(selected);
+  });
 
   const refreshConfigDialog = async () => {
     setConfigLoading(true);
     try {
-      const summaryLines = await runCommandCapture('/config');
+      const summary = await runCommandCapture('/config');
+      const summaryLines = summary.lines;
       const keep = parseValueLine(summaryLines, 'keepChannel');
       if (keep === 'on' || keep === 'off') {
         setConfigKeepChannel(keep);
@@ -427,7 +497,8 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
         setConfigRuntimeMode(runtimeMode);
       }
 
-      const agentLines = await runCommandCapture('/config defaultAgent');
+      const agentResult = await runCommandCapture('/config defaultAgent');
+      const agentLines = agentResult.lines;
       const availableLine = agentLines.find((line) => line.startsWith('Available:'));
       if (availableLine) {
         const parsed = availableLine
@@ -518,7 +589,8 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     if (configLoading()) return;
     const item = configItems()[configSelected()];
     if (!item) return;
-    const lines = await runCommandCapture(item.command);
+    const result = await runCommandCapture(item.command);
+    const lines = result.lines;
     const line = lines.find((entry) => entry.startsWith('✅') || entry.startsWith('⚠️')) || 'Config updated';
     setConfigMessage(line);
     await refreshConfigDialog();
@@ -575,11 +647,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       return;
     }
     closeCommandPalette();
-    const shouldClose = await props.input.onCommand(item.command, () => {});
-    if (shouldClose) {
-      renderer.destroy();
-      props.close();
-    }
+    await executeCommand(item.command);
   };
 
   const closeStopDialog = () => {
@@ -644,7 +712,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     if (!choice) return;
     closeNewDialog();
     if (choice.type === 'create') {
-      await props.input.onCommand('/new', () => {});
+      await executeCommand('/new');
       return;
     }
     await focusProject(choice.project);
@@ -694,11 +762,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       return;
     }
 
-    const shouldClose = await props.input.onCommand(command, () => {});
-    if (shouldClose) {
-      renderer.destroy();
-      props.close();
-    }
+    await executeCommand(command);
   };
 
   const canHandleRuntimeInput = () => {
@@ -1022,6 +1086,10 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     let stopped = false;
     let detachRuntimeFrame: (() => void) | undefined;
 
+    if (DEBUG_SELECTION) {
+      setCompactStatus('[selection-debug] enabled');
+    }
+
     const refreshProjects = async () => {
       try {
         const next = await props.input.getProjects();
@@ -1089,6 +1157,10 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       });
     }
 
+    renderer.console.onCopySelection = (text) => {
+      void copySelectionToClipboard(text);
+    };
+
     const cursorTimer = setInterval(() => {
       setCursorBlinkOn((value) => !value);
     }, 520);
@@ -1119,7 +1191,19 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       clearInterval(outputFallbackTimer);
       clearInterval(cursorTimer);
       detachRuntimeFrame?.();
+      if (clipboardToastTimer) {
+        clearTimeout(clipboardToastTimer);
+        clipboardToastTimer = undefined;
+      }
+      renderer.console.onCopySelection = undefined;
     });
+
+    const initial = props.input.initialCommand?.trim();
+    if (initial) {
+      setRuntimeInputMode(false);
+      void executeCommand(initial);
+    }
+
     setTimeout(() => {
       if (canHandleRuntimeInput()) {
         textarea?.blur();
@@ -1130,7 +1214,27 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   });
 
   return (
-    <box width={dims().width} height={dims().height} backgroundColor={palette.bg} flexDirection="column">
+    <box
+      width={dims().width}
+      height={dims().height}
+      backgroundColor={palette.bg}
+      flexDirection="column"
+      onMouseDown={(event) => {
+        if (DEBUG_SELECTION) {
+          setCompactStatus(`[mouse] down x=${event.x} y=${event.y} btn=${event.button}`);
+        }
+      }}
+      onMouseDrag={(event) => {
+        if (DEBUG_SELECTION) {
+          setCompactStatus(`[mouse] drag x=${event.x} y=${event.y}`);
+        }
+      }}
+      onMouseUp={(event) => {
+        if (DEBUG_SELECTION) {
+          setCompactStatus(`[mouse] up x=${event.x} y=${event.y} btn=${event.button}`);
+        }
+      }}
+    >
       <box flexGrow={1} backgroundColor={palette.bg} flexDirection="row" paddingLeft={1} paddingRight={1} paddingTop={1}>
         <box
           flexGrow={1}
@@ -1177,6 +1281,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           </box>
           <text fg={runtimeInputMode() ? palette.primary : palette.muted}>{runtimeInputMode() ? 'mode: runtime input' : 'mode: command input'}</text>
           <text fg={palette.muted}>{runtimeStatusLine()}</text>
+          <text fg={palette.muted}>{commandStatusLine()}</text>
           <text fg={prefixPending() ? palette.primary : palette.muted}>{`prefix: ${PREFIX_LABEL}${prefixPending() ? ' (waiting key)' : ''}`}</text>
           <text fg={palette.muted}>toggle: prefix + g</text>
           <text fg={palette.muted}>runtime: slash/ctrl pass to AI</text>
@@ -1300,6 +1405,21 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           </box>
         </box>
       </box>
+
+      <Show when={clipboardToast()}>
+        <box
+          position="absolute"
+          top={1}
+          right={2}
+          border
+          borderColor={palette.focus}
+          backgroundColor={palette.selectedBg}
+          paddingLeft={1}
+          paddingRight={1}
+        >
+          <text fg={palette.selectedFg}>{clipboardToast()}</text>
+        </box>
+      </Show>
 
       <Show when={newOpen()}>
         <box

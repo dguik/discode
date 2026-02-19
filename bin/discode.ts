@@ -16,6 +16,7 @@ import { attachCommand } from '../src/cli/commands/attach.js';
 import { stopCommand } from '../src/cli/commands/stop.js';
 import { tuiCommand } from '../src/cli/commands/tui.js';
 import { onboardCommand } from '../src/cli/commands/onboard.js';
+import { onboardWizardCommand } from '../src/cli/commands/onboard-wizard.js';
 import { startCommand } from '../src/cli/commands/start.js';
 import { configCommand } from '../src/cli/commands/config.js';
 import { statusCommand } from '../src/cli/commands/status.js';
@@ -236,7 +237,7 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
     .strict()
     .command(
       ['$0', 'tui'],
-      'Interactive terminal UI (supports /new)',
+      'Interactive terminal UI (supports /new, /onboard, /config)',
       (y: Argv) => addTmuxOptions(y),
       withCommandTelemetry('tui', async (argv: any) =>
         tuiCommand({
@@ -245,20 +246,48 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
     )
     .command(
       'onboard',
-      'One-time onboarding: save token, choose default AI CLI, configure OpenCode permission, choose telemetry opt-in',
+      'Full-screen onboarding wizard',
       (y: Argv) => y
         .option('platform', { type: 'string', choices: ['discord', 'slack'], describe: 'Messaging platform to use' })
         .option('runtime-mode', { type: 'string', choices: ['tmux', 'pty'], describe: 'Runtime backend to use' })
-        .option('token', { alias: 't', type: 'string', describe: 'Discord bot token (optional; prompt if omitted)' })
+        .option('token', { alias: 't', type: 'string', describe: 'Discord bot token (pre-fill value)' })
         .option('slack-bot-token', { type: 'string', describe: 'Slack bot token (xoxb-...)' })
-        .option('slack-app-token', { type: 'string', describe: 'Slack app-level token (xapp-...)' }),
-      withCommandTelemetry('onboard', async (argv: any) => onboardCommand({
-        platform: argv.platform,
-        runtimeMode: argv.runtimeMode,
-        token: argv.token,
-        slackBotToken: argv.slackBotToken,
-        slackAppToken: argv.slackAppToken,
-      }))
+        .option('slack-app-token', { type: 'string', describe: 'Slack app-level token (xapp-...)' })
+        .option('no-tui', { type: 'boolean', default: false, describe: 'Run legacy non-TUI onboarding flow' }),
+      withCommandTelemetry('onboard', async (argv: any) => {
+        if (!isInteractiveShell() || argv.noTui) {
+          await onboardCommand({
+            platform: argv.platform,
+            runtimeMode: argv.runtimeMode,
+            token: argv.token,
+            slackBotToken: argv.slackBotToken,
+            slackAppToken: argv.slackAppToken,
+          });
+          return;
+        }
+
+        const result = await onboardWizardCommand({
+          platform: argv.platform,
+          runtimeMode: argv.runtimeMode,
+          token: argv.token,
+          slackBotToken: argv.slackBotToken,
+          slackAppToken: argv.slackAppToken,
+        });
+        if (!result) return;
+
+        await onboardCommand({
+          platform: result.platform,
+          runtimeMode: result.runtimeMode,
+          token: result.token,
+          slackBotToken: result.slackBotToken,
+          slackAppToken: result.slackAppToken,
+          defaultAgentCli: result.defaultAgentCli,
+          telemetryEnabled: result.telemetryEnabled,
+          opencodePermissionMode: result.opencodePermissionMode,
+          nonInteractive: true,
+          exitOnError: false,
+        });
+      })
     )
     .command(
       'setup [token]',
