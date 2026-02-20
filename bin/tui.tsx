@@ -809,14 +809,14 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     if (name === 'pageup') return '\x1b[5~';
     if (name === 'pagedown') return '\x1b[6~';
 
-    const sequence = evt.sequence || '';
-    if (!evt.meta && sequence.length > 0) {
-      return sequence;
-    }
-
     if (evt.ctrl && name.length === 1 && /^[a-z]$/i.test(name)) {
       const code = name.toLowerCase().charCodeAt(0) - 96;
       if (code >= 1 && code <= 26) return String.fromCharCode(code);
+    }
+
+    const sequence = evt.sequence || '';
+    if (!evt.meta && sequence.length > 0) {
+      return sequence;
     }
 
     return null;
