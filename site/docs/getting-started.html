@@ -73,6 +73,35 @@
               </p>
             </section>
 
+            <section class="doc-section" id="slack-token">
+              <h2>Issue a Slack Bot Token (for Slack)</h2>
+              <ol>
+                <li>
+                  In <a href="https://api.slack.com/apps" target="_blank" rel="noreferrer">Slack App Dashboard</a>,
+                  click <strong>Create New App</strong> - <strong>From scratch</strong>.
+                </li>
+                <li>
+                  In <strong>OAuth &amp; Permissions</strong> - <strong>Bot Token Scopes</strong>, add
+                  <code>chat:write</code>, <code>channels:history</code>, <code>channels:read</code>,
+                  <code>channels:manage</code>, <code>groups:read</code>, <code>files:read</code>,
+                  <code>files:write</code>, <code>reactions:read</code>, and <code>reactions:write</code>.
+                </li>
+                <li>
+                  Open <strong>Install App</strong> - <strong>Install to Workspace</strong>, then copy the
+                  <strong>Bot User OAuth Token</strong> (<code>xoxb-...</code>).
+                </li>
+                <li>
+                  Enable <strong>Socket Mode</strong>, create an App-Level Token with
+                  <code>connections:write</code>, and copy the <code>xapp-...</code> token.
+                </li>
+              </ol>
+              <pre class="command"><code>discode onboard --platform slack</code></pre>
+              <p class="callout">
+                During onboarding, enter both <code>xoxb-...</code> and <code>xapp-...</code>. Never commit or
+                share these tokens.
+              </p>
+            </section>
+
             <section class="doc-section" id="install">
               <h2>Install Discode</h2>
               <p>Choose one method:</p>
