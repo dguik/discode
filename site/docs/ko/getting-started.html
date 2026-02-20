@@ -50,6 +50,7 @@
             <a href="./getting-started.html" aria-current="page">시작하기</a>
             <a href="./cli-reference.html">CLI 레퍼런스</a>
             <a href="./discord-bot.html">Discord 봇 설정</a>
+            <a href="./slack-bot.html">Slack 봇 설정</a>
             <a href="./release.html">릴리즈 가이드</a>
           </aside>
 
@@ -74,35 +75,9 @@
                 아직 봇 설정을 하지 않았다면
                 <a href="./discord-bot.html">Discord 봇 설정</a>을 먼저 진행하세요.
               </p>
-            </section>
-
-            <section class="doc-section" id="slack-token">
-              <h2>Slack Bot Token 발급 (Slack 사용 시)</h2>
-              <ol>
-                <li>
-                  <a href="https://api.slack.com/apps" target="_blank" rel="noreferrer">Slack App 관리 페이지</a>에서
-                  <strong>Create New App</strong> - <strong>From scratch</strong>로 앱을 생성합니다.
-                </li>
-                <li>
-                  <strong>OAuth &amp; Permissions</strong> - <strong>Bot Token Scopes</strong>에서
-                  <code>chat:write</code>, <code>channels:history</code>, <code>channels:read</code>,
-                  <code>channels:manage</code>, <code>groups:read</code>, <code>files:read</code>,
-                  <code>files:write</code>, <code>reactions:read</code>, <code>reactions:write</code>
-                  스코프를 추가합니다.
-                </li>
-                <li>
-                  <strong>Install App</strong> - <strong>Install to Workspace</strong>를 눌러 설치한 뒤,
-                  <code>xoxb-...</code> 형태의 <strong>Bot User OAuth Token</strong>을 복사합니다.
-                </li>
-                <li>
-                  <strong>Socket Mode</strong>를 켜고 <code>connections:write</code> 권한으로
-                  <strong>App-Level Token</strong>을 발급해 <code>xapp-...</code> 토큰도 복사합니다.
-                </li>
-              </ol>
-              <pre class="command"><code>discode onboard --platform slack</code></pre>
-              <p class="callout">
-                온보딩에서 <code>xoxb-...</code>와 <code>xapp-...</code>를 입력하면 됩니다. 토큰은 저장소에
-                커밋하거나 외부에 공유하지 마세요.
+              <p>
+                Slack을 사용한다면 <a href="./slack-bot.html">Slack 봇 설정</a>에서
+                <code>xoxb-...</code>, <code>xapp-...</code> 토큰 발급 절차를 먼저 진행하세요.
               </p>
             </section>
 
