@@ -22,9 +22,19 @@ import {
 } from './state/instances.js';
 import { installFileInstruction } from './infra/file-instruction.js';
 import { installDiscodeSendScript } from './infra/send-script.js';
-import { buildAgentLaunchEnv, buildExportPrefix, withClaudePluginDir } from './policy/agent-launch.js';
+import { buildAgentLaunchEnv, buildContainerEnv, buildExportPrefix, withClaudePluginDir } from './policy/agent-launch.js';
 import { installAgentIntegration } from './policy/agent-integration.js';
 import { resolveProjectWindowName, toProjectScopedName } from './policy/window-naming.js';
+import {
+  isDockerAvailable,
+  createContainer,
+  buildDockerStartCommand,
+  injectCredentials,
+  injectChromeMcpBridge,
+  ChromeMcpProxy,
+  WORKSPACE_DIR,
+} from './container/index.js';
+import { ContainerSync } from './container/sync.js';
 import { PendingMessageTracker } from './bridge/pending-message-tracker.js';
 import { BridgeProjectBootstrap } from './bridge/project-bootstrap.js';
 import { BridgeMessageRouter } from './bridge/message-router.js';
@@ -52,6 +62,10 @@ export class AgentBridge {
   private stateManager: IStateManager;
   private registry: AgentRegistry;
   private bridgeConfig: BridgeConfig;
+  /** Active container sync instances keyed by `projectName#instanceId`. */
+  private containerSyncs = new Map<string, ContainerSync>();
+  /** TCP proxy bridging Chrome extension socket to containers. */
+  private chromeMcpProxy: ChromeMcpProxy | null = null;
 
   constructor(deps?: AgentBridgeDeps) {
     this.bridgeConfig = deps?.config || defaultConfig;
@@ -128,6 +142,15 @@ export class AgentBridge {
 
     await this.messaging.connect();
     console.log('✅ Messaging client connected');
+
+    // Start Chrome MCP proxy if a Chrome extension socket exists.
+    // This bridges the host's Chrome extension Unix socket to TCP
+    // so containers can reach it via host.docker.internal.
+    const proxy = new ChromeMcpProxy({ port: (this.bridgeConfig.hookServerPort || 18470) + 1 });
+    if (await proxy.start()) {
+      this.chromeMcpProxy = proxy;
+      console.log(`🌐 Chrome MCP proxy listening on port ${proxy.getPort()}`);
+    }
 
     this.projectBootstrap.bootstrapProjects();
     this.restoreRuntimeWindowsIfNeeded();
@@ -215,21 +238,90 @@ export class AgentBridge {
       // Non-critical.
     }
 
-    const exportPrefix = buildExportPrefix(buildAgentLaunchEnv({
-      projectName,
-      port,
-      agentType: adapter.config.name,
-      instanceId,
-      permissionAllow: adapter.config.name === 'opencode' && permissionAllow,
-    }));
-    const startCommand = withClaudePluginDir(adapter.getStartCommand(projectPath, permissionAllow), integration.claudePluginDir);
+    const containerMode = !!this.bridgeConfig.container?.enabled;
+    const socketPath = this.bridgeConfig.container?.socketPath || undefined;
+    let containerId: string | undefined;
+    let containerName: string | undefined;
 
-    if (!options?.skipRuntimeStart) {
-      this.runtime.startAgentInWindow(
-        tmuxSession,
-        windowName,
-        `${exportPrefix}${startCommand}`
-      );
+    if (containerMode) {
+      // Container isolation mode: create Docker container, use `docker start -ai` as command
+      if (!isDockerAvailable(socketPath)) {
+        throw new Error('Container mode is enabled but Docker is not available. Is Docker running?');
+      }
+
+      containerName = `discode-${projectName}-${instanceId}`.replace(/[^a-zA-Z0-9_.-]/g, '-');
+      const containerEnv = buildContainerEnv({
+        projectName,
+        port,
+        agentType: adapter.config.name,
+        instanceId,
+        permissionAllow: adapter.config.name === 'opencode' && permissionAllow,
+      });
+
+      // Build agent command for execution inside the container
+      const containerAgentCmd = adapter.getStartCommand(WORKSPACE_DIR, permissionAllow);
+      const containerPluginDir = '/home/coder/.claude/plugins/discode-claude-bridge';
+      const agentCommand = withClaudePluginDir(containerAgentCmd, integration.claudePluginDir ? containerPluginDir : undefined);
+
+      // Mount host plugin dir into container (read-only) if available
+      const volumes: string[] = [];
+      if (integration.claudePluginDir) {
+        volumes.push(`${integration.claudePluginDir}:${containerPluginDir}:ro`);
+      }
+
+      containerId = createContainer({
+        containerName,
+        projectPath,
+        socketPath,
+        env: containerEnv,
+        command: agentCommand,
+        volumes,
+      });
+
+      // Inject Claude credentials into the container
+      injectCredentials(containerId, socketPath);
+
+      // Always inject Chrome MCP bridge config so the container can reach
+      // the proxy that the daemon runs on hookServerPort + 1.
+      const chromeMcpPort = (this.bridgeConfig.hookServerPort || 18470) + 1;
+      if (injectChromeMcpBridge(containerId, chromeMcpPort, adapter.config.name, socketPath)) {
+        console.log('🌐 Injected Chrome MCP bridge into container');
+      }
+
+      // The runtime command becomes `docker start -ai <containerId>`
+      const dockerStartCmd = buildDockerStartCommand(containerId, socketPath);
+
+      if (!options?.skipRuntimeStart) {
+        this.runtime.startAgentInWindow(tmuxSession, windowName, dockerStartCmd);
+      }
+
+      // Start periodic file sync
+      const sync = new ContainerSync({
+        containerId,
+        projectPath,
+        socketPath,
+        intervalMs: this.bridgeConfig.container?.syncIntervalMs,
+      });
+      sync.start();
+      this.containerSyncs.set(`${projectName}#${instanceId}`, sync);
+    } else {
+      // Standard mode: run agent command directly
+      const exportPrefix = buildExportPrefix(buildAgentLaunchEnv({
+        projectName,
+        port,
+        agentType: adapter.config.name,
+        instanceId,
+        permissionAllow: adapter.config.name === 'opencode' && permissionAllow,
+      }));
+      const startCommand = withClaudePluginDir(adapter.getStartCommand(projectPath, permissionAllow), integration.claudePluginDir);
+
+      if (!options?.skipRuntimeStart) {
+        this.runtime.startAgentInWindow(
+          tmuxSession,
+          windowName,
+          `${exportPrefix}${startCommand}`
+        );
+      }
     }
 
     // Save state
@@ -251,6 +343,7 @@ export class AgentBridge {
         tmuxWindow: windowName,
         channelId,
         eventHook: adapter.config.name === 'opencode' || integration.eventHookInstalled,
+        ...(containerMode ? { containerMode: true, containerId, containerName } : {}),
       },
     };
     const projectState = normalizeProjectState({
@@ -272,6 +365,18 @@ export class AgentBridge {
   }
 
   async stop(): Promise<void> {
+    // Stop Chrome MCP proxy
+    if (this.chromeMcpProxy) {
+      this.chromeMcpProxy.stop();
+      this.chromeMcpProxy = null;
+    }
+
+    // Stop all container syncs
+    for (const [, sync] of this.containerSyncs) {
+      sync.stop();
+    }
+    this.containerSyncs.clear();
+
     this.streamServer.stop();
     this.hookServer.stop();
     this.runtime.dispose?.('SIGTERM');
@@ -283,6 +388,7 @@ export class AgentBridge {
 
     const port = this.bridgeConfig.hookServerPort || 18470;
     const permissionAllow = this.bridgeConfig.opencode?.permissionMode === 'allow';
+    const socketPath = this.bridgeConfig.container?.socketPath || undefined;
 
     for (const raw of this.stateManager.listProjects()) {
       const project = normalizeProjectState(raw);
@@ -300,6 +406,23 @@ export class AgentBridge {
         );
 
         if (this.runtime.windowExists(project.tmuxSession, windowName)) continue;
+
+        // Container-mode instances: re-attach using docker start -ai
+        if (instance.containerMode && instance.containerId) {
+          const dockerStartCmd = buildDockerStartCommand(instance.containerId, socketPath);
+          this.runtime.startAgentInWindow(project.tmuxSession, windowName, dockerStartCmd);
+
+          // Restart file sync
+          const sync = new ContainerSync({
+            containerId: instance.containerId,
+            projectPath: project.projectPath,
+            socketPath,
+            intervalMs: this.bridgeConfig.container?.syncIntervalMs,
+          });
+          sync.start();
+          this.containerSyncs.set(`${project.projectName}#${instance.instanceId}`, sync);
+          continue;
+        }
 
         const integration = installAgentIntegration(instance.agentType, project.projectPath, 'reinstall');
         const startCommand = withClaudePluginDir(

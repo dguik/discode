@@ -21,6 +21,8 @@ export async function configCommand(options: {
   slackAppToken?: string;
   platform?: string;
   runtimeMode?: 'tmux' | 'pty';
+  containerEnabled?: boolean;
+  containerSocketPath?: string;
   telemetry?: 'on' | 'off';
   telemetryEndpoint?: string;
 }) {
@@ -42,6 +44,10 @@ export async function configCommand(options: {
     console.log(chalk.gray(`   Default AI CLI: ${config.defaultAgentCli || '(not set)'}`));
     console.log(chalk.gray(`   OpenCode Permission Mode: ${config.opencode?.permissionMode || '(not set)'}`));
     console.log(chalk.gray(`   Runtime Mode: ${config.runtimeMode || 'tmux'}`));
+    console.log(chalk.gray(`   Container Isolation: ${config.container?.enabled ? 'on' : 'off'}`));
+    if (config.container?.socketPath) {
+      console.log(chalk.gray(`   Container Socket: ${config.container.socketPath}`));
+    }
     console.log(chalk.gray(`   Keep Channel On Stop: ${getConfigValue('keepChannelOnStop') ? 'on' : 'off'}`));
     console.log(chalk.gray(`   Telemetry: ${telemetry.enabled ? 'on' : 'off'}`));
     console.log(chalk.gray(`   Telemetry Endpoint: ${telemetry.endpoint || '(not set)'}`));
@@ -166,6 +172,18 @@ export async function configCommand(options: {
   if (options.opencodePermission) {
     saveConfig({ opencodePermissionMode: options.opencodePermission });
     console.log(chalk.green(`✅ OpenCode permission mode saved: ${options.opencodePermission}`));
+    updated = true;
+  }
+
+  if (options.containerEnabled !== undefined) {
+    saveConfig({ containerEnabled: options.containerEnabled });
+    console.log(chalk.green(`✅ Container isolation: ${options.containerEnabled ? 'enabled' : 'disabled'}`));
+    updated = true;
+  }
+
+  if (options.containerSocketPath) {
+    saveConfig({ containerSocketPath: options.containerSocketPath });
+    console.log(chalk.green(`✅ Container socket path saved: ${options.containerSocketPath}`));
     updated = true;
   }
 

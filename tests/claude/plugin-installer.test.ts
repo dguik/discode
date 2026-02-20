@@ -1,5 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, rmSync } from 'fs';
-import { join } from 'path';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, rmSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -85,5 +85,60 @@ describe('claude plugin installer', () => {
 
     const skillPath = join(pluginDir, 'skills', 'discode-send', 'SKILL.md');
     expect(existsSync(skillPath)).toBe(true);
+  });
+
+  describe('compiled binary resource resolution', () => {
+    let originalExecPath: string;
+
+    beforeEach(() => {
+      originalExecPath = process.execPath;
+    });
+
+    afterEach(() => {
+      process.execPath = originalExecPath;
+    });
+
+    it('resolves plugin source from process.execPath-based resources path', () => {
+      // Simulate compiled binary layout: bin/discode + resources/claude-plugin/
+      const binaryRoot = join(tempDir, 'binary-root');
+      const binDir = join(binaryRoot, 'bin');
+      const resourcesDir = join(binaryRoot, 'resources', 'claude-plugin');
+
+      mkdirSync(binDir, { recursive: true });
+      cpSync(getPluginSourceDir(), resourcesDir, { recursive: true });
+      writeFileSync(join(binDir, 'discode'), '');
+
+      process.execPath = join(binDir, 'discode');
+
+      // Verify the process.execPath-based candidate resolves correctly
+      const candidate = join(dirname(process.execPath), '..', 'resources', 'claude-plugin');
+      expect(existsSync(candidate)).toBe(true);
+      expect(existsSync(join(candidate, '.claude-plugin', 'plugin.json'))).toBe(true);
+      expect(existsSync(join(candidate, 'hooks', 'hooks.json'))).toBe(true);
+      expect(existsSync(join(candidate, 'scripts', CLAUDE_STOP_HOOK_FILENAME))).toBe(true);
+    });
+
+    it('installClaudePlugin works from binary resources layout', () => {
+      // Create binary layout with plugin resources
+      const binaryRoot = join(tempDir, 'binary-root');
+      const binDir = join(binaryRoot, 'bin');
+      const resourcesDir = join(binaryRoot, 'resources', 'claude-plugin');
+      const pluginDir = join(tempDir, 'installed-plugin');
+
+      mkdirSync(binDir, { recursive: true });
+      cpSync(getPluginSourceDir(), resourcesDir, { recursive: true });
+      writeFileSync(join(binDir, 'discode'), '');
+
+      process.execPath = join(binDir, 'discode');
+
+      // Install from the binary resources path
+      const result = installClaudePlugin(undefined, pluginDir);
+      expect(result).toBe(pluginDir);
+      expect(existsSync(join(pluginDir, '.claude-plugin', 'plugin.json'))).toBe(true);
+      expect(existsSync(join(pluginDir, 'scripts', CLAUDE_STOP_HOOK_FILENAME))).toBe(true);
+
+      const stats = statSync(join(pluginDir, 'scripts', CLAUDE_STOP_HOOK_FILENAME));
+      expect(stats.mode & 0o755).toBe(0o755);
+    });
   });
 });

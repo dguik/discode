@@ -1,5 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'fs';
-import { join } from 'path';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -70,6 +70,61 @@ describe('gemini hook installer', () => {
       .flatMap((group) => group.hooks || [])
       .filter((hook) => hook.name === GEMINI_HOOK_NAME);
     expect(entries).toHaveLength(1);
+  });
+
+  describe('compiled binary resource resolution', () => {
+    let originalExecPath: string;
+
+    beforeEach(() => {
+      originalExecPath = process.execPath;
+    });
+
+    afterEach(() => {
+      process.execPath = originalExecPath;
+    });
+
+    it('resolves hook source from process.execPath-based resources path', () => {
+      // Simulate compiled binary layout: bin/discode + resources/gemini-hook/
+      const binaryRoot = join(tempDir, 'binary-root');
+      const binDir = join(binaryRoot, 'bin');
+      const resourcesDir = join(binaryRoot, 'resources', 'gemini-hook');
+
+      mkdirSync(binDir, { recursive: true });
+      mkdirSync(resourcesDir, { recursive: true });
+      copyFileSync(getGeminiHookSourcePath(), join(resourcesDir, GEMINI_AFTER_AGENT_HOOK_FILENAME));
+      writeFileSync(join(binDir, 'discode'), '');
+
+      process.execPath = join(binDir, 'discode');
+
+      const candidate = join(dirname(process.execPath), '..', 'resources', 'gemini-hook', GEMINI_AFTER_AGENT_HOOK_FILENAME);
+      expect(existsSync(candidate)).toBe(true);
+
+      const content = readFileSync(candidate, 'utf-8');
+      expect(content).toContain('/opencode-event');
+    });
+
+    it('installGeminiHook works from binary resources layout', () => {
+      const binaryRoot = join(tempDir, 'binary-root');
+      const binDir = join(binaryRoot, 'bin');
+      const resourcesDir = join(binaryRoot, 'resources', 'gemini-hook');
+      const targetDir = join(tempDir, 'gemini-config');
+
+      mkdirSync(binDir, { recursive: true });
+      mkdirSync(resourcesDir, { recursive: true });
+      copyFileSync(getGeminiHookSourcePath(), join(resourcesDir, GEMINI_AFTER_AGENT_HOOK_FILENAME));
+      writeFileSync(join(binDir, 'discode'), '');
+
+      process.execPath = join(binDir, 'discode');
+
+      const hookPath = installGeminiHook(undefined, targetDir);
+      expect(existsSync(hookPath)).toBe(true);
+
+      const mode = statSync(hookPath).mode & 0o755;
+      expect(mode).toBe(0o755);
+
+      const settingsPath = join(targetDir, 'settings.json');
+      expect(existsSync(settingsPath)).toBe(true);
+    });
   });
 
   it('removeGeminiHook removes hook file and settings entry', () => {

@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { homedir } from 'os';
 
 export const OPENCODE_PLUGIN_FILENAME = 'agent-opencode-bridge-plugin.ts';
@@ -13,6 +13,7 @@ export function getPluginSourcePath(): string {
     join(import.meta.dirname, 'plugin', OPENCODE_PLUGIN_FILENAME),             // source layout: src/opencode/
     join(import.meta.dirname, 'opencode', 'plugin', OPENCODE_PLUGIN_FILENAME), // bundled chunk in dist/
     join(import.meta.dirname, '../opencode', 'plugin', OPENCODE_PLUGIN_FILENAME), // bundled entry in dist/src/
+    join(dirname(process.execPath), '..', 'resources', 'opencode-plugin', OPENCODE_PLUGIN_FILENAME), // compiled binary
   ];
   return candidates.find(p => existsSync(p)) ?? candidates[0];
 }

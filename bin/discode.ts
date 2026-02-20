@@ -318,12 +318,14 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
         .positional('agent', { type: 'string', describe: 'Agent to use (claude, gemini, opencode)' })
         .option('name', { alias: 'n', type: 'string', describe: 'Project name (defaults to directory name)' })
         .option('instance', { type: 'string', describe: 'Agent instance ID (e.g. gemini-2)' })
-        .option('attach', { type: 'boolean', default: true, describe: 'Attach to tmux session after setup' }),
+        .option('attach', { type: 'boolean', default: true, describe: 'Attach to tmux session after setup' })
+        .option('container', { type: 'boolean', describe: 'Run agent inside a Docker container for isolation' }),
       withCommandTelemetry('new', async (argv: any) =>
         newCommand(argv.agent, {
           name: argv.name,
           instance: argv.instance,
           attach: argv.attach,
+          container: argv.container,
           tmuxSharedSessionName: argv.tmuxSharedSessionName,
         }))
     )
@@ -345,6 +347,8 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
           choices: ['allow', 'default'],
           describe: 'Set OpenCode permission mode',
         })
+        .option('container', { type: 'boolean', describe: 'Enable/disable Docker container isolation' })
+        .option('container-socket-path', { type: 'string', describe: 'Docker socket path override' })
         .option('telemetry', {
           type: 'string',
           choices: ['on', 'off'],
@@ -368,6 +372,8 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
           runtimeMode: argv.runtimeMode,
           slackBotToken: argv.slackBotToken,
           slackAppToken: argv.slackAppToken,
+          containerEnabled: argv.container,
+          containerSocketPath: argv.containerSocketPath,
           telemetry: argv.telemetry,
           telemetryEndpoint: argv.telemetryEndpoint,
         }))

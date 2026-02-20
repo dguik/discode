@@ -1,6 +1,6 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { escapeShellArg } from '../infra/shell-escape.js';
 
 export const GEMINI_HOOK_NAME = 'discode-gemini-after-agent';
@@ -159,6 +159,7 @@ export function getGeminiHookSourcePath(): string {
     join(import.meta.dirname, 'hook', GEMINI_AFTER_AGENT_HOOK_FILENAME),             // source layout: src/gemini/
     join(import.meta.dirname, 'gemini', 'hook', GEMINI_AFTER_AGENT_HOOK_FILENAME),   // bundled chunk in dist/
     join(import.meta.dirname, '../gemini', 'hook', GEMINI_AFTER_AGENT_HOOK_FILENAME), // bundled entry in dist/src/
+    join(dirname(process.execPath), '..', 'resources', 'gemini-hook', GEMINI_AFTER_AGENT_HOOK_FILENAME), // compiled binary
   ];
   return candidates.find(p => existsSync(p)) ?? candidates[0];
 }
