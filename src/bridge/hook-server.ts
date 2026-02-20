@@ -498,9 +498,112 @@ export class BridgeHookServer {
       return true;
     }
 
+    if (eventType === 'session.notification') {
+      const notificationType = typeof event.notificationType === 'string' ? event.notificationType : 'unknown';
+      const emojiMap: Record<string, string> = {
+        permission_prompt: '\uD83D\uDD10',
+        idle_prompt: '\uD83D\uDCA4',
+        auth_success: '\uD83D\uDD11',
+        elicitation_dialog: '\u2753',
+      };
+      const emoji = emojiMap[notificationType] || '\uD83D\uDD14';
+      const msg = text || notificationType;
+      await this.deps.messaging.sendToChannel(channelId, `${emoji} ${msg}`);
+
+      // Send prompt details (AskUserQuestion choices, ExitPlanMode) extracted from transcript
+      const promptText = typeof event.promptText === 'string' ? event.promptText.trim() : '';
+      if (promptText) {
+        const promptSplit = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
+        const promptChunks = promptSplit(promptText);
+        for (const chunk of promptChunks) {
+          if (chunk.trim().length > 0) {
+            await this.deps.messaging.sendToChannel(channelId, chunk);
+          }
+        }
+      }
+
+      return true;
+    }
+
+    if (eventType === 'session.start') {
+      const source = typeof event.source === 'string' ? event.source : 'unknown';
+      const model = typeof event.model === 'string' ? event.model : '';
+      const modelSuffix = model ? `, ${model}` : '';
+      await this.deps.messaging.sendToChannel(channelId, `\u25B6\uFE0F Session started (${source}${modelSuffix})`);
+      return true;
+    }
+
+    if (eventType === 'session.end') {
+      const reason = typeof event.reason === 'string' ? event.reason : 'unknown';
+      await this.deps.messaging.sendToChannel(channelId, `\u23F9\uFE0F Session ended (${reason})`);
+      return true;
+    }
+
+    // Auto-create pending entry for tmux-initiated prompts (no Slack message triggered markPending)
+    if (
+      (eventType === 'tool.activity' || eventType === 'session.idle') &&
+      !this.deps.pendingTracker.hasPending(projectName, instance?.agentType || agentType, instance?.instanceId)
+    ) {
+      await this.deps.pendingTracker.ensurePending(projectName, instance?.agentType || agentType, channelId, instance?.instanceId);
+    }
+
+    if (eventType === 'tool.activity') {
+      const pending = this.deps.pendingTracker.getPending(projectName, instance?.agentType || agentType, instance?.instanceId);
+      if (text && pending?.startMessageId && this.deps.messaging.replyInThread) {
+        try {
+          await this.deps.messaging.replyInThread(pending.channelId, pending.startMessageId, text);
+        } catch (error) {
+          console.warn('Failed to post tool activity as thread reply:', error);
+        }
+      }
+      return true;
+    }
+
     if (eventType === 'session.idle') {
+      // Grab the pending message info BEFORE markCompleted deletes it (needed for thread replies)
+      const pending = this.deps.pendingTracker.getPending(projectName, instance?.agentType || agentType, instance?.instanceId);
+
       // Fire reaction update in background – don't block message delivery
       this.deps.pendingTracker.markCompleted(projectName, instance?.agentType || agentType, instance?.instanceId).catch(() => {});
+
+      // Post intermediate text (assistant text from before tool calls) as thread reply
+      const intermediateText = typeof event.intermediateText === 'string' ? event.intermediateText.trim() : '';
+      if (intermediateText && pending?.startMessageId && this.deps.messaging.replyInThread) {
+        try {
+          const split = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
+          const chunks = split(intermediateText);
+          for (const chunk of chunks) {
+            if (chunk.trim().length > 0) {
+              await this.deps.messaging.replyInThread(pending.channelId, pending.startMessageId, chunk);
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to post intermediate text as thread reply:', error);
+        }
+      }
+
+      // Post thinking as thread reply under the start message
+      const thinking = typeof event.thinking === 'string' ? event.thinking.trim() : '';
+      if (thinking && pending?.startMessageId && this.deps.messaging.replyInThread) {
+        try {
+          const maxLen = 12000;
+          let thinkingText = thinking.length > maxLen
+            ? thinking.substring(0, maxLen) + '\n\n_(truncated)_'
+            : thinking;
+          thinkingText = `:brain: *Reasoning*\n\`\`\`\n${thinkingText}\n\`\`\``;
+
+          const split = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
+          const thinkingChunks = split(thinkingText);
+          for (const chunk of thinkingChunks) {
+            if (chunk.trim().length > 0) {
+              await this.deps.messaging.replyInThread(pending.channelId, pending.startMessageId, chunk);
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to post thinking as thread reply:', error);
+        }
+      }
+
       if (text && text.trim().length > 0) {
         const trimmed = text.trim();
         // Use turnText (all assistant text from the turn) for file path extraction
@@ -525,6 +628,19 @@ export class BridgeHookServer {
           await this.deps.messaging.sendToChannelWithFiles(channelId, '', filePaths);
         }
       }
+
+      // Send prompt choices (AskUserQuestion, ExitPlanMode) as additional message
+      const promptText = typeof event.promptText === 'string' ? event.promptText.trim() : '';
+      if (promptText) {
+        const promptSplit = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
+        const promptChunks = promptSplit(promptText);
+        for (const chunk of promptChunks) {
+          if (chunk.trim().length > 0) {
+            await this.deps.messaging.sendToChannel(channelId, chunk);
+          }
+        }
+      }
+
       return true;
     }
 
