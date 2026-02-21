@@ -155,8 +155,8 @@ function OnboardWizardApp(props: {
     }
     if (step === 'runtimeMode') {
       return [
-        { value: 'pty', label: 'pty (recommended)', description: 'Simple local runtime mode' },
-        { value: 'tmux', label: 'tmux', description: 'Advanced tmux-based runtime mode' },
+        { value: 'tmux', label: 'tmux (recommended)', description: 'Advanced tmux-based runtime mode' },
+        { value: 'pty', label: 'pty', description: 'Simple local runtime mode' },
       ];
     }
     if (step === 'defaultAgent') {
