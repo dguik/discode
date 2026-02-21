@@ -857,11 +857,6 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       evt.preventDefault();
       setPrefixPending(false);
 
-      if (evt.name === 'g') {
-        setRuntimeInputMode(!runtimeInputMode());
-        return;
-      }
-
       if (evt.name === 'c') {
         renderer.destroy();
         props.close();
@@ -1323,11 +1318,10 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           <text fg={palette.muted}>{runtimeStatusLine()}</text>
           <text fg={palette.muted}>{commandStatusLine()}</text>
           <text fg={prefixPending() ? palette.primary : palette.muted}>{`prefix: ${PREFIX_LABEL}${prefixPending() ? ' (waiting key)' : ''}`}</text>
-          <text fg={palette.muted}>toggle: prefix + g</text>
           <text fg={palette.muted}>runtime: slash/ctrl pass to AI</text>
           <text fg={palette.muted}>window: prefix + 1..9</text>
           <text fg={palette.muted}>palette: Ctrl+Shift+P</text>
-          <text fg={palette.muted}>commands: prefix + g, then / + Enter</text>
+          <text fg={palette.muted}>commands: / + Enter</text>
 
           <box flexDirection="column" marginTop={1}>
             <text fg={palette.primary} attributes={TextAttributes.BOLD}>Current Sessions</text>
@@ -1402,7 +1396,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
                 maxHeight={4}
                 onSubmit={submit}
                 keyBindings={[{ name: 'return', action: 'submit' }]}
-                placeholder={runtimeInputMode() ? `Press ${PREFIX_LABEL} then g to enter command mode` : 'Type a command'}
+                placeholder={runtimeInputMode() ? 'Type /command and press Enter' : 'Type a command'}
                 textColor={palette.text}
                 focusedTextColor={palette.text}
                 cursorColor={palette.primary}
