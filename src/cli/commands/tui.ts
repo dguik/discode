@@ -1170,8 +1170,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     handoffToBunRuntime();
   }
 
-  const preloadModule = '@opentui/solid/preload';
-  await import(preloadModule);
+  await import('@opentui/solid/preload');
   const tmuxPaneTarget = process.env.TMUX_PANE;
   const startedFromTmux = !!process.env.TMUX;
   if (startedFromTmux) {

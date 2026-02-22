@@ -76,8 +76,7 @@ export async function onboardWizardCommand(options: OnboardWizardCliOptions): Pr
     handoffToBunRuntime();
   }
 
-  const preloadModule = '@opentui/solid/preload';
-  await import(preloadModule);
+  await import('@opentui/solid/preload');
 
   const mod = await loadOnboardTuiModule();
   if (!mod.runOnboardTui) {
