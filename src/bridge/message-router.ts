@@ -272,6 +272,12 @@ export class BridgeMessageRouter {
         return;
       }
 
+      // If hook events are active, defer to hook handler instead of capturing raw buffer
+      if (this.deps.pendingTracker.isHookActive(projectName, agentType, instanceKey)) {
+        console.log(`${tag} fallback: hook events active, deferring to hook handler`);
+        return;
+      }
+
       const snapshot = this.captureWindowText(sessionName, windowName);
       if (!snapshot) {
         console.log(`${tag} fallback check #${checkCount}: empty buffer, skipping`);

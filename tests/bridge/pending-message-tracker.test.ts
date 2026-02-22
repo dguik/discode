@@ -283,6 +283,72 @@ describe('PendingMessageTracker', () => {
     expect(entry!.startMessageId).toBeUndefined();
   });
 
+  // ── hookActive ──────────────────────────────────────────────────
+
+  it('setHookActive marks pending entry as hook-active', async () => {
+    const messaging = createMockMessaging();
+    const tracker = new PendingMessageTracker(messaging as MessagingClient);
+
+    await tracker.markPending('proj', 'claude', 'ch-1', 'msg-1');
+    expect(tracker.isHookActive('proj', 'claude')).toBe(false);
+
+    tracker.setHookActive('proj', 'claude');
+    expect(tracker.isHookActive('proj', 'claude')).toBe(true);
+  });
+
+  it('isHookActive returns false when no pending entry', () => {
+    const messaging = createMockMessaging();
+    const tracker = new PendingMessageTracker(messaging as MessagingClient);
+
+    expect(tracker.isHookActive('proj', 'claude')).toBe(false);
+  });
+
+  it('setHookActive is no-op when no pending entry', () => {
+    const messaging = createMockMessaging();
+    const tracker = new PendingMessageTracker(messaging as MessagingClient);
+
+    // Should not throw
+    tracker.setHookActive('proj', 'claude');
+    expect(tracker.isHookActive('proj', 'claude')).toBe(false);
+  });
+
+  it('hookActive flag is cleared when markCompleted removes pending entry', async () => {
+    const messaging = createMockMessaging();
+    const tracker = new PendingMessageTracker(messaging as MessagingClient);
+
+    await tracker.markPending('proj', 'claude', 'ch-1', 'msg-1');
+    tracker.setHookActive('proj', 'claude');
+    expect(tracker.isHookActive('proj', 'claude')).toBe(true);
+
+    await tracker.markCompleted('proj', 'claude');
+    // Active map is cleared, so isHookActive should return false
+    expect(tracker.isHookActive('proj', 'claude')).toBe(false);
+  });
+
+  it('hookActive flag is cleared when markPending replaces entry', async () => {
+    const messaging = createMockMessaging();
+    const tracker = new PendingMessageTracker(messaging as MessagingClient);
+
+    await tracker.markPending('proj', 'claude', 'ch-1', 'msg-1');
+    tracker.setHookActive('proj', 'claude');
+
+    // New markPending creates a fresh entry without hookActive
+    await tracker.markPending('proj', 'claude', 'ch-2', 'msg-2');
+    expect(tracker.isHookActive('proj', 'claude')).toBe(false);
+  });
+
+  it('setHookActive with instanceId', async () => {
+    const messaging = createMockMessaging();
+    const tracker = new PendingMessageTracker(messaging as MessagingClient);
+
+    await tracker.markPending('proj', 'claude', 'ch-1', 'msg-1', 'inst-A');
+    await tracker.markPending('proj', 'claude', 'ch-2', 'msg-2', 'inst-B');
+
+    tracker.setHookActive('proj', 'claude', 'inst-A');
+    expect(tracker.isHookActive('proj', 'claude', 'inst-A')).toBe(true);
+    expect(tracker.isHookActive('proj', 'claude', 'inst-B')).toBe(false);
+  });
+
   it('ensurePending entry stays in recentlyCompleted after markCompleted', async () => {
     const messaging = createMockMessaging();
     const tracker = new PendingMessageTracker(messaging as MessagingClient);

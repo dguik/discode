@@ -68,7 +68,11 @@ export class BridgeHookServer {
   /** Thread activity messages (one message per instance, replaced with latest activity). */
   private threadActivityMessages = new Map<string, { channelId: string; parentMessageId: string; messageId: string; lines: string[] }>();
 
+  /** Session lifecycle timers — resolve pending after delay if no AI activity starts (local commands like /model). */
+  private sessionLifecycleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   private static readonly THINKING_INTERVAL_MS = 10_000;
+  private static readonly SESSION_LIFECYCLE_DELAY_MS = 5_000;
 
   private static readonly MAX_BODY_BYTES = 256 * 1024;
 
@@ -157,6 +161,11 @@ export class BridgeHookServer {
     for (const [key] of this.thinkingTimers) {
       this.clearThinkingTimer(key);
     }
+    // Clear all session lifecycle timers
+    for (const timer of this.sessionLifecycleTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.sessionLifecycleTimers.clear();
     // Clear all thread activity tracking
     this.threadActivityMessages.clear();
     this.httpServer?.close();
@@ -565,6 +574,14 @@ export class BridgeHookServer {
     }
   }
 
+  private clearSessionLifecycleTimer(key: string): void {
+    const timer = this.sessionLifecycleTimers.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      this.sessionLifecycleTimers.delete(key);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Lazy start message creation
   // ---------------------------------------------------------------------------
@@ -641,16 +658,44 @@ export class BridgeHookServer {
     const model = typeof ctx.event.model === 'string' ? ctx.event.model : '';
     const modelSuffix = model ? `, ${model}` : '';
     await this.deps.messaging.sendToChannel(ctx.channelId, `\u25B6\uFE0F Session started (${source}${modelSuffix})`);
+
+    // Mark hook as active so buffer fallback defers to hook handling
+    this.deps.pendingTracker.setHookActive(ctx.projectName, ctx.agentType, ctx.instanceId);
+
+    // Start lifecycle timer — if no AI activity starts within the delay,
+    // this was a local command (e.g. /model) and the pending entry should resolve.
+    const timerKey = `${ctx.projectName}:${ctx.instanceKey}`;
+    this.clearSessionLifecycleTimer(timerKey);
+    const timer = setTimeout(() => {
+      this.sessionLifecycleTimers.delete(timerKey);
+      if (
+        this.deps.pendingTracker.hasPending(ctx.projectName, ctx.agentType, ctx.instanceId) &&
+        !this.deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId)?.startMessageId
+      ) {
+        this.deps.pendingTracker.markCompleted(ctx.projectName, ctx.agentType, ctx.instanceId).catch(() => {});
+      }
+    }, BridgeHookServer.SESSION_LIFECYCLE_DELAY_MS);
+    this.sessionLifecycleTimers.set(timerKey, timer);
+
     return true;
   }
 
   private async handleSessionEnd(ctx: EventContext): Promise<boolean> {
     const reason = typeof ctx.event.reason === 'string' ? ctx.event.reason : 'unknown';
     await this.deps.messaging.sendToChannel(ctx.channelId, `\u23F9\uFE0F Session ended (${reason})`);
+
+    // Mark hook as active so buffer fallback defers to hook handling.
+    // This is critical for /model: session.end fires immediately when the
+    // command interrupts the current session — well before the 3s buffer fallback.
+    this.deps.pendingTracker.setHookActive(ctx.projectName, ctx.agentType, ctx.instanceId);
+
     return true;
   }
 
   private async handleThinkingStart(ctx: EventContext): Promise<boolean> {
+    // Cancel session lifecycle timer — AI activity started
+    this.clearSessionLifecycleTimer(`${ctx.projectName}:${ctx.instanceKey}`);
+
     // Lazily create start message on first activity
     await this.ensureStartMessageAndStreaming(ctx);
 
@@ -659,10 +704,14 @@ export class BridgeHookServer {
       this.deps.messaging.addReactionToMessage(pending.channelId, pending.messageId, '\uD83E\uDDE0').catch(() => {});
     }
 
-    // Start periodic elapsed-time updates so Slack users know thinking is ongoing
+    // Show thinking indicator immediately, then update elapsed time periodically
     const timerKey = `${ctx.projectName}:${ctx.instanceKey}`;
     this.clearThinkingTimer(timerKey);
     const startTime = Date.now();
+    this.deps.streamingUpdater.append(
+      ctx.projectName, ctx.instanceKey,
+      '\uD83E\uDDE0 Thinking\u2026',
+    );
     const timer = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       this.deps.streamingUpdater.append(
@@ -702,6 +751,9 @@ export class BridgeHookServer {
   }
 
   private async handleToolActivity(ctx: EventContext): Promise<boolean> {
+    // Cancel session lifecycle timer — AI activity started
+    this.clearSessionLifecycleTimer(`${ctx.projectName}:${ctx.instanceKey}`);
+
     // Lazily create start message on first activity
     await this.ensureStartMessageAndStreaming(ctx);
 
@@ -756,6 +808,8 @@ export class BridgeHookServer {
   private async handleSessionIdle(ctx: EventContext): Promise<boolean> {
     // Clear thinking timer if still running
     this.clearThinkingTimer(`${ctx.projectName}:${ctx.instanceKey}`);
+    // Cancel session lifecycle timer
+    this.clearSessionLifecycleTimer(`${ctx.projectName}:${ctx.instanceKey}`);
     // Clear thread activity tracking
     this.threadActivityMessages.delete(`${ctx.projectName}:${ctx.instanceKey}`);
 

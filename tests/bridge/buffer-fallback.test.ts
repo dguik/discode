@@ -1,9 +1,10 @@
 /**
  * Tests for the terminal buffer fallback mechanism.
  *
- * When the Stop hook doesn't fire (e.g., interactive prompts like /model),
- * the buffer fallback captures the terminal content and sends it to Slack
- * after detecting that the terminal buffer is stable.
+ * When the Stop hook doesn't fire, the buffer fallback captures the terminal
+ * content and sends it to Slack after detecting that the terminal buffer is
+ * stable.  If hook events set hookActive on the pending entry before the
+ * fallback fires, the fallback defers to the hook handler.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -167,7 +168,7 @@ describe('buffer fallback for interactive prompts', () => {
   // ── Core behavior ───────────────────────────────────────────────
 
   it('sends terminal buffer to Slack when Stop hook does not fire', async () => {
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     // First timer fires at 3s — captures snapshot A
     await vi.advanceTimersByTimeAsync(3000);
@@ -188,7 +189,7 @@ describe('buffer fallback for interactive prompts', () => {
   });
 
   it('marks pending as completed after sending buffer', async () => {
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     // Advance past both checks
     await vi.advanceTimersByTimeAsync(3000);
@@ -242,7 +243,7 @@ describe('buffer fallback for interactive prompts', () => {
       return MODEL_MENU;
     });
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     // First check at 3s — snapshot A = 'thinking...'
     await vi.advanceTimersByTimeAsync(3000);
@@ -282,7 +283,7 @@ describe('buffer fallback for interactive prompts', () => {
   it('does not send when buffer is whitespace-only', async () => {
     runtime.getWindowBuffer.mockReturnValue('   \n  \n   \n');
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -293,14 +294,14 @@ describe('buffer fallback for interactive prompts', () => {
   // ── Timer management ────────────────────────────────────────────
 
   it('cancels previous fallback when new message arrives', async () => {
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'first msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     // Advance 2s (before first fallback fires)
     await vi.advanceTimersByTimeAsync(2000);
 
     // New message arrives — this should cancel the previous fallback timer
     runtime.getWindowBuffer.mockReturnValue('new prompt content');
-    await messageCallback('claude', '1', 'myapp', 'ch-1', 'msg-2', undefined);
+    await messageCallback('claude', 'second msg', 'myapp', 'ch-1', 'msg-2', undefined);
 
     // Advance past the old fallback time (3s from original message)
     await vi.advanceTimersByTimeAsync(1000);
@@ -321,14 +322,14 @@ describe('buffer fallback for interactive prompts', () => {
 
   it('does not fire fallback after timer is cancelled by new message', async () => {
     runtime.getWindowBuffer.mockReturnValue(MODEL_MENU);
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'first msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     // Advance 2.5s
     await vi.advanceTimersByTimeAsync(2500);
 
     // Stop hook fires for the second message, clearing pending
     runtime.getWindowBuffer.mockReturnValue('idle screen');
-    await messageCallback('claude', '1', 'myapp', 'ch-1', 'msg-2', undefined);
+    await messageCallback('claude', 'second msg', 'myapp', 'ch-1', 'msg-2', undefined);
     await pendingTracker.markCompleted('myapp', 'claude', 'claude');
 
     // Advance past all timers
@@ -344,7 +345,7 @@ describe('buffer fallback for interactive prompts', () => {
     runtime.getWindowBuffer.mockReturnValue(MODEL_MENU);
 
     // Send message with no messageId — no pending is tracked
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', undefined, undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', undefined, undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -358,7 +359,7 @@ describe('buffer fallback for interactive prompts', () => {
   it('does not send when buffer is empty', async () => {
     runtime.getWindowBuffer.mockReturnValue('');
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -371,7 +372,7 @@ describe('buffer fallback for interactive prompts', () => {
       throw new Error('window not found');
     });
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     // Should not throw
     await vi.advanceTimersByTimeAsync(3000);
@@ -384,7 +385,7 @@ describe('buffer fallback for interactive prompts', () => {
     runtime.getWindowBuffer.mockReturnValue(MODEL_MENU);
     messaging.sendToChannel.mockRejectedValueOnce(new Error('Slack API error'));
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     // Should not throw even when sendToChannel rejects
     await vi.advanceTimersByTimeAsync(3000);
@@ -413,7 +414,7 @@ describe('buffer fallback for interactive prompts', () => {
     r.register();
     const cb = messaging.onMessage.mock.calls[1][0];
 
-    await cb('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await cb('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -438,7 +439,7 @@ describe('buffer fallback for interactive prompts', () => {
 
     runtime.getWindowFrame = vi.fn().mockReturnValue(styledFrame);
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -456,7 +457,7 @@ describe('buffer fallback for interactive prompts', () => {
     });
     runtime.getWindowBuffer.mockReturnValue(MODEL_MENU);
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -473,7 +474,7 @@ describe('buffer fallback for interactive prompts', () => {
     runtime.getWindowFrame = vi.fn().mockReturnValue(null);
     runtime.getWindowBuffer.mockReturnValue(HELP_OUTPUT);
 
-    await messageCallback('claude', '/help', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -499,7 +500,7 @@ describe('buffer fallback for interactive prompts', () => {
 
     runtime.getWindowFrame = vi.fn().mockReturnValue(styledFrame);
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -515,8 +516,8 @@ describe('buffer fallback for interactive prompts', () => {
   it('maintains separate fallback timers per instance', async () => {
     stateManager.getProject.mockReturnValue(createMultiInstanceProject());
 
-    let instance1Buffer = '/model menu instance 1';
-    let instance2Buffer = '/help output instance 2';
+    let instance1Buffer = 'output from instance 1';
+    let instance2Buffer = 'output from instance 2';
 
     runtime.getWindowBuffer.mockImplementation((_session: string, windowName: string) => {
       if (windowName === 'myapp-claude') return instance1Buffer;
@@ -524,11 +525,11 @@ describe('buffer fallback for interactive prompts', () => {
       return '';
     });
 
-    // Send /model to instance 1
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    // Send to instance 1
+    await messageCallback('claude', 'msg one', 'myapp', 'ch-1', 'msg-1', undefined);
 
-    // Send /help to instance 2
-    await messageCallback('claude', '/help', 'myapp', 'ch-2', 'msg-2', undefined);
+    // Send to instance 2
+    await messageCallback('claude', 'msg two', 'myapp', 'ch-2', 'msg-2', undefined);
 
     // Advance past both fallback timers
     await vi.advanceTimersByTimeAsync(3000);
@@ -555,9 +556,9 @@ describe('buffer fallback for interactive prompts', () => {
     });
 
     // Send to instance 1
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'msg one', 'myapp', 'ch-1', 'msg-1', undefined);
     // Send to instance 2
-    await messageCallback('claude', '/help', 'myapp', 'ch-2', 'msg-2', undefined);
+    await messageCallback('claude', 'msg two', 'myapp', 'ch-2', 'msg-2', undefined);
 
     // Resolve instance 1 via Stop hook before fallback
     await vi.advanceTimersByTimeAsync(2000);
@@ -585,7 +586,7 @@ describe('buffer fallback for interactive prompts', () => {
     const ansiBuffer = '\x1b[1m\x1b[36mSelect model\x1b[0m\n  1. Default\n';
     runtime.getWindowBuffer.mockReturnValue(ansiBuffer);
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -598,10 +599,10 @@ describe('buffer fallback for interactive prompts', () => {
 
   // ── Various interactive commands ────────────────────────────────
 
-  it('handles /help command output', async () => {
+  it('handles command output in buffer', async () => {
     runtime.getWindowBuffer.mockReturnValue(HELP_OUTPUT);
 
-    await messageCallback('claude', '/help', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -687,7 +688,7 @@ describe('buffer fallback for interactive prompts', () => {
 
     runtime.getWindowBuffer.mockReturnValue(fullScreen);
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -733,7 +734,7 @@ describe('buffer fallback for interactive prompts', () => {
 
     runtime.getWindowBuffer.mockReturnValue(menuOnly);
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -747,7 +748,7 @@ describe('buffer fallback for interactive prompts', () => {
 
   it('strips trailing blank lines from extracted command block', async () => {
     const withTrailing = [
-      '❯ /help',
+      '❯ help text',
       'Available commands:',
       '  /model   - Switch models',
       '',
@@ -757,7 +758,7 @@ describe('buffer fallback for interactive prompts', () => {
 
     runtime.getWindowBuffer.mockReturnValue(withTrailing);
 
-    await messageCallback('claude', '/help', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -767,7 +768,7 @@ describe('buffer fallback for interactive prompts', () => {
     expect(sent).toMatch(/Switch models\n```$/);
   });
 
-  it('extracts command block from real-world /model screen capture', async () => {
+  it('extracts command block from real-world screen capture', async () => {
     const realCapture = [
       '╭─── Claude Code v2.1.45 ─────────────────────────────────────────╮',
       '│                           │ Tips for getting started            │',
@@ -783,7 +784,7 @@ describe('buffer fallback for interactive prompts', () => {
       '',
       '● ㅎㅇ! 무엇을 도와드릴까요?',
       '',
-      '❯ /model',
+      '❯ test msg',
       '──────────────────────────────────────────────────────────',
       ' Select model',
       ' Switch between Claude models.',
@@ -800,7 +801,7 @@ describe('buffer fallback for interactive prompts', () => {
 
     runtime.getWindowBuffer.mockReturnValue(realCapture);
 
-    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+    await messageCallback('claude', 'test msg', 'myapp', 'ch-1', 'msg-1', undefined);
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
@@ -810,8 +811,7 @@ describe('buffer fallback for interactive prompts', () => {
     expect(sent).not.toContain('Welcome back');
     expect(sent).not.toContain('Set model to opus');
     expect(sent).not.toContain('무엇을 도와드릴까요');
-    // Should contain the menu from the last prompt
-    expect(sent).toContain('❯ /model');
+    // Should contain the content from the last prompt
     expect(sent).toContain('Select model');
     expect(sent).toContain('opus ✔');
     expect(sent).toContain('High effort');
@@ -907,52 +907,37 @@ describe('buffer fallback for interactive prompts', () => {
     expect(messaging.sendToChannel).not.toHaveBeenCalled();
   });
 
-  it('still sends interactive menu content (not suppressed)', async () => {
-    const modelMenu = [
-      '● Previous response',
-      '',
-      '❯ /model',
-      '──────────────────────────────────────────────────────────',
-      ' Select model',
-      '',
-      '   1. Default (recommended)',
-      ' ❯ 4. opus ✔',
-      '',
-      ' Enter to confirm · Esc to exit',
-    ].join('\n');
+  // ── hookActive suppression (hook events fire before buffer) ──
 
-    runtime.getWindowBuffer.mockReturnValue(modelMenu);
+  it('defers to hook handler when hookActive is set before buffer fires', async () => {
+    runtime.getWindowBuffer.mockReturnValue(MODEL_MENU);
 
     await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
 
+    // Simulate hook event setting hookActive at 2s (before buffer fallback)
+    await vi.advanceTimersByTimeAsync(2000);
+    pendingTracker.setHookActive('myapp', 'claude', 'claude');
+
+    // Advance past both fallback checks
+    await vi.advanceTimersByTimeAsync(1000); // 3s check
+    await vi.advanceTimersByTimeAsync(2000); // 5s check
+
+    // Buffer fallback should NOT send — hook handler is active
+    expect(messaging.sendToChannel).not.toHaveBeenCalled();
+  });
+
+  it('sends buffer normally when hookActive is not set', async () => {
+    runtime.getWindowBuffer.mockReturnValue(MODEL_MENU);
+
+    await messageCallback('claude', '/model', 'myapp', 'ch-1', 'msg-1', undefined);
+
+    // No hookActive set — buffer fallback proceeds
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
 
-    // Interactive menu content should still be sent
     expect(messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
       expect.stringContaining('Select model'),
-    );
-  });
-
-  it('still sends help command output (not suppressed)', async () => {
-    const helpOutput = [
-      '❯ /help',
-      'Available commands:',
-      '  /model   - Switch models',
-      '  /help    - Show this help',
-    ].join('\n');
-
-    runtime.getWindowBuffer.mockReturnValue(helpOutput);
-
-    await messageCallback('claude', '/help', 'myapp', 'ch-1', 'msg-1', undefined);
-
-    await vi.advanceTimersByTimeAsync(3000);
-    await vi.advanceTimersByTimeAsync(2000);
-
-    expect(messaging.sendToChannel).toHaveBeenCalledWith(
-      'ch-1',
-      expect.stringContaining('Available commands'),
     );
   });
 });

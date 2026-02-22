@@ -4,6 +4,7 @@ export interface PendingEntry {
   channelId: string;
   messageId: string;
   startMessageId?: string;
+  hookActive?: boolean;
 }
 
 export class PendingMessageTracker {
@@ -133,5 +134,19 @@ export class PendingMessageTracker {
   getPending(projectName: string, agentType: string, instanceId?: string): PendingEntry | undefined {
     const key = this.pendingKey(projectName, instanceId || agentType);
     return this.pendingMessageByInstance.get(key) || this.recentlyCompleted.get(key)?.entry;
+  }
+
+  setHookActive(projectName: string, agentType: string, instanceId?: string): void {
+    const key = this.pendingKey(projectName, instanceId || agentType);
+    const pending = this.pendingMessageByInstance.get(key);
+    if (pending) {
+      pending.hookActive = true;
+    }
+  }
+
+  isHookActive(projectName: string, agentType: string, instanceId?: string): boolean {
+    const key = this.pendingKey(projectName, instanceId || agentType);
+    const pending = this.pendingMessageByInstance.get(key);
+    return pending?.hookActive === true;
   }
 }

@@ -29,6 +29,8 @@ function createMockPendingTracker() {
     ensurePending: vi.fn().mockResolvedValue(undefined),
     ensureStartMessage: vi.fn().mockResolvedValue(undefined),
     getPending: vi.fn().mockReturnValue(undefined),
+    setHookActive: vi.fn(),
+    isHookActive: vi.fn().mockReturnValue(false),
   };
 }
 
@@ -3977,6 +3979,296 @@ describe('BridgeHookServer', () => {
       });
 
       expect(mockPendingTracker.ensurePending).not.toHaveBeenCalled();
+    });
+
+    it('session.end calls setHookActive on pending tracker', async () => {
+      const mockMessaging = createMockMessaging();
+      const mockPendingTracker = createMockPendingTracker();
+      const stateManager = createMockStateManager({
+        test: {
+          projectName: 'test',
+          projectPath: tempDir,
+          tmuxSession: 'bridge',
+          agents: { claude: true },
+          discordChannels: { claude: 'ch-123' },
+          instances: {
+            claude: { instanceId: 'claude', agentType: 'claude', channelId: 'ch-123' },
+          },
+          createdAt: new Date(),
+          lastActive: new Date(),
+        },
+      });
+      startServer({
+        messaging: mockMessaging as any,
+        stateManager: stateManager as any,
+        pendingTracker: mockPendingTracker as any,
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      await postJSON(port, '/opencode-event', {
+        projectName: 'test',
+        agentType: 'claude',
+        type: 'session.end',
+        reason: 'model',
+      });
+
+      expect(mockPendingTracker.setHookActive).toHaveBeenCalledWith('test', 'claude', 'claude');
+    });
+
+    it('session.start calls setHookActive on pending tracker', async () => {
+      const mockMessaging = createMockMessaging();
+      const mockPendingTracker = createMockPendingTracker();
+      const stateManager = createMockStateManager({
+        test: {
+          projectName: 'test',
+          projectPath: tempDir,
+          tmuxSession: 'bridge',
+          agents: { claude: true },
+          discordChannels: { claude: 'ch-123' },
+          instances: {
+            claude: { instanceId: 'claude', agentType: 'claude', channelId: 'ch-123' },
+          },
+          createdAt: new Date(),
+          lastActive: new Date(),
+        },
+      });
+      startServer({
+        messaging: mockMessaging as any,
+        stateManager: stateManager as any,
+        pendingTracker: mockPendingTracker as any,
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      await postJSON(port, '/opencode-event', {
+        projectName: 'test',
+        agentType: 'claude',
+        type: 'session.start',
+        source: 'model',
+        model: 'opus',
+      });
+
+      expect(mockPendingTracker.setHookActive).toHaveBeenCalledWith('test', 'claude', 'claude');
+    });
+
+    it('session.start lifecycle timer resolves pending after 5s with no AI activity', async () => {
+      vi.useFakeTimers();
+      const mockMessaging = createMockMessaging();
+      const mockPendingTracker = createMockPendingTracker();
+      mockPendingTracker.hasPending.mockReturnValue(true);
+      mockPendingTracker.getPending.mockReturnValue({
+        channelId: 'ch-123',
+        messageId: 'msg-1',
+        // no startMessageId — no AI activity happened
+      });
+      const stateManager = createMockStateManager({
+        test: {
+          projectName: 'test',
+          projectPath: tempDir,
+          tmuxSession: 'bridge',
+          agents: { claude: true },
+          discordChannels: { claude: 'ch-123' },
+          instances: {
+            claude: { instanceId: 'claude', agentType: 'claude', channelId: 'ch-123' },
+          },
+          createdAt: new Date(),
+          lastActive: new Date(),
+        },
+      });
+
+      // Create server directly (not via HTTP) so we can use fake timers
+      const hookServer = new BridgeHookServer({
+        port: 0,
+        messaging: mockMessaging as any,
+        stateManager: stateManager as any,
+        pendingTracker: mockPendingTracker as any,
+        streamingUpdater: createMockStreamingUpdater() as any,
+        reloadChannelMappings: vi.fn(),
+      });
+
+      await hookServer.handleOpencodeEvent({
+        projectName: 'test',
+        agentType: 'claude',
+        type: 'session.start',
+        source: 'model',
+        model: 'opus',
+      });
+
+      // Timer hasn't fired yet
+      expect(mockPendingTracker.markCompleted).not.toHaveBeenCalled();
+
+      // Advance past 5s lifecycle delay
+      vi.advanceTimersByTime(5001);
+
+      expect(mockPendingTracker.markCompleted).toHaveBeenCalledWith('test', 'claude', 'claude');
+
+      hookServer.stop();
+      vi.useRealTimers();
+    });
+
+    it('session.start lifecycle timer does NOT resolve when AI activity started (startMessageId set)', async () => {
+      vi.useFakeTimers();
+      const mockMessaging = createMockMessaging();
+      const mockPendingTracker = createMockPendingTracker();
+      mockPendingTracker.hasPending.mockReturnValue(true);
+      mockPendingTracker.getPending.mockReturnValue({
+        channelId: 'ch-123',
+        messageId: 'msg-1',
+        startMessageId: 'start-msg-ts', // AI activity started
+      });
+      const stateManager = createMockStateManager({
+        test: {
+          projectName: 'test',
+          projectPath: tempDir,
+          tmuxSession: 'bridge',
+          agents: { claude: true },
+          discordChannels: { claude: 'ch-123' },
+          instances: {
+            claude: { instanceId: 'claude', agentType: 'claude', channelId: 'ch-123' },
+          },
+          createdAt: new Date(),
+          lastActive: new Date(),
+        },
+      });
+
+      const hookServer = new BridgeHookServer({
+        port: 0,
+        messaging: mockMessaging as any,
+        stateManager: stateManager as any,
+        pendingTracker: mockPendingTracker as any,
+        streamingUpdater: createMockStreamingUpdater() as any,
+        reloadChannelMappings: vi.fn(),
+      });
+
+      await hookServer.handleOpencodeEvent({
+        projectName: 'test',
+        agentType: 'claude',
+        type: 'session.start',
+        source: 'model',
+        model: 'opus',
+      });
+
+      vi.advanceTimersByTime(5001);
+
+      // Should NOT mark completed because startMessageId exists (AI activity)
+      expect(mockPendingTracker.markCompleted).not.toHaveBeenCalled();
+
+      hookServer.stop();
+      vi.useRealTimers();
+    });
+
+    it('thinking.start cancels session lifecycle timer', async () => {
+      vi.useFakeTimers();
+      const mockMessaging = createMockMessaging();
+      const mockPendingTracker = createMockPendingTracker();
+      mockPendingTracker.hasPending.mockReturnValue(true);
+      mockPendingTracker.getPending.mockReturnValue({
+        channelId: 'ch-123',
+        messageId: 'msg-1',
+      });
+      const stateManager = createMockStateManager({
+        test: {
+          projectName: 'test',
+          projectPath: tempDir,
+          tmuxSession: 'bridge',
+          agents: { claude: true },
+          discordChannels: { claude: 'ch-123' },
+          instances: {
+            claude: { instanceId: 'claude', agentType: 'claude', channelId: 'ch-123' },
+          },
+          createdAt: new Date(),
+          lastActive: new Date(),
+        },
+      });
+
+      const hookServer = new BridgeHookServer({
+        port: 0,
+        messaging: mockMessaging as any,
+        stateManager: stateManager as any,
+        pendingTracker: mockPendingTracker as any,
+        streamingUpdater: createMockStreamingUpdater() as any,
+        reloadChannelMappings: vi.fn(),
+      });
+
+      // Start session
+      await hookServer.handleOpencodeEvent({
+        projectName: 'test',
+        agentType: 'claude',
+        type: 'session.start',
+        source: 'startup',
+      });
+
+      // AI thinking starts (should cancel lifecycle timer)
+      await hookServer.handleOpencodeEvent({
+        projectName: 'test',
+        agentType: 'claude',
+        type: 'thinking.start',
+      });
+
+      // Advance past lifecycle delay — should NOT fire
+      vi.advanceTimersByTime(5001);
+
+      expect(mockPendingTracker.markCompleted).not.toHaveBeenCalled();
+
+      hookServer.stop();
+      vi.useRealTimers();
+    });
+
+    it('tool.activity cancels session lifecycle timer', async () => {
+      vi.useFakeTimers();
+      const mockMessaging = createMockMessaging();
+      const mockPendingTracker = createMockPendingTracker();
+      mockPendingTracker.hasPending.mockReturnValue(true);
+      mockPendingTracker.getPending.mockReturnValue({
+        channelId: 'ch-123',
+        messageId: 'msg-1',
+      });
+      const stateManager = createMockStateManager({
+        test: {
+          projectName: 'test',
+          projectPath: tempDir,
+          tmuxSession: 'bridge',
+          agents: { claude: true },
+          discordChannels: { claude: 'ch-123' },
+          instances: {
+            claude: { instanceId: 'claude', agentType: 'claude', channelId: 'ch-123' },
+          },
+          createdAt: new Date(),
+          lastActive: new Date(),
+        },
+      });
+
+      const hookServer = new BridgeHookServer({
+        port: 0,
+        messaging: mockMessaging as any,
+        stateManager: stateManager as any,
+        pendingTracker: mockPendingTracker as any,
+        streamingUpdater: createMockStreamingUpdater() as any,
+        reloadChannelMappings: vi.fn(),
+      });
+
+      // Start session
+      await hookServer.handleOpencodeEvent({
+        projectName: 'test',
+        agentType: 'claude',
+        type: 'session.start',
+        source: 'startup',
+      });
+
+      // Tool activity starts (should cancel lifecycle timer)
+      await hookServer.handleOpencodeEvent({
+        projectName: 'test',
+        agentType: 'claude',
+        type: 'tool.activity',
+        text: 'Reading file...',
+      });
+
+      // Advance past lifecycle delay — should NOT fire
+      vi.advanceTimersByTime(5001);
+
+      expect(mockPendingTracker.markCompleted).not.toHaveBeenCalled();
+
+      hookServer.stop();
+      vi.useRealTimers();
     });
 
     it('does not call ensurePending for session.start', async () => {
