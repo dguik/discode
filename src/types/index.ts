@@ -88,6 +88,10 @@ export interface ProjectInstanceState {
   containerId?: string;
   /** Docker container name for display/logging. */
   containerName?: string;
+  /** Runtime type: 'tmux' (default) or 'sdk' (in-process Claude Agent SDK). */
+  runtimeType?: 'tmux' | 'sdk';
+  /** SDK conversation session ID for multi-turn continuation. */
+  sdkSessionId?: string;
 }
 
 export interface ProjectState {

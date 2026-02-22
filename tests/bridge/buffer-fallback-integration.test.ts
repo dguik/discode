@@ -122,6 +122,7 @@ describe('buffer fallback integration (real tmux)', () => {
       runtime,
       stateManager,
       pendingTracker,
+      streamingUpdater: { canStream: vi.fn(), start: vi.fn(), append: vi.fn(), finalize: vi.fn(), discard: vi.fn(), has: vi.fn() } as any,
       sanitizeInput: (content: string) => content.trim() || null,
     });
 

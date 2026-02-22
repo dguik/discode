@@ -507,6 +507,19 @@ export class DiscordClient implements MessagingClient {
     }
   }
 
+  async replyInThreadWithId(channelId: string, parentMessageId: string, content: string): Promise<string | undefined> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel?.isTextBased() || !('messages' in channel)) return undefined;
+      const parentMessage = await (channel as TextChannel).messages.fetch(parentMessageId);
+      const reply = await parentMessage.reply(content);
+      return reply.id;
+    } catch (error) {
+      console.error(`Failed to reply in thread on Discord channel ${channelId}:`, error);
+      return undefined;
+    }
+  }
+
   /**
    * Send a message with file attachments to a specific channel.
    * If content is empty but files are present, sends files only.

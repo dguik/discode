@@ -131,14 +131,43 @@ export class SlackClient implements MessagingClient {
 
   async replyInThread(channelId: string, parentMessageId: string, content: string): Promise<void> {
     try {
-      await this.app.client.chat.postMessage({
+      const result = await this.app.client.chat.postMessage({
         token: this.botToken,
         channel: channelId,
         thread_ts: parentMessageId,
         text: content,
       });
+      console.log(`🧵 replyInThread OK: channel=${channelId} thread_ts=${parentMessageId} result_ts=${result.ts} content=${content.substring(0, 80)}`);
+    } catch (error) {
+      console.error(`🧵 replyInThread FAILED: channel=${channelId} thread_ts=${parentMessageId}:`, error);
+    }
+  }
+
+  async replyInThreadWithId(channelId: string, parentMessageId: string, content: string): Promise<string | undefined> {
+    try {
+      const result = await this.app.client.chat.postMessage({
+        token: this.botToken,
+        channel: channelId,
+        thread_ts: parentMessageId,
+        text: content,
+      });
+      return result.ts;
     } catch (error) {
       console.error(`Failed to reply in thread on Slack channel ${channelId}:`, error);
+      return undefined;
+    }
+  }
+
+  async updateMessage(channelId: string, messageId: string, content: string): Promise<void> {
+    try {
+      await this.app.client.chat.update({
+        token: this.botToken,
+        channel: channelId,
+        ts: messageId,
+        text: content,
+      });
+    } catch (error) {
+      console.error(`Failed to update message on Slack channel ${channelId}:`, error);
     }
   }
 
@@ -562,6 +591,7 @@ export class SlackClient implements MessagingClient {
       '❌': 'x',
       '⚠️': 'warning',
       '🔒': 'lock',
+      '🧠': 'brain',
     };
     return map[emoji] || emoji.replace(/:/g, '');
   }

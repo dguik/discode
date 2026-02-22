@@ -151,6 +151,7 @@ describe('buffer fallback for interactive prompts', () => {
       runtime,
       stateManager,
       pendingTracker,
+      streamingUpdater: { canStream: vi.fn(), start: vi.fn(), append: vi.fn(), finalize: vi.fn(), discard: vi.fn(), has: vi.fn() } as any,
       sanitizeInput: (content: string) => content.trim() || null,
     });
 
@@ -406,6 +407,7 @@ describe('buffer fallback for interactive prompts', () => {
       runtime: bareRuntime,
       stateManager,
       pendingTracker,
+      streamingUpdater: { canStream: vi.fn(), start: vi.fn(), append: vi.fn(), finalize: vi.fn(), discard: vi.fn(), has: vi.fn() } as any,
       sanitizeInput: (content: string) => content.trim() || null,
     });
     r.register();

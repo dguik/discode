@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import type { MessagingClient } from '../messaging/interface.js';
 import type { IStateManager } from '../types/interfaces.js';
 import type { AgentRuntime } from '../runtime/interface.js';
@@ -10,14 +11,18 @@ import {
 import { downloadFileAttachments, buildFileMarkers } from '../infra/file-downloader.js';
 import { cleanCapture } from '../capture/parser.js';
 import { PendingMessageTracker } from './pending-message-tracker.js';
+import type { StreamingMessageUpdater } from './streaming-message-updater.js';
 import { injectFile, WORKSPACE_DIR } from '../container/index.js';
+import type { ClaudeSdkRunner } from '../sdk/index.js';
 
 export interface BridgeMessageRouterDeps {
   messaging: MessagingClient;
   runtime: AgentRuntime;
   stateManager: IStateManager;
   pendingTracker: PendingMessageTracker;
+  streamingUpdater: StreamingMessageUpdater;
   sanitizeInput: (content: string) => string | null;
+  getSdkRunner?: (projectName: string, instanceId: string) => ClaudeSdkRunner | undefined;
 }
 
 export class BridgeMessageRouter {
@@ -81,10 +86,34 @@ export class BridgeMessageRouter {
         return;
       }
 
-      if (messageId) {
-        await this.deps.pendingTracker.markPending(projectName, resolvedAgentType, channelId, messageId, instanceKey);
+      // Shell command: messages starting with ! are executed directly on the host
+      if (sanitized.startsWith('!')) {
+        const command = sanitized.substring(1).trim();
+        if (command.length > 0) {
+          await this.executeShellCommand(command, project.projectPath, channelId);
+        }
+        this.deps.stateManager.updateLastActive(projectName);
+        return;
       }
 
+      if (messageId) {
+        await this.deps.pendingTracker.markPending(projectName, resolvedAgentType, channelId, messageId, instanceKey);
+        // Streaming updater is started lazily on first activity (thinking/tool events)
+      }
+
+      if (mappedInstance.runtimeType === 'sdk') {
+        const runner = this.deps.getSdkRunner?.(projectName, instanceKey);
+        if (!runner) {
+          await this.deps.pendingTracker.markError(projectName, resolvedAgentType, instanceKey);
+          await messaging.sendToChannel(channelId, '\u26A0\uFE0F SDK runner not found for this instance. Try restarting the project.');
+          this.deps.stateManager.updateLastActive(projectName);
+          return;
+        }
+        // Fire-and-forget: events stream through handleOpencodeEvent
+        runner.submitMessage(sanitized).catch((err) => {
+          console.error(`[sdk-runner] submitMessage error for ${instanceKey}:`, err);
+        });
+      } else {
         try {
           await this.submitToAgent(normalizedProject.tmuxSession, windowName, sanitized, resolvedAgentType);
           this.scheduleBufferFallback(
@@ -96,8 +125,9 @@ export class BridgeMessageRouter {
             channelId,
           );
         } catch (error) {
-        await this.deps.pendingTracker.markError(projectName, resolvedAgentType, instanceKey);
-        await messaging.sendToChannel(channelId, this.buildDeliveryFailureGuidance(projectName, error));
+          await this.deps.pendingTracker.markError(projectName, resolvedAgentType, instanceKey);
+          await messaging.sendToChannel(channelId, this.buildDeliveryFailureGuidance(projectName, error));
+        }
       }
 
       this.deps.stateManager.updateLastActive(projectName);
@@ -137,6 +167,69 @@ export class BridgeMessageRouter {
     const delayMs = this.getEnvInt(envKey, defaultMs);
     await this.sleep(delayMs);
     this.deps.runtime.sendEnterToWindow(tmuxSession, windowName, agentType);
+  }
+
+  /**
+   * Execute a shell command on the host and send output to the channel.
+   * Output is wrapped in code blocks. Long output is split into multiple
+   * messages to respect platform character limits.
+   */
+  private async executeShellCommand(command: string, projectPath: string, channelId: string): Promise<void> {
+    const { messaging } = this.deps;
+    let output: string;
+
+    try {
+      output = execSync(command, {
+        cwd: projectPath,
+        timeout: 30_000,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (err: any) {
+      const exitCode = err.status ?? 1;
+      const combined = ((err.stdout || '') + (err.stderr || '')).trim();
+      const errorMsg = combined.length > 0
+        ? `⚠️ Exit code ${exitCode}\n\`\`\`\n${combined}\n\`\`\``
+        : `⚠️ Exit code ${exitCode} (no output)`;
+
+      await this.sendShellChunks(channelId, errorMsg);
+      return;
+    }
+
+    const trimmed = output.trim();
+    if (trimmed.length === 0) {
+      await messaging.sendToChannel(channelId, '✅ (no output)');
+      return;
+    }
+
+    await this.sendShellChunks(channelId, `\`\`\`\n${trimmed}\n\`\`\``);
+  }
+
+  /**
+   * Send text to a channel, splitting into multiple messages if it exceeds
+   * the platform character limit. Unlike splitForSlack/splitForDiscord, this
+   * does NOT strip outer code blocks — shell output formatting is preserved.
+   */
+  private async sendShellChunks(channelId: string, text: string): Promise<void> {
+    const maxLen = this.deps.messaging.platform === 'slack' ? 3900 : 1900;
+
+    if (text.length <= maxLen) {
+      await this.deps.messaging.sendToChannel(channelId, text);
+      return;
+    }
+
+    const lines = text.split('\n');
+    let current = '';
+    for (const line of lines) {
+      if (current.length + line.length + 1 > maxLen) {
+        if (current) await this.deps.messaging.sendToChannel(channelId, current);
+        current = line;
+      } else {
+        current += (current ? '\n' : '') + line;
+      }
+    }
+    if (current) await this.deps.messaging.sendToChannel(channelId, current);
   }
 
   /**

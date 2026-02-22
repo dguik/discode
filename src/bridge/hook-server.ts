@@ -17,21 +17,79 @@ import {
   normalizeProjectState,
 } from '../state/instances.js';
 import { PendingMessageTracker } from './pending-message-tracker.js';
+import type { PendingEntry } from './pending-message-tracker.js';
+import type { StreamingMessageUpdater } from './streaming-message-updater.js';
 
 export interface BridgeHookServerDeps {
   port: number;
   messaging: MessagingClient;
   stateManager: IStateManager;
   pendingTracker: PendingMessageTracker;
+  streamingUpdater: StreamingMessageUpdater;
   reloadChannelMappings: () => void;
   runtime?: AgentRuntime;
 }
+
+/** Shared context passed to individual event handlers after common validation. */
+interface EventContext {
+  event: Record<string, unknown>;
+  projectName: string;
+  channelId: string;
+  /** Resolved agent type (from instance or event payload). */
+  agentType: string;
+  /** Resolved instance ID, if available. */
+  instanceId: string | undefined;
+  /** Key for streaming updater: instanceId ?? agentType. */
+  instanceKey: string;
+  text: string | undefined;
+  /** Resolved, absolute project path (empty string if unavailable). */
+  projectPath: string;
+  /**
+   * Snapshot of the pending entry captured at event arrival time.
+   * Prevents race conditions where markPending for a NEWER request overwrites
+   * the active pending while the current handler is queued/running.
+   */
+  pendingSnapshot: PendingEntry | undefined;
+}
+
+type StatusResult = { status: number; message: string };
+type HttpRes = { writeHead: (status: number, headers?: Record<string, string>) => void; end: (body: string) => void };
 
 export class BridgeHookServer {
   private httpServer?: ReturnType<typeof createServer>;
   private runtimeControl: RuntimeControlPlane;
 
+  /** Per-channel event queue to serialize message delivery (prevents simultaneous prompt messages). */
+  private channelQueues = new Map<string, Promise<void>>();
+
+  /** Periodic timers that show elapsed thinking time in the streaming message. */
+  private thinkingTimers = new Map<string, { timer: ReturnType<typeof setInterval>; startTime: number }>();
+
+  /** Thread activity messages (one message per instance, replaced with latest activity). */
+  private threadActivityMessages = new Map<string, { channelId: string; parentMessageId: string; messageId: string; lines: string[] }>();
+
+  private static readonly THINKING_INTERVAL_MS = 10_000;
+
   private static readonly MAX_BODY_BYTES = 256 * 1024;
+
+  private eventHandlers: Record<string, (ctx: EventContext) => Promise<boolean>> = {
+    'session.error': (ctx) => this.handleSessionError(ctx),
+    'session.notification': (ctx) => this.handleSessionNotification(ctx),
+    'session.start': (ctx) => this.handleSessionStart(ctx),
+    'session.end': (ctx) => this.handleSessionEnd(ctx),
+    'thinking.start': (ctx) => this.handleThinkingStart(ctx),
+    'thinking.stop': (ctx) => this.handleThinkingStop(ctx),
+    'tool.activity': (ctx) => this.handleToolActivity(ctx),
+    'session.idle': (ctx) => this.handleSessionIdle(ctx),
+  };
+
+  private statusRoutes: Record<string, (payload: unknown) => StatusResult | Promise<StatusResult>> = {
+    '/runtime/focus': (p) => this.handleRuntimeFocus(p),
+    '/runtime/input': (p) => this.handleRuntimeInput(p),
+    '/runtime/stop': (p) => this.handleRuntimeStop(p),
+    '/runtime/ensure': (p) => this.handleRuntimeEnsure(p),
+    '/send-files': (p) => this.handleSendFiles(p),
+  };
 
   constructor(private deps: BridgeHookServerDeps) {
     this.runtimeControl = new RuntimeControlPlane(deps.runtime);
@@ -77,116 +135,7 @@ export class BridgeHookServer {
         if (aborted) return;
         void (async () => {
           try {
-            if (pathname === '/reload') {
-              this.deps.reloadChannelMappings();
-              res.writeHead(200);
-              res.end('OK');
-              return;
-            }
-
-            if (pathname === '/runtime/focus') {
-              let payload: unknown;
-              try {
-                payload = body ? JSON.parse(body) : {};
-              } catch {
-                res.writeHead(400);
-                res.end('Invalid JSON');
-                return;
-              }
-
-              const result = this.handleRuntimeFocus(payload);
-              res.writeHead(result.status);
-              res.end(result.message);
-              return;
-            }
-
-            if (pathname === '/runtime/input') {
-              let payload: unknown;
-              try {
-                payload = body ? JSON.parse(body) : {};
-              } catch {
-                res.writeHead(400);
-                res.end('Invalid JSON');
-                return;
-              }
-
-              const result = this.handleRuntimeInput(payload);
-              res.writeHead(result.status);
-              res.end(result.message);
-              return;
-            }
-
-            if (pathname === '/runtime/stop') {
-              let payload: unknown;
-              try {
-                payload = body ? JSON.parse(body) : {};
-              } catch {
-                res.writeHead(400);
-                res.end('Invalid JSON');
-                return;
-              }
-
-              const result = this.handleRuntimeStop(payload);
-              res.writeHead(result.status);
-              res.end(result.message);
-              return;
-            }
-
-            if (pathname === '/runtime/ensure') {
-              let payload: unknown;
-              try {
-                payload = body ? JSON.parse(body) : {};
-              } catch {
-                res.writeHead(400);
-                res.end('Invalid JSON');
-                return;
-              }
-
-              const result = this.handleRuntimeEnsure(payload);
-              res.writeHead(result.status);
-              res.end(result.message);
-              return;
-            }
-
-            if (pathname === '/send-files') {
-              let payload: unknown;
-              try {
-                payload = body ? JSON.parse(body) : {};
-              } catch {
-                res.writeHead(400);
-                res.end('Invalid JSON');
-                return;
-              }
-
-              const result = await this.handleSendFiles(payload);
-              res.writeHead(result.status);
-              res.end(result.message);
-              return;
-            }
-
-            if (pathname === '/opencode-event') {
-              let payload: unknown;
-              try {
-                payload = body ? JSON.parse(body) : {};
-              } catch {
-                res.writeHead(400);
-                res.end('Invalid JSON');
-                return;
-              }
-
-              const ok = await this.handleOpencodeEvent(payload);
-              if (ok) {
-                res.writeHead(200);
-                res.end('OK');
-              } else {
-                res.writeHead(400);
-                res.end('Invalid event payload');
-              }
-              return;
-            }
-
-            res.writeHead(404);
-            res.end('Not found');
+            await this.dispatchPostRoute(pathname || '', body, res);
           } catch (error) {
             console.error('Request processing error:', error);
             res.writeHead(500);
@@ -204,11 +153,21 @@ export class BridgeHookServer {
   }
 
   stop(): void {
+    // Clear all thinking timers
+    for (const [key] of this.thinkingTimers) {
+      this.clearThinkingTimer(key);
+    }
+    // Clear all thread activity tracking
+    this.threadActivityMessages.clear();
     this.httpServer?.close();
     this.httpServer = undefined;
   }
 
-  private writeJson(res: { writeHead: (status: number, headers?: Record<string, string>) => void; end: (body: string) => void }, status: number, payload: unknown): void {
+  // ---------------------------------------------------------------------------
+  // HTTP helpers
+  // ---------------------------------------------------------------------------
+
+  private writeJson(res: HttpRes, status: number, payload: unknown): void {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(payload));
   }
@@ -219,7 +178,56 @@ export class BridgeHookServer {
     return undefined;
   }
 
-  private handleRuntimeWindows(res: { writeHead: (status: number, headers?: Record<string, string>) => void; end: (body: string) => void }): void {
+  private parseJsonBody(body: string, res: HttpRes): unknown | null {
+    try {
+      return body ? JSON.parse(body) : {};
+    } catch {
+      res.writeHead(400);
+      res.end('Invalid JSON');
+      return null;
+    }
+  }
+
+  private async dispatchPostRoute(pathname: string, body: string, res: HttpRes): Promise<void> {
+    if (pathname === '/reload') {
+      this.deps.reloadChannelMappings();
+      res.writeHead(200);
+      res.end('OK');
+      return;
+    }
+
+    const payload = this.parseJsonBody(body, res);
+    if (payload === null) return;
+
+    const statusHandler = this.statusRoutes[pathname];
+    if (statusHandler) {
+      const result = await statusHandler(payload);
+      res.writeHead(result.status);
+      res.end(result.message);
+      return;
+    }
+
+    if (pathname === '/opencode-event') {
+      const ok = await this.handleOpencodeEvent(payload);
+      if (ok) {
+        res.writeHead(200);
+        res.end('OK');
+      } else {
+        res.writeHead(400);
+        res.end('Invalid event payload');
+      }
+      return;
+    }
+
+    res.writeHead(404);
+    res.end('Not found');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Runtime control routes
+  // ---------------------------------------------------------------------------
+
+  private handleRuntimeWindows(res: HttpRes): void {
     if (!this.runtimeControl.isEnabled()) {
       this.writeJson(res, 501, { error: 'Runtime control unavailable' });
       return;
@@ -229,7 +237,7 @@ export class BridgeHookServer {
     this.writeJson(res, 200, result);
   }
 
-  private handleRuntimeFocus(payload: unknown): { status: number; message: string } {
+  private handleRuntimeFocus(payload: unknown): StatusResult {
     if (!this.runtimeControl.isEnabled()) {
       return { status: 501, message: 'Runtime control unavailable' };
     }
@@ -252,7 +260,7 @@ export class BridgeHookServer {
     return { status: 200, message: 'OK' };
   }
 
-  private handleRuntimeInput(payload: unknown): { status: number; message: string } {
+  private handleRuntimeInput(payload: unknown): StatusResult {
     if (!this.runtimeControl.isEnabled()) {
       return { status: 501, message: 'Runtime control unavailable' };
     }
@@ -284,11 +292,7 @@ export class BridgeHookServer {
     }
   }
 
-  private handleRuntimeBuffer(
-    res: { writeHead: (status: number, headers?: Record<string, string>) => void; end: (body: string) => void },
-    windowId: string | undefined,
-    since: number,
-  ): void {
+  private handleRuntimeBuffer(res: HttpRes, windowId: string | undefined, since: number): void {
     if (!this.runtimeControl.isEnabled()) {
       this.writeJson(res, 501, { error: 'Runtime control unavailable' });
       return;
@@ -311,7 +315,7 @@ export class BridgeHookServer {
     }
   }
 
-  private handleRuntimeStop(payload: unknown): { status: number; message: string } {
+  private handleRuntimeStop(payload: unknown): StatusResult {
     if (!this.runtimeControl.isEnabled()) {
       return { status: 501, message: 'Runtime control unavailable' };
     }
@@ -341,7 +345,7 @@ export class BridgeHookServer {
     }
   }
 
-  private handleRuntimeEnsure(payload: unknown): { status: number; message: string } {
+  private handleRuntimeEnsure(payload: unknown): StatusResult {
     if (!this.deps.runtime) {
       return { status: 501, message: 'Runtime control unavailable' };
     }
@@ -403,6 +407,10 @@ export class BridgeHookServer {
     return { status: 200, message: 'OK' };
   }
 
+  // ---------------------------------------------------------------------------
+  // File handling
+  // ---------------------------------------------------------------------------
+
   /**
    * Validate an array of file paths: each must exist and reside within the project directory.
    */
@@ -419,7 +427,7 @@ export class BridgeHookServer {
     });
   }
 
-  private async handleSendFiles(payload: unknown): Promise<{ status: number; message: string }> {
+  private async handleSendFiles(payload: unknown): Promise<StatusResult> {
     if (!payload || typeof payload !== 'object') {
       return { status: 400, message: 'Invalid payload' };
     }
@@ -448,12 +456,16 @@ export class BridgeHookServer {
     if (validFiles.length === 0) return { status: 400, message: 'No valid files' };
 
     console.log(
-      `📤 [${projectName}/${instance?.agentType || agentType}] send-files: ${validFiles.length} file(s)`,
+      `\uD83D\uDCE4 [${projectName}/${instance?.agentType || agentType}] send-files: ${validFiles.length} file(s)`,
     );
 
     await this.deps.messaging.sendToChannelWithFiles(channelId, '', validFiles);
     return { status: 200, message: 'OK' };
   }
+
+  // ---------------------------------------------------------------------------
+  // OpenCode event handling
+  // ---------------------------------------------------------------------------
 
   private getEventText(payload: Record<string, unknown>): string | undefined {
     const direct = payload.text;
@@ -464,7 +476,7 @@ export class BridgeHookServer {
     return undefined;
   }
 
-  private async handleOpencodeEvent(payload: unknown): Promise<boolean> {
+  async handleOpencodeEvent(payload: unknown): Promise<boolean> {
     if (!payload || typeof payload !== 'object') return false;
 
     const event = payload as Record<string, unknown>;
@@ -486,164 +498,415 @@ export class BridgeHookServer {
     if (!channelId) return false;
 
     const text = this.getEventText(event);
+    const resolvedAgentType = instance?.agentType || agentType;
+    const resolvedInstanceId = instance?.instanceId;
+    const instanceKey = resolvedInstanceId || resolvedAgentType;
+
     console.log(
-      `🔍 [${projectName}/${instance?.agentType || agentType}${instance ? `#${instance.instanceId}` : ''}] event=${eventType} text=${text ? `(${text.length} chars) ${text.substring(0, 100)}` : '(empty)'}`,
+      `\uD83D\uDD0D [${projectName}/${resolvedAgentType}${resolvedInstanceId ? `#${resolvedInstanceId}` : ''}] event=${eventType} text=${text ? `(${text.length} chars) ${text.substring(0, 100)}` : '(empty)'}`,
     );
-
-    if (eventType === 'session.error') {
-      // Fire reaction update in background – don't block message delivery
-      this.deps.pendingTracker.markError(projectName, instance?.agentType || agentType, instance?.instanceId).catch(() => {});
-      const msg = text || 'unknown error';
-      await this.deps.messaging.sendToChannel(channelId, `⚠️ OpenCode session error: ${msg}`);
-      return true;
-    }
-
-    if (eventType === 'session.notification') {
-      const notificationType = typeof event.notificationType === 'string' ? event.notificationType : 'unknown';
-      const emojiMap: Record<string, string> = {
-        permission_prompt: '\uD83D\uDD10',
-        idle_prompt: '\uD83D\uDCA4',
-        auth_success: '\uD83D\uDD11',
-        elicitation_dialog: '\u2753',
-      };
-      const emoji = emojiMap[notificationType] || '\uD83D\uDD14';
-      const msg = text || notificationType;
-      await this.deps.messaging.sendToChannel(channelId, `${emoji} ${msg}`);
-
-      // Send prompt details (AskUserQuestion choices, ExitPlanMode) extracted from transcript
-      const promptText = typeof event.promptText === 'string' ? event.promptText.trim() : '';
-      if (promptText) {
-        const promptSplit = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
-        const promptChunks = promptSplit(promptText);
-        for (const chunk of promptChunks) {
-          if (chunk.trim().length > 0) {
-            await this.deps.messaging.sendToChannel(channelId, chunk);
-          }
-        }
-      }
-
-      return true;
-    }
-
-    if (eventType === 'session.start') {
-      const source = typeof event.source === 'string' ? event.source : 'unknown';
-      const model = typeof event.model === 'string' ? event.model : '';
-      const modelSuffix = model ? `, ${model}` : '';
-      await this.deps.messaging.sendToChannel(channelId, `\u25B6\uFE0F Session started (${source}${modelSuffix})`);
-      return true;
-    }
-
-    if (eventType === 'session.end') {
-      const reason = typeof event.reason === 'string' ? event.reason : 'unknown';
-      await this.deps.messaging.sendToChannel(channelId, `\u23F9\uFE0F Session ended (${reason})`);
-      return true;
-    }
 
     // Auto-create pending entry for tmux-initiated prompts (no Slack message triggered markPending)
     if (
       (eventType === 'tool.activity' || eventType === 'session.idle') &&
-      !this.deps.pendingTracker.hasPending(projectName, instance?.agentType || agentType, instance?.instanceId)
+      !this.deps.pendingTracker.hasPending(projectName, resolvedAgentType, resolvedInstanceId)
     ) {
-      await this.deps.pendingTracker.ensurePending(projectName, instance?.agentType || agentType, channelId, instance?.instanceId);
+      await this.deps.pendingTracker.ensurePending(projectName, resolvedAgentType, channelId, resolvedInstanceId);
+      // Streaming updater is started lazily on first activity (thinking/tool events)
     }
 
-    if (eventType === 'tool.activity') {
-      const pending = this.deps.pendingTracker.getPending(projectName, instance?.agentType || agentType, instance?.instanceId);
-      if (text && pending?.startMessageId && this.deps.messaging.replyInThread) {
+    // Capture the pending entry NOW (before the handler is queued) so that
+    // a subsequent markPending for a newer request cannot overwrite it.
+    const pendingSnapshot = this.deps.pendingTracker.getPending(projectName, resolvedAgentType, resolvedInstanceId);
+
+    const ctx: EventContext = {
+      event,
+      projectName,
+      channelId,
+      agentType: resolvedAgentType,
+      instanceId: resolvedInstanceId,
+      instanceKey,
+      text,
+      projectPath: project.projectPath ? resolve(project.projectPath) : '',
+      pendingSnapshot: pendingSnapshot ? { ...pendingSnapshot } : undefined,
+    };
+
+    const handler = eventType ? this.eventHandlers[eventType] : undefined;
+    if (handler) return this.enqueueForChannel(channelId, () => handler(ctx));
+    return true;
+  }
+
+  /**
+   * Enqueue an event handler so that events targeting the same channel are
+   * processed sequentially.  This prevents multiple prompt/notification
+   * messages from being sent to Slack simultaneously.
+   */
+  private enqueueForChannel(channelId: string, fn: () => Promise<boolean>): Promise<boolean> {
+    const previous = this.channelQueues.get(channelId) ?? Promise.resolve();
+    let result = true;
+    const next = previous
+      .then(async () => { result = await fn(); })
+      .catch(() => {})
+      .finally(() => {
+        // Clean up once the chain settles to avoid leaking memory
+        if (this.channelQueues.get(channelId) === next) {
+          this.channelQueues.delete(channelId);
+        }
+      });
+    this.channelQueues.set(channelId, next);
+    return next.then(() => result);
+  }
+
+  private clearThinkingTimer(key: string): void {
+    const entry = this.thinkingTimers.get(key);
+    if (entry) {
+      clearInterval(entry.timer);
+      this.thinkingTimers.delete(key);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lazy start message creation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Lazily create the "⏳ Processing..." start message and start the streaming
+   * updater.  Called from thinking.start and tool.activity handlers so that
+   * commands with no activity (e.g. /compact) never produce a parent message.
+   */
+  private async ensureStartMessageAndStreaming(ctx: EventContext): Promise<string | undefined> {
+    const startMessageId = await this.deps.pendingTracker.ensureStartMessage(
+      ctx.projectName, ctx.agentType, ctx.instanceId,
+    );
+
+    if (startMessageId) {
+      // Update snapshot so subsequent code in this handler can use it
+      if (ctx.pendingSnapshot) {
+        ctx.pendingSnapshot.startMessageId = startMessageId;
+      }
+
+      // Start streaming updater if not already active
+      if (!this.deps.streamingUpdater.has(ctx.projectName, ctx.instanceKey)) {
+        const pending = this.deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
+        if (pending) {
+          this.deps.streamingUpdater.start(ctx.projectName, ctx.instanceKey, pending.channelId, startMessageId);
+        }
+      }
+    }
+
+    return startMessageId;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Individual event handlers
+  // ---------------------------------------------------------------------------
+
+  private async handleSessionError(ctx: EventContext): Promise<boolean> {
+    // Clear thinking timer if still running
+    this.clearThinkingTimer(`${ctx.projectName}:${ctx.instanceKey}`);
+    // Clear thread activity tracking
+    this.threadActivityMessages.delete(`${ctx.projectName}:${ctx.instanceKey}`);
+    // Discard any in-progress streaming message
+    this.deps.streamingUpdater.discard(ctx.projectName, ctx.instanceKey);
+    // Fire reaction update in background – don't block message delivery
+    this.deps.pendingTracker.markError(ctx.projectName, ctx.agentType, ctx.instanceId).catch(() => {});
+    const msg = ctx.text || 'unknown error';
+    await this.deps.messaging.sendToChannel(ctx.channelId, `\u26A0\uFE0F OpenCode session error: ${msg}`);
+    return true;
+  }
+
+  private async handleSessionNotification(ctx: EventContext): Promise<boolean> {
+    const notificationType = typeof ctx.event.notificationType === 'string' ? ctx.event.notificationType : 'unknown';
+    const emojiMap: Record<string, string> = {
+      permission_prompt: '\uD83D\uDD10',
+      idle_prompt: '\uD83D\uDCA4',
+      auth_success: '\uD83D\uDD11',
+      elicitation_dialog: '\u2753',
+    };
+    const emoji = emojiMap[notificationType] || '\uD83D\uDD14';
+    const msg = ctx.text || notificationType;
+    await this.deps.messaging.sendToChannel(ctx.channelId, `${emoji} ${msg}`);
+
+    // Send prompt details (AskUserQuestion choices, ExitPlanMode) extracted from transcript
+    const promptText = typeof ctx.event.promptText === 'string' ? ctx.event.promptText.trim() : '';
+    if (promptText) {
+      await this.splitAndSendToChannel(ctx.channelId, promptText);
+    }
+
+    return true;
+  }
+
+  private async handleSessionStart(ctx: EventContext): Promise<boolean> {
+    const source = typeof ctx.event.source === 'string' ? ctx.event.source : 'unknown';
+    const model = typeof ctx.event.model === 'string' ? ctx.event.model : '';
+    const modelSuffix = model ? `, ${model}` : '';
+    await this.deps.messaging.sendToChannel(ctx.channelId, `\u25B6\uFE0F Session started (${source}${modelSuffix})`);
+    return true;
+  }
+
+  private async handleSessionEnd(ctx: EventContext): Promise<boolean> {
+    const reason = typeof ctx.event.reason === 'string' ? ctx.event.reason : 'unknown';
+    await this.deps.messaging.sendToChannel(ctx.channelId, `\u23F9\uFE0F Session ended (${reason})`);
+    return true;
+  }
+
+  private async handleThinkingStart(ctx: EventContext): Promise<boolean> {
+    // Lazily create start message on first activity
+    await this.ensureStartMessageAndStreaming(ctx);
+
+    const pending = ctx.pendingSnapshot;
+    if (pending?.messageId) {
+      this.deps.messaging.addReactionToMessage(pending.channelId, pending.messageId, '\uD83E\uDDE0').catch(() => {});
+    }
+
+    // Start periodic elapsed-time updates so Slack users know thinking is ongoing
+    const timerKey = `${ctx.projectName}:${ctx.instanceKey}`;
+    this.clearThinkingTimer(timerKey);
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      this.deps.streamingUpdater.append(
+        ctx.projectName, ctx.instanceKey,
+        `\uD83E\uDDE0 Thinking\u2026 (${elapsed}s)`,
+      );
+    }, BridgeHookServer.THINKING_INTERVAL_MS);
+    this.thinkingTimers.set(timerKey, { timer, startTime });
+
+    return true;
+  }
+
+  private async handleThinkingStop(ctx: EventContext): Promise<boolean> {
+    const pending = ctx.pendingSnapshot;
+
+    // Show total thinking duration and clear the timer
+    const timerKey = `${ctx.projectName}:${ctx.instanceKey}`;
+    const entry = this.thinkingTimers.get(timerKey);
+    if (entry) {
+      const elapsed = Math.round((Date.now() - entry.startTime) / 1000);
+      if (elapsed >= 5) {
+        this.deps.streamingUpdater.append(
+          ctx.projectName, ctx.instanceKey,
+          `\uD83E\uDDE0 Thought for ${elapsed}s`,
+        );
+      }
+    }
+    this.clearThinkingTimer(timerKey);
+
+    // Replace 🧠 reaction with ✅ to indicate thinking is complete
+    if (pending?.messageId) {
+      this.deps.messaging.replaceOwnReactionOnMessage(
+        pending.channelId, pending.messageId, '\uD83E\uDDE0', '\u2705',
+      ).catch(() => {});
+    }
+    return true;
+  }
+
+  private async handleToolActivity(ctx: EventContext): Promise<boolean> {
+    // Lazily create start message on first activity
+    await this.ensureStartMessageAndStreaming(ctx);
+
+    const pending = ctx.pendingSnapshot;
+
+    // Update single thread message with accumulated tool activity (append mode)
+    if (ctx.text && pending?.startMessageId) {
+      const k = `${ctx.projectName}:${ctx.instanceKey}`;
+      const existing = this.threadActivityMessages.get(k);
+
+      if (existing && existing.parentMessageId === pending.startMessageId && this.deps.messaging.updateMessage) {
+        // Append new activity line to thread message
+        existing.lines.push(ctx.text);
         try {
-          await this.deps.messaging.replyInThread(pending.channelId, pending.startMessageId, text);
+          await this.deps.messaging.updateMessage(existing.channelId, existing.messageId, existing.lines.join('\n'));
+        } catch (error) {
+          console.warn('Failed to update thread activity message:', error);
+        }
+      } else if (this.deps.messaging.replyInThreadWithId) {
+        // Create first thread message and track it
+        try {
+          const msgId = await this.deps.messaging.replyInThreadWithId(pending.channelId, pending.startMessageId, ctx.text);
+          if (msgId) {
+            this.threadActivityMessages.set(k, {
+              channelId: pending.channelId,
+              parentMessageId: pending.startMessageId,
+              messageId: msgId,
+              lines: [ctx.text],
+            });
+          }
+        } catch (error) {
+          console.warn('Failed to post tool activity as thread reply:', error);
+        }
+      } else if (this.deps.messaging.replyInThread) {
+        // Fallback: no ID tracking available, post individual replies
+        try {
+          await this.deps.messaging.replyInThread(pending.channelId, pending.startMessageId, ctx.text);
         } catch (error) {
           console.warn('Failed to post tool activity as thread reply:', error);
         }
       }
-      return true;
     }
 
-    if (eventType === 'session.idle') {
-      // Grab the pending message info BEFORE markCompleted deletes it (needed for thread replies)
-      const pending = this.deps.pendingTracker.getPending(projectName, instance?.agentType || agentType, instance?.instanceId);
-
-      // Fire reaction update in background – don't block message delivery
-      this.deps.pendingTracker.markCompleted(projectName, instance?.agentType || agentType, instance?.instanceId).catch(() => {});
-
-      // Post intermediate text (assistant text from before tool calls) as thread reply
-      const intermediateText = typeof event.intermediateText === 'string' ? event.intermediateText.trim() : '';
-      if (intermediateText && pending?.startMessageId && this.deps.messaging.replyInThread) {
-        try {
-          const split = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
-          const chunks = split(intermediateText);
-          for (const chunk of chunks) {
-            if (chunk.trim().length > 0) {
-              await this.deps.messaging.replyInThread(pending.channelId, pending.startMessageId, chunk);
-            }
-          }
-        } catch (error) {
-          console.warn('Failed to post intermediate text as thread reply:', error);
-        }
-      }
-
-      // Post thinking as thread reply under the start message
-      const thinking = typeof event.thinking === 'string' ? event.thinking.trim() : '';
-      if (thinking && pending?.startMessageId && this.deps.messaging.replyInThread) {
-        try {
-          const maxLen = 12000;
-          let thinkingText = thinking.length > maxLen
-            ? thinking.substring(0, maxLen) + '\n\n_(truncated)_'
-            : thinking;
-          thinkingText = `:brain: *Reasoning*\n\`\`\`\n${thinkingText}\n\`\`\``;
-
-          const split = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
-          const thinkingChunks = split(thinkingText);
-          for (const chunk of thinkingChunks) {
-            if (chunk.trim().length > 0) {
-              await this.deps.messaging.replyInThread(pending.channelId, pending.startMessageId, chunk);
-            }
-          }
-        } catch (error) {
-          console.warn('Failed to post thinking as thread reply:', error);
-        }
-      }
-
-      if (text && text.trim().length > 0) {
-        const trimmed = text.trim();
-        // Use turnText (all assistant text from the turn) for file path extraction
-        // to handle the race condition where displayText doesn't contain file paths
-        const turnText = typeof event.turnText === 'string' ? event.turnText.trim() : '';
-        const fileSearchText = turnText || trimmed;
-        const projectPath = project.projectPath ? resolve(project.projectPath) : '';
-        const filePaths = this.validateFilePaths(extractFilePaths(fileSearchText), projectPath);
-
-        // Strip file paths from the display text to avoid leaking absolute paths
-        const displayText = filePaths.length > 0 ? stripFilePaths(trimmed, filePaths) : trimmed;
-
-        const split = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
-        const chunks = split(displayText);
-        for (const chunk of chunks) {
-          if (chunk.trim().length > 0) {
-            await this.deps.messaging.sendToChannel(channelId, chunk);
-          }
-        }
-
-        if (filePaths.length > 0) {
-          await this.deps.messaging.sendToChannelWithFiles(channelId, '', filePaths);
-        }
-      }
-
-      // Send prompt choices (AskUserQuestion, ExitPlanMode) as additional message
-      const promptText = typeof event.promptText === 'string' ? event.promptText.trim() : '';
-      if (promptText) {
-        const promptSplit = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
-        const promptChunks = promptSplit(promptText);
-        for (const chunk of promptChunks) {
-          if (chunk.trim().length > 0) {
-            await this.deps.messaging.sendToChannel(channelId, chunk);
-          }
-        }
-      }
-
-      return true;
+    // Update parent message with tool activity preview so the channel view shows progress
+    if (ctx.text) {
+      this.deps.streamingUpdater.append(ctx.projectName, ctx.instanceKey, ctx.text);
     }
 
     return true;
+  }
+
+  private async handleSessionIdle(ctx: EventContext): Promise<boolean> {
+    // Clear thinking timer if still running
+    this.clearThinkingTimer(`${ctx.projectName}:${ctx.instanceKey}`);
+    // Clear thread activity tracking
+    this.threadActivityMessages.delete(`${ctx.projectName}:${ctx.instanceKey}`);
+
+    // Get startMessageId from the live pending entry — it may have been created
+    // lazily by thinking.start or tool.activity handlers after the snapshot was taken.
+    const livePending = this.deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
+    const startMessageId = livePending?.startMessageId;
+
+    // Finalize streaming message only if a start message was created (i.e. there was activity)
+    const usage = ctx.event.usage as Record<string, unknown> | undefined;
+    if (startMessageId) {
+      const finalizeHeader = this.buildFinalizeHeader(usage);
+      await this.deps.streamingUpdater.finalize(
+        ctx.projectName, ctx.instanceKey,
+        finalizeHeader || undefined,
+        startMessageId,
+      );
+    }
+
+    // Fire reaction update in background – don't block message delivery
+    this.deps.pendingTracker.markCompleted(ctx.projectName, ctx.agentType, ctx.instanceId).catch(() => {});
+
+    // Thread replies — only possible if a start message exists
+    const pending: PendingEntry | undefined = startMessageId
+      ? { channelId: ctx.channelId, messageId: ctx.pendingSnapshot?.messageId || '', startMessageId }
+      : undefined;
+    await this.postUsageAsThreadReply(pending, usage);
+    await this.postIntermediateTextAsThreadReply(pending, ctx.event);
+    await this.postThinkingAsThreadReply(pending, ctx.event);
+
+    // Main response text + files
+    await this.postResponseText(ctx);
+
+    // Prompt choices (AskUserQuestion, ExitPlanMode)
+    await this.postPromptChoices(ctx);
+
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // session.idle sub-methods
+  // ---------------------------------------------------------------------------
+
+  private buildFinalizeHeader(usage: Record<string, unknown> | undefined): string | undefined {
+    if (!usage || typeof usage !== 'object') return undefined;
+    const inputTokens = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
+    const outputTokens = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
+    const totalTokens = inputTokens + outputTokens;
+    const totalCost = typeof usage.totalCostUsd === 'number' ? usage.totalCostUsd : 0;
+    const parts: string[] = ['\u2705 Done'];
+    if (totalTokens > 0) parts.push(`${totalTokens.toLocaleString()} tokens`);
+    if (totalCost > 0) parts.push(`$${totalCost.toFixed(2)}`);
+    return parts.join(' \u00B7 ');
+  }
+
+  private async postUsageAsThreadReply(
+    pending: PendingEntry | undefined,
+    usage: Record<string, unknown> | undefined,
+  ): Promise<void> {
+    if (!usage || typeof usage !== 'object' || !pending?.startMessageId || !this.deps.messaging.replyInThread) return;
+    const inputTokens = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
+    const outputTokens = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
+    const totalCost = typeof usage.totalCostUsd === 'number' ? usage.totalCostUsd : 0;
+    if (inputTokens > 0 || outputTokens > 0) {
+      const usageLine = `\uD83D\uDCCA Input: ${inputTokens.toLocaleString()} \u00B7 Output: ${outputTokens.toLocaleString()}${totalCost > 0 ? ` \u00B7 Cost: $${totalCost.toFixed(2)}` : ''}`;
+      try {
+        await this.deps.messaging.replyInThread(pending.channelId, pending.startMessageId, usageLine);
+      } catch { /* ignore usage reply failures */ }
+    }
+  }
+
+  private async postIntermediateTextAsThreadReply(
+    pending: PendingEntry | undefined,
+    event: Record<string, unknown>,
+  ): Promise<void> {
+    const intermediateText = typeof event.intermediateText === 'string' ? event.intermediateText.trim() : '';
+    if (!intermediateText || !pending?.startMessageId || !this.deps.messaging.replyInThread) return;
+    try {
+      await this.splitAndSendAsThreadReply(pending.channelId, pending.startMessageId, intermediateText);
+    } catch (error) {
+      console.warn('Failed to post intermediate text as thread reply:', error);
+    }
+  }
+
+  private async postThinkingAsThreadReply(
+    pending: PendingEntry | undefined,
+    event: Record<string, unknown>,
+  ): Promise<void> {
+    const thinking = typeof event.thinking === 'string' ? event.thinking.trim() : '';
+    if (!thinking || !pending?.startMessageId || !this.deps.messaging.replyInThread) return;
+    try {
+      const maxLen = 12000;
+      let thinkingText = thinking.length > maxLen
+        ? thinking.substring(0, maxLen) + '\n\n_(truncated)_'
+        : thinking;
+      thinkingText = `:brain: *Reasoning*\n\`\`\`\n${thinkingText}\n\`\`\``;
+      await this.splitAndSendAsThreadReply(pending.channelId, pending.startMessageId, thinkingText);
+    } catch (error) {
+      console.warn('Failed to post thinking as thread reply:', error);
+    }
+  }
+
+  private async postResponseText(ctx: EventContext): Promise<void> {
+    if (!ctx.text || ctx.text.trim().length === 0) return;
+
+    const trimmed = ctx.text.trim();
+    // Use turnText (all assistant text from the turn) for file path extraction
+    // to handle the race condition where displayText doesn't contain file paths
+    const turnText = typeof ctx.event.turnText === 'string' ? ctx.event.turnText.trim() : '';
+    const fileSearchText = turnText || trimmed;
+    const filePaths = this.validateFilePaths(extractFilePaths(fileSearchText), ctx.projectPath);
+
+    // Strip file paths from the display text to avoid leaking absolute paths
+    const displayText = filePaths.length > 0 ? stripFilePaths(trimmed, filePaths) : trimmed;
+
+    await this.splitAndSendToChannel(ctx.channelId, displayText);
+
+    if (filePaths.length > 0) {
+      await this.deps.messaging.sendToChannelWithFiles(ctx.channelId, '', filePaths);
+    }
+  }
+
+  private async postPromptChoices(ctx: EventContext): Promise<void> {
+    // Send prompt choices (AskUserQuestion, ExitPlanMode) as channel message
+    const promptText = typeof ctx.event.promptText === 'string' ? ctx.event.promptText.trim() : '';
+    if (!promptText) return;
+    await this.splitAndSendToChannel(ctx.channelId, promptText);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared message splitting helpers
+  // ---------------------------------------------------------------------------
+
+  private async splitAndSendToChannel(channelId: string, text: string): Promise<void> {
+    const split = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
+    const chunks = split(text);
+    for (const chunk of chunks) {
+      if (chunk.trim().length > 0) {
+        await this.deps.messaging.sendToChannel(channelId, chunk);
+      }
+    }
+  }
+
+  private async splitAndSendAsThreadReply(channelId: string, messageId: string, text: string): Promise<void> {
+    if (!this.deps.messaging.replyInThread) return;
+    const split = this.deps.messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
+    const chunks = split(text);
+    for (const chunk of chunks) {
+      if (chunk.trim().length > 0) {
+        await this.deps.messaging.replyInThread(channelId, messageId, chunk);
+      }
+    }
   }
 }

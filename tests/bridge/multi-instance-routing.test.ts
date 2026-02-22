@@ -132,6 +132,7 @@ describe('multi-instance platform → agent routing', () => {
       markPending: vi.fn().mockResolvedValue(undefined),
       markError: vi.fn().mockResolvedValue(undefined),
       markCompleted: vi.fn().mockResolvedValue(undefined),
+      getPending: vi.fn().mockReturnValue(undefined),
     };
 
     router = new BridgeMessageRouter({
@@ -139,6 +140,14 @@ describe('multi-instance platform → agent routing', () => {
       runtime,
       stateManager,
       pendingTracker,
+      streamingUpdater: {
+        canStream: vi.fn().mockReturnValue(false),
+        start: vi.fn(),
+        append: vi.fn().mockReturnValue(false),
+        finalize: vi.fn().mockResolvedValue(undefined),
+        discard: vi.fn(),
+        has: vi.fn().mockReturnValue(false),
+      } as any,
       sanitizeInput: (content: string) => content.trim() || null,
     });
 

@@ -34,6 +34,7 @@ function createMockPendingTracker() {
     markError: vi.fn().mockResolvedValue(undefined),
     hasPending: vi.fn().mockReturnValue(true),
     ensurePending: vi.fn().mockResolvedValue(undefined),
+    ensureStartMessage: vi.fn().mockResolvedValue(undefined),
     getPending: vi.fn().mockReturnValue(undefined),
   };
 }
@@ -95,6 +96,7 @@ describe('container agent → platform send', () => {
       messaging: createMockMessaging() as any,
       stateManager: createMockStateManager() as any,
       pendingTracker: createMockPendingTracker() as any,
+      streamingUpdater: { canStream: vi.fn(), start: vi.fn(), append: vi.fn(), finalize: vi.fn(), discard: vi.fn(), has: vi.fn() } as any,
       reloadChannelMappings: vi.fn(),
       ...deps,
     };
@@ -318,7 +320,7 @@ describe('container agent → platform send', () => {
         'start-msg-ts',
         expect.stringContaining('analyze the error stack trace'),
       );
-      // Main response should be a channel message
+      // Main response goes to channel via sendToChannel
       expect(mockMessaging.sendToChannel).toHaveBeenCalledWith('ch-container', 'Fixed the bug.');
     });
 
@@ -419,7 +421,7 @@ describe('container agent → platform send', () => {
         'start-msg-ts-2',
         expect.stringContaining('Instance 2 reasoning'),
       );
-      // Main response to secondary channel
+      // Main response goes to secondary channel via sendToChannel
       expect(mockMessaging.sendToChannel).toHaveBeenCalledWith('ch-secondary', 'Response from instance 2');
     });
 
@@ -489,15 +491,20 @@ describe('container agent → platform send', () => {
         expect.stringContaining('evaluate options'),
       );
       // Text + promptText → channel messages
-      expect(mockMessaging.sendToChannel).toHaveBeenCalledTimes(2);
-      expect(mockMessaging.sendToChannel.mock.calls[0][1]).toBe('Here are two approaches.');
-      expect(mockMessaging.sendToChannel.mock.calls[1][1]).toContain('Pick one?');
+      expect(mockMessaging.sendToChannel).toHaveBeenCalledWith('ch-container', 'Here are two approaches.');
+      expect(mockMessaging.sendToChannel).toHaveBeenCalledWith(
+        'ch-container',
+        expect.stringContaining('Pick one?'),
+      );
     });
 
     it('posts tool.activity from container instance as thread reply', async () => {
       const mockMessaging = createMockMessaging();
       (mockMessaging as any).replyInThread = vi.fn().mockResolvedValue(undefined);
+      (mockMessaging as any).replyInThreadWithId = vi.fn().mockResolvedValue('thread-msg-ts');
+      (mockMessaging as any).updateMessage = vi.fn().mockResolvedValue(undefined);
       const mockPendingTracker = createMockPendingTracker();
+      mockPendingTracker.ensureStartMessage.mockResolvedValue('start-msg-ts');
       mockPendingTracker.getPending.mockReturnValue({
         channelId: 'ch-container',
         messageId: 'msg-user-1',
@@ -522,8 +529,8 @@ describe('container agent → platform send', () => {
       });
 
       expect(res.status).toBe(200);
-      expect((mockMessaging as any).replyInThread).toHaveBeenCalledTimes(1);
-      expect((mockMessaging as any).replyInThread).toHaveBeenCalledWith(
+      expect((mockMessaging as any).replyInThreadWithId).toHaveBeenCalledTimes(1);
+      expect((mockMessaging as any).replyInThreadWithId).toHaveBeenCalledWith(
         'ch-container',
         'start-msg-ts',
         '📖 Read(`src/index.ts`)',
@@ -535,6 +542,7 @@ describe('container agent → platform send', () => {
     it('ignores tool.activity from container when no pending entry', async () => {
       const mockMessaging = createMockMessaging();
       (mockMessaging as any).replyInThread = vi.fn().mockResolvedValue(undefined);
+      (mockMessaging as any).replyInThreadWithId = vi.fn().mockResolvedValue('thread-msg-ts');
       const mockPendingTracker = createMockPendingTracker();
       // getPending returns undefined
       const project = createContainerProject();
@@ -556,13 +564,16 @@ describe('container agent → platform send', () => {
       });
 
       expect(res.status).toBe(200);
-      expect((mockMessaging as any).replyInThread).not.toHaveBeenCalled();
+      expect((mockMessaging as any).replyInThreadWithId).not.toHaveBeenCalled();
     });
 
     it('routes tool.activity to correct instance channel in multi-instance setup', async () => {
       const mockMessaging = createMockMessaging();
       (mockMessaging as any).replyInThread = vi.fn().mockResolvedValue(undefined);
+      (mockMessaging as any).replyInThreadWithId = vi.fn().mockResolvedValue('thread-msg-ts');
+      (mockMessaging as any).updateMessage = vi.fn().mockResolvedValue(undefined);
       const mockPendingTracker = createMockPendingTracker();
+      mockPendingTracker.ensureStartMessage.mockResolvedValue('start-msg-ts');
       mockPendingTracker.getPending.mockReturnValue({
         channelId: 'ch-claude-2',
         messageId: 'msg-user-1',
@@ -609,7 +620,7 @@ describe('container agent → platform send', () => {
       });
 
       expect(res.status).toBe(200);
-      expect((mockMessaging as any).replyInThread).toHaveBeenCalledWith(
+      expect((mockMessaging as any).replyInThreadWithId).toHaveBeenCalledWith(
         'ch-claude-2',
         'start-msg-ts',
         '💻 `npm run build`',
@@ -619,6 +630,7 @@ describe('container agent → platform send', () => {
     it('tool.activity does not trigger markCompleted on container instance', async () => {
       const mockMessaging = createMockMessaging();
       (mockMessaging as any).replyInThread = vi.fn().mockResolvedValue(undefined);
+      (mockMessaging as any).replyInThreadWithId = vi.fn().mockResolvedValue('thread-msg-ts');
       const mockPendingTracker = createMockPendingTracker();
       mockPendingTracker.getPending.mockReturnValue({
         channelId: 'ch-container',

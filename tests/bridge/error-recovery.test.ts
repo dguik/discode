@@ -43,6 +43,8 @@ function createMockMessaging() {
     sendToChannelWithFiles: vi.fn().mockResolvedValue(undefined),
     addReactionToMessage: vi.fn().mockResolvedValue(undefined),
     replaceOwnReactionOnMessage: vi.fn().mockResolvedValue(undefined),
+    replyInThreadWithId: vi.fn().mockResolvedValue('thread-msg-ts'),
+    updateMessage: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -76,6 +78,7 @@ function createMockPendingTracker() {
     markError: vi.fn().mockResolvedValue(undefined),
     hasPending: vi.fn().mockReturnValue(true),
     ensurePending: vi.fn().mockResolvedValue(undefined),
+    ensureStartMessage: vi.fn().mockResolvedValue(undefined),
     getPending: vi.fn().mockReturnValue(undefined),
   };
 }
@@ -185,7 +188,7 @@ describe('PendingMessageTracker', () => {
   });
 
   describe('getPending', () => {
-    it('returns pending entry with startMessageId when sendToChannelWithId succeeds', async () => {
+    it('returns pending entry with startMessageId after ensureStartMessage', async () => {
       const messaging = {
         ...createMockMessaging(),
         sendToChannelWithId: vi.fn().mockResolvedValue('bot-start-msg-ts'),
@@ -193,6 +196,8 @@ describe('PendingMessageTracker', () => {
       const tracker = new PendingMessageTracker(messaging as any);
 
       await tracker.markPending('project', 'claude', 'ch-1', 'msg-1');
+      // markPending no longer creates start message — call ensureStartMessage lazily
+      await tracker.ensureStartMessage('project', 'claude');
 
       const entry = tracker.getPending('project', 'claude');
       expect(entry).toBeDefined();
@@ -235,6 +240,7 @@ describe('PendingMessageTracker', () => {
       const tracker = new PendingMessageTracker(messaging as any);
 
       await tracker.markPending('project', 'claude', 'ch-1', 'msg-1');
+      await tracker.ensureStartMessage('project', 'claude');
       expect(tracker.getPending('project', 'claude')).toBeDefined();
 
       await tracker.markCompleted('project', 'claude');
@@ -257,6 +263,8 @@ describe('PendingMessageTracker', () => {
 
       await tracker.markPending('project', 'claude', 'ch-1', 'msg-1', 'claude');
       await tracker.markPending('project', 'claude', 'ch-2', 'msg-2', 'claude-2');
+      await tracker.ensureStartMessage('project', 'claude', 'claude');
+      await tracker.ensureStartMessage('project', 'claude', 'claude-2');
 
       const entry1 = tracker.getPending('project', 'claude', 'claude');
       const entry2 = tracker.getPending('project', 'claude', 'claude-2');
@@ -264,7 +272,7 @@ describe('PendingMessageTracker', () => {
       expect(entry2?.startMessageId).toBe('start-ts-2');
     });
 
-    it('sends start message via sendToChannelWithId during markPending', async () => {
+    it('sends start message via ensureStartMessage (not during markPending)', async () => {
       const messaging = {
         ...createMockMessaging(),
         sendToChannelWithId: vi.fn().mockResolvedValue('start-ts'),
@@ -272,8 +280,13 @@ describe('PendingMessageTracker', () => {
       const tracker = new PendingMessageTracker(messaging as any);
 
       await tracker.markPending('project', 'claude', 'ch-1', 'msg-1');
+      // markPending should NOT send start message
+      expect(messaging.sendToChannelWithId).not.toHaveBeenCalled();
 
+      // ensureStartMessage creates it lazily
+      const startId = await tracker.ensureStartMessage('project', 'claude');
       expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing...');
+      expect(startId).toBe('start-ts');
     });
   });
 
@@ -373,6 +386,7 @@ describe('BridgeMessageRouter delivery failure', () => {
       runtime,
       stateManager,
       pendingTracker,
+      streamingUpdater: { canStream: vi.fn(), start: vi.fn(), append: vi.fn(), finalize: vi.fn(), discard: vi.fn(), has: vi.fn() } as any,
       sanitizeInput: (content: string) => content.trim() || null,
     });
 
@@ -484,6 +498,7 @@ describe('hook server error resilience', () => {
       messaging: createMockMessaging() as any,
       stateManager: createMockStateManager() as any,
       pendingTracker: createMockPendingTracker() as any,
+      streamingUpdater: { canStream: vi.fn(), start: vi.fn(), append: vi.fn(), finalize: vi.fn(), discard: vi.fn(), has: vi.fn() } as any,
       reloadChannelMappings: vi.fn(),
       ...deps,
     };
@@ -528,8 +543,8 @@ describe('hook server error resilience', () => {
       text: 'Hello',
     });
 
-    // Should return 500 (internal error) but not crash the server
-    expect(res.status).toBe(500);
+    // Channel queue absorbs errors via .catch() — returns 200 even on handler failure
+    expect(res.status).toBe(200);
 
     // Verify server is still alive by making another request
     const res2 = await postJSON(port, '/reload', {});
@@ -555,7 +570,8 @@ describe('hook server error resilience', () => {
       text: 'Agent crashed',
     });
 
-    expect(res.status).toBe(500);
+    // Channel queue absorbs errors via .catch() — returns 200 even on handler failure
+    expect(res.status).toBe(200);
 
     // Server should still be operational
     const res2 = await postJSON(port, '/reload', {});
@@ -692,10 +708,10 @@ describe('hook server error resilience', () => {
     expect(mockMessaging.sendToChannel).not.toHaveBeenCalled();
   });
 
-  it('does not crash when replyInThread throws during tool.activity', async () => {
+  it('does not crash when replyInThreadWithId throws during tool.activity', async () => {
     const mockMessaging = {
       ...createMockMessaging(),
-      replyInThread: vi.fn().mockRejectedValue(new Error('Discord API error')),
+      replyInThreadWithId: vi.fn().mockRejectedValue(new Error('Discord API error')),
     };
     const mockPendingTracker = createMockPendingTracker();
     mockPendingTracker.getPending.mockReturnValue({
@@ -758,15 +774,13 @@ describe('hook server error resilience', () => {
     });
 
     expect(res.status).toBe(200);
-    // replyInThread called: once by "⏳ Processing..." in markPending is sendToChannelWithId,
-    // and once by tool.activity
-    expect(mockMessaging.replyInThread).toHaveBeenCalledWith('ch-1', 'start-ts', '📖 Read(`src/index.ts`)');
+    // replyInThreadWithId called for tool.activity thread reply
+    expect(mockMessaging.replyInThreadWithId).toHaveBeenCalledWith('ch-1', 'start-ts', '📖 Read(`src/index.ts`)');
   });
 
   it('does not crash when ensurePending throws during tool.activity', async () => {
     const mockMessaging = {
       ...createMockMessaging(),
-      replyInThread: vi.fn().mockResolvedValue(undefined),
     };
     const mockPendingTracker = createMockPendingTracker();
     mockPendingTracker.hasPending.mockReturnValue(false);
@@ -839,7 +853,7 @@ describe('hook server error resilience', () => {
     });
     await new Promise((r) => setTimeout(r, 50));
 
-    // Step 1: First tool.activity from tmux — triggers ensurePending
+    // Step 1: First tool.activity from tmux — triggers ensurePending + ensureStartMessage
     const res1 = await postJSON(port, '/opencode-event', {
       projectName: 'test',
       agentType: 'claude',
@@ -847,10 +861,11 @@ describe('hook server error resilience', () => {
       text: '📖 Read(`src/index.ts`)',
     });
     expect(res1.status).toBe(200);
+    // ensureStartMessage creates the start message lazily on first activity
     expect(mockMessaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing...');
-    expect(mockMessaging.replyInThread).toHaveBeenCalledWith('ch-1', 'auto-start-ts', '📖 Read(`src/index.ts`)');
+    expect(mockMessaging.replyInThreadWithId).toHaveBeenCalledWith('ch-1', 'auto-start-ts', '📖 Read(`src/index.ts`)');
 
-    // Step 2: Second tool.activity — no duplicate ensurePending
+    // Step 2: Second tool.activity — appends to thread message
     mockMessaging.sendToChannelWithId.mockClear();
     const res2 = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -861,7 +876,12 @@ describe('hook server error resilience', () => {
     expect(res2.status).toBe(200);
     // Should NOT send another "Processing..." message
     expect(mockMessaging.sendToChannelWithId).not.toHaveBeenCalled();
-    expect(mockMessaging.replyInThread).toHaveBeenCalledWith('ch-1', 'auto-start-ts', '✏️ Edit(`src/config.ts`) +3 lines');
+    // Second activity appends to the existing thread message
+    expect(mockMessaging.replyInThreadWithId).toHaveBeenCalledTimes(1); // only first call
+    expect(mockMessaging.updateMessage).toHaveBeenCalledWith(
+      'ch-1', 'thread-msg-ts',
+      '📖 Read(`src/index.ts`)\n✏️ Edit(`src/config.ts`) +3 lines',
+    );
 
     // Step 3: session.idle — completes the turn
     const res3 = await postJSON(port, '/opencode-event', {
@@ -881,7 +901,7 @@ describe('hook server error resilience', () => {
       (c: any) => typeof c[2] === 'string' && c[2].includes('Analyzing the issue'),
     );
     expect(thinkingCall).toBeDefined();
-    // Main text as channel message
+    // Main text goes to channel
     expect(mockMessaging.sendToChannel).toHaveBeenCalledWith('ch-1', 'Done!');
 
     // No reaction change (tmux-initiated, empty messageId)

@@ -39,23 +39,15 @@ export class PendingMessageTracker {
     // Add reaction to user's message
     await this.messaging.addReactionToMessage(channelId, messageId, '⏳');
 
-    // Send a start message and store its ID for thread replies
-    let startMessageId: string | undefined;
-    if (this.messaging.sendToChannelWithId) {
-      try {
-        startMessageId = await this.messaging.sendToChannelWithId(channelId, '⏳ Processing...');
-      } catch {
-        // Non-fatal: thread replies will be skipped if start message fails
-      }
-    }
-
-    this.pendingMessageByInstance.set(key, { channelId, messageId, startMessageId });
+    // Store pending entry WITHOUT start message — deferred until first activity
+    this.pendingMessageByInstance.set(key, { channelId, messageId });
   }
 
   /**
    * Ensure a pending entry exists for this instance.
    * Used for tmux-initiated prompts that bypass the normal Slack message flow.
-   * Sends "⏳ Processing..." but does not add a reaction (no user message to react to).
+   * Does not add a reaction (no user message to react to).
+   * The start message is created lazily via ensureStartMessage().
    */
   async ensurePending(
     projectName: string,
@@ -75,16 +67,33 @@ export class PendingMessageTracker {
       this.recentlyCompleted.delete(key);
     }
 
-    let startMessageId: string | undefined;
+    // Store pending entry WITHOUT start message — deferred until first activity
+    this.pendingMessageByInstance.set(key, { channelId, messageId: '' });
+  }
+
+  /**
+   * Lazily create the "⏳ Processing..." start message for this pending entry.
+   * Called on the first activity event (thinking.start, tool.activity) so that
+   * commands with no activity (e.g. /compact) never produce a parent message.
+   * Returns the startMessageId if created or already exists.
+   */
+  async ensureStartMessage(projectName: string, agentType: string, instanceId?: string): Promise<string | undefined> {
+    const key = this.pendingKey(projectName, instanceId || agentType);
+    const pending = this.pendingMessageByInstance.get(key);
+    if (!pending) return undefined;
+
+    // Already has a start message
+    if (pending.startMessageId) return pending.startMessageId;
+
     if (this.messaging.sendToChannelWithId) {
       try {
-        startMessageId = await this.messaging.sendToChannelWithId(channelId, '⏳ Processing...');
+        pending.startMessageId = await this.messaging.sendToChannelWithId(pending.channelId, '⏳ Processing...');
       } catch {
-        // Non-fatal: thread replies will be skipped if start message fails
+        // Non-fatal
       }
     }
 
-    this.pendingMessageByInstance.set(key, { channelId, messageId: '', startMessageId });
+    return pending.startMessageId;
   }
 
   async markCompleted(projectName: string, agentType: string, instanceId?: string): Promise<void> {

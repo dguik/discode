@@ -74,6 +74,8 @@ function normalizeInstanceMap(project: ProjectState): Record<string, ProjectInst
       ...(rawValue.containerMode ? { containerMode: true } : {}),
       ...(typeof rawValue.containerId === 'string' ? { containerId: rawValue.containerId } : {}),
       ...(typeof rawValue.containerName === 'string' ? { containerName: rawValue.containerName } : {}),
+      ...(rawValue.runtimeType === 'sdk' || rawValue.runtimeType === 'tmux' ? { runtimeType: rawValue.runtimeType } : {}),
+      ...(typeof rawValue.sdkSessionId === 'string' ? { sdkSessionId: rawValue.sdkSessionId } : {}),
     };
   }
 
