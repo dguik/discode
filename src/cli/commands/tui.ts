@@ -721,62 +721,88 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     width?: number,
     height?: number,
   ): Promise<string | undefined> => {
-    await requireStreamConnected('window output');
-
-    if (runtimeSupported === false) {
-      throw new Error('Runtime stream support is unavailable in the running daemon.');
-    }
-
-    const windowId = `${sessionName}:${windowName}`;
-
-    ensureStreamSubscribed(windowId, width, height);
-    const frame = runtimeFrameCache.get(windowId);
-    if (frame !== undefined) {
-      setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: 'stream live',
-      });
-      return frame;
-    }
-
-    const subscribed = streamSubscriptions.get(windowId);
-    if (subscribed && Date.now() - subscribed.subscribedAt < 1500) {
+    // Gracefully handle disconnected stream
+    if (!runtimeStreamConnected || !streamClient.isConnected()) {
       return undefined;
     }
 
-    setTransportStatus({
-      mode: 'stream',
-      connected: true,
-      detail: 'waiting for stream frame',
-    });
-    return undefined;
+    if (runtimeSupported === false) {
+      return undefined;
+    }
+
+    const windowId = `${sessionName}:${windowName}`;
+
+    try {
+      ensureStreamSubscribed(windowId, width, height);
+      const frame = runtimeFrameCache.get(windowId);
+      if (frame !== undefined) {
+        setTransportStatus({
+          mode: 'stream',
+          connected: true,
+          detail: 'stream live',
+        });
+        return frame;
+      }
+
+      const subscribed = streamSubscriptions.get(windowId);
+      if (subscribed && Date.now() - subscribed.subscribedAt < 1500) {
+        return undefined;
+      }
+
+      setTransportStatus({
+        mode: 'stream',
+        connected: true,
+        detail: 'waiting for stream frame',
+      });
+      return undefined;
+    } catch {
+      // Silently return undefined if stream operations fail
+      return undefined;
+    }
   };
 
   const sendRuntimeRawKey = async (sessionName: string, windowName: string, raw: string): Promise<void> => {
-    await requireStreamConnected('runtime input');
-
     if (!raw) return;
-    if (runtimeSupported === false) {
-      throw new Error('Runtime stream support is unavailable in the running daemon.');
+
+    // Gracefully handle disconnected stream (e.g., when window is closing)
+    if (!runtimeStreamConnected || !streamClient.isConnected()) {
+      return;
     }
+
+    if (runtimeSupported === false) {
+      return;
+    }
+
     const windowId = `${sessionName}:${windowName}`;
-    streamClient.input(windowId, Buffer.from(raw, 'utf8'));
-    setTransportStatus({
-      mode: 'stream',
-      connected: true,
-      detail: 'stream input',
-    });
+    try {
+      streamClient.input(windowId, Buffer.from(raw, 'utf8'));
+      setTransportStatus({
+        mode: 'stream',
+        connected: true,
+        detail: 'stream input',
+      });
+    } catch {
+      // Silently ignore errors when sending to disconnected/closed windows
+    }
   };
 
   const sendRuntimeResize = async (sessionName: string, windowName: string, width: number, height: number): Promise<void> => {
-    await requireStreamConnected('runtime resize');
-    if (runtimeSupported === false) {
-      throw new Error('Runtime stream support is unavailable in the running daemon.');
+    // Gracefully handle disconnected stream (e.g., when window is closing)
+    if (!runtimeStreamConnected || !streamClient.isConnected()) {
+      return;
     }
+
+    if (runtimeSupported === false) {
+      return;
+    }
+
     const windowId = `${sessionName}:${windowName}`;
-    streamClient.resize(windowId, width, height);
-    ensureStreamSubscribed(windowId, width, height);
+    try {
+      streamClient.resize(windowId, width, height);
+      ensureStreamSubscribed(windowId, width, height);
+    } catch {
+      // Silently ignore errors when resizing disconnected/closed windows
+    }
   };
 
   const registerRuntimeFrameListener = (listener: (frame: {
@@ -795,7 +821,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
 
   const handler = async (command: string, append: (line: string) => void): Promise<boolean> => {
     if (command === '/exit' || command === '/quit') {
-      append('Bye!');
+      append('Exiting TUI...');
       return true;
     }
 
@@ -1323,5 +1349,19 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     streamClient.disconnect();
     clearTmuxHealthTimer();
     process.off('exit', clearTmuxHealthTimer);
+
+    // After exiting TUI, return to terminal
+    if (effectiveConfig.runtimeMode === 'pty') {
+      // In PTY mode, spawn an interactive shell
+      console.log(chalk.cyan('\n📺 Opening terminal...\n'));
+      const shell = process.env.SHELL || '/bin/bash';
+      const { spawnSync } = await import('child_process');
+      spawnSync(shell, [], { stdio: 'inherit' });
+    } else if (startedFromTmux && currentSession) {
+      // In tmux mode, attach to the tmux session
+      console.log(chalk.cyan('\n📺 Returning to terminal...\n'));
+      const { attachToTmux } = await import('../common/tmux.js');
+      attachToTmux(currentSession, currentWindow || undefined);
+    }
   }
 }
