@@ -1,12 +1,12 @@
 /** @jsxImportSource @opentui/solid */
 /** @jsxRuntime automatic */
 
-import { InputRenderable, RGBA, TextAttributes } from '@opentui/core';
-import { render, useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/solid';
+import { InputRenderable, RGBA, TextAttributes, TextareaRenderable } from '@opentui/core';
+import { render, useKeyboard, usePaste, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/solid';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import { copyTextToClipboard } from '../src/cli/common/clipboard.js';
+import { copyTextToClipboard, readTextFromClipboard } from '../src/cli/common/clipboard.js';
 import type { TerminalSegment, TerminalStyledLine } from '../src/runtime/vt-screen.js';
 
 declare const DISCODE_VERSION: string | undefined;
@@ -100,6 +100,18 @@ const palette = {
   selectedBg: '#2b2b2b',
   selectedFg: '#ffffff',
 };
+
+const slashCommands = [
+  { command: '/new', description: 'create new session' },
+  { command: '/onboard', description: 'run onboarding inside TUI' },
+  { command: '/list', description: 'show current session list' },
+  { command: '/stop', description: 'select and stop a project' },
+  { command: '/projects', description: 'list configured projects' },
+  { command: '/config', description: 'manage keepChannel/defaultAgent/defaultChannel/runtimeMode' },
+  { command: '/help', description: 'show available commands' },
+  { command: '/exit', description: 'close the TUI' },
+  { command: '/quit', description: 'close the TUI' },
+];
 
 const paletteCommands = [
   { command: '/new', description: 'Create a new session' },
@@ -202,6 +214,8 @@ function withCursorPlainLine(line: string, col: number): string {
 function TuiApp(props: { input: TuiInput; close: () => void }) {
   const dims = useTerminalDimensions();
   const renderer = useRenderer();
+  const [value, setValue] = createSignal('');
+  const [selected, setSelected] = createSignal(0);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [paletteQuery, setPaletteQuery] = createSignal('');
   const [paletteSelected, setPaletteSelected] = createSignal(0);
@@ -227,9 +241,11 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [windowCursor, setWindowCursor] = createSignal<TerminalCursor | undefined>(undefined);
   const [cursorBlinkOn, setCursorBlinkOn] = createSignal(true);
   const [prefixPending, setPrefixPending] = createSignal(false);
+  const [runtimeInputMode, setRuntimeInputMode] = createSignal(true);
   const [runtimeStatusLine, setRuntimeStatusLine] = createSignal('transport: stream');
   const [commandStatusLine, setCommandStatusLine] = createSignal('status: ready');
   const [clipboardToast, setClipboardToast] = createSignal<string | undefined>(undefined);
+  const [composerReady, setComposerReady] = createSignal(false);
   const [projects, setProjects] = createSignal<Array<{
     project: string;
     session: string;
@@ -238,6 +254,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     channel: string;
     open: boolean;
   }>>([]);
+  let textarea: TextareaRenderable;
   let paletteInput: InputRenderable;
   let clipboardToastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -249,9 +266,9 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     openProjects()
       .slice()
       .sort((a, b) => {
-        const bySession = a.session.localeCompare(b.session);
+        const bySession = b.session.localeCompare(a.session);
         if (bySession !== 0) return bySession;
-        return a.window.localeCompare(b.window);
+        return b.window.localeCompare(a.window);
       })
       .slice(0, 9)
   );
@@ -284,7 +301,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
 
   const shouldShowRuntimeCursor = createMemo(() => {
     const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen();
-    const runtimeActive = !!currentSession() && !!currentWindow();
+    const runtimeActive = runtimeInputMode() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
     return runtimeActive && !dialogOpen && cursorBlinkOn();
   });
 
@@ -337,6 +354,21 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       .sort((a, b) => a.session.localeCompare(b.session));
   });
 
+  const query = createMemo(() => {
+    const next = value();
+    if (!next.startsWith('/')) return null;
+    if (next.includes(' ')) return null;
+    return next.slice(1).toLowerCase();
+  });
+
+  const matches = createMemo(() => {
+    if (paletteOpen()) return [];
+    const next = query();
+    if (next === null) return [];
+    if (next.length === 0) return slashCommands;
+    return slashCommands.filter((item) => item.command.slice(1).startsWith(next));
+  });
+
   const paletteMatches = createMemo(() => {
     const q = paletteQuery().trim().toLowerCase();
     if (!q) return paletteCommands;
@@ -344,6 +376,23 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       return item.command.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
     });
   });
+
+  const clampSelection = (offset: number) => {
+    const items = matches();
+    if (items.length === 0) return;
+    const count = items.length;
+    const next = (selected() + offset + count) % count;
+    setSelected(next);
+  };
+
+  const applySelection = () => {
+    const item = matches()[selected()];
+    if (!item) return;
+    const next = `${item.command} `;
+    textarea.setText(next);
+    setValue(next);
+    textarea.gotoBufferEnd();
+  };
 
   const parseValueLine = (lines: string[], key: string): string | undefined => {
     const prefix = `${key.toLowerCase()}:`;
@@ -475,6 +524,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     setConfigOpen(true);
     setConfigSelected(0);
     setConfigMessage('Loading...');
+    textarea?.blur();
     void refreshConfigDialog();
   };
 
@@ -550,6 +600,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     setPaletteOpen(true);
     setPaletteQuery('');
     setPaletteSelected(0);
+    textarea?.blur();
     setTimeout(() => {
       if (!paletteInput || paletteInput.isDestroyed) return;
       paletteInput.focus();
@@ -681,9 +732,60 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     await props.input.onStopProject(project);
   };
 
-  const canHandleRuntimeInput = () => {
-    return !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && !!currentSession() && !!currentWindow();
+  const submit = async () => {
+    const raw = textarea?.plainText ?? '';
+    const command = raw.trim();
+    textarea?.setText('');
+    setValue('');
+    if (!command) return;
+
+    if (command === 'new' || command === '/new') {
+      setNewOpen(true);
+      setNewSelected(0);
+      return;
+    }
+
+    if (command === 'stop' || command === '/stop') {
+      setStopOpen(true);
+      setStopSelected(0);
+      return;
+    }
+
+    if (command === 'list' || command === '/list') {
+      setListOpen(true);
+      setListSelected(0);
+      return;
+    }
+
+    if (command === 'config' || command === '/config') {
+      openConfigDialog();
+      return;
+    }
+
+    await executeCommand(command);
   };
+
+  const canHandleRuntimeInput = () => {
+    return runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
+  };
+
+  createEffect(() => {
+    if (!composerReady()) return;
+    if (!textarea || textarea.isDestroyed) return;
+
+    const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen();
+    if (dialogOpen) {
+      textarea.blur();
+      return;
+    }
+
+    if (canHandleRuntimeInput()) {
+      textarea.blur();
+      return;
+    }
+
+    textarea.focus();
+  });
 
   const toRuntimeRawKey = (evt: {
     name?: string;
@@ -718,6 +820,28 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     }
 
     return null;
+  };
+
+  const sendRawToRuntime = (raw: string) => {
+    if (!raw || !props.input.onRuntimeKey) return;
+    const session = currentSession();
+    const window = currentWindow();
+    if (!session || !window) return;
+    void props.input.onRuntimeKey(session, window, raw);
+  };
+
+  const pasteClipboardToRuntime = async () => {
+    try {
+      const text = await readTextFromClipboard();
+      if (!text || text.length === 0) {
+        showClipboardToast('Clipboard is empty');
+        return;
+      }
+      sendRawToRuntime(text);
+      showClipboardToast('Pasted from clipboard');
+    } catch (error) {
+      showClipboardToast(`Paste failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const toTextAttributes = (segment: { bold?: boolean; italic?: boolean; underline?: boolean }): number => {
@@ -796,11 +920,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       }
 
       if (evt.name === PREFIX_KEY_NAME && canHandleRuntimeInput()) {
-        const session = currentSession();
-        const window = currentWindow();
-        if (session && window && props.input.onRuntimeKey) {
-          void props.input.onRuntimeKey(session, window, String.fromCharCode(2));
-        }
+        sendRawToRuntime(String.fromCharCode(2));
       }
       return;
     }
@@ -820,6 +940,12 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       if (!paletteOpen()) {
         openCommandPalette();
       }
+      return;
+    }
+
+    if (evt.ctrl && evt.name === 'v' && canHandleRuntimeInput()) {
+      evt.preventDefault();
+      void pasteClipboardToRuntime();
       return;
     }
 
@@ -962,17 +1088,33 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       }
     }
 
+    if (!runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && evt.name === 'escape') {
+      evt.preventDefault();
+      textarea?.setText('');
+      setValue('');
+      setRuntimeInputMode(true);
+      return;
+    }
+
     if (canHandleRuntimeInput()) {
       const raw = toRuntimeRawKey(evt);
       if (raw) {
         evt.preventDefault();
-        const session = currentSession();
-        const window = currentWindow();
-        if (session && window && props.input.onRuntimeKey) {
-          void props.input.onRuntimeKey(session, window, raw);
+        sendRawToRuntime(raw);
+        if (value() && !value().startsWith('/')) {
+          textarea?.setText('');
+          setValue('');
         }
       }
     }
+  });
+
+  usePaste((evt) => {
+    if (!canHandleRuntimeInput()) return;
+    const text = evt.text || '';
+    if (!text) return;
+    evt.preventDefault();
+    sendRawToRuntime(text);
   });
 
   onMount(() => {
@@ -1093,9 +1235,17 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
 
     const initial = props.input.initialCommand?.trim();
     if (initial) {
+      setRuntimeInputMode(false);
       void executeCommand(initial);
     }
 
+    setTimeout(() => {
+      if (canHandleRuntimeInput()) {
+        textarea?.blur();
+      } else {
+        textarea?.focus();
+      }
+    }, 1);
   });
 
   return (
@@ -1164,13 +1314,14 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
             <text fg={palette.primary} attributes={TextAttributes.BOLD}>discode</text>
             <text fg={palette.muted}>{TUI_VERSION_LABEL}</text>
           </box>
-          <text fg={palette.primary}>mode: runtime input</text>
+          <text fg={runtimeInputMode() ? palette.primary : palette.muted}>{runtimeInputMode() ? 'mode: runtime input' : 'mode: command input'}</text>
           <text fg={palette.muted}>{runtimeStatusLine()}</text>
           <text fg={palette.muted}>{commandStatusLine()}</text>
           <text fg={prefixPending() ? palette.primary : palette.muted}>{`prefix: ${PREFIX_LABEL}${prefixPending() ? ' (waiting key)' : ''}`}</text>
           <text fg={palette.muted}>runtime: slash/ctrl pass to AI</text>
           <text fg={palette.muted}>window: prefix + 1..9</text>
           <text fg={palette.muted}>palette: Ctrl+Shift+P</text>
+          <text fg={palette.muted}>commands: / + Enter</text>
 
           <box flexDirection="column" marginTop={1}>
             <text fg={palette.primary} attributes={TextAttributes.BOLD}>Current Sessions</text>
@@ -1206,6 +1357,87 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           </box>
 
           <box flexGrow={1} />
+
+          <Show when={matches().length > 0}>
+            <box marginTop={1} border borderColor={palette.border} backgroundColor={palette.panel} flexDirection="column">
+              <For each={matches().slice(0, 6)}>
+                {(item, index) => (
+                  <box
+                    paddingLeft={1}
+                    paddingRight={1}
+                    backgroundColor={selected() === index() ? palette.selectedBg : palette.panel}
+                  >
+                    <text fg={selected() === index() ? palette.selectedFg : palette.text}>{item.command}</text>
+                    <text fg={palette.muted}>{`  ${item.description}`}</text>
+                  </box>
+                )}
+              </For>
+            </box>
+          </Show>
+
+          <box
+            marginTop={1}
+            marginBottom={1}
+            border
+            borderColor={!canHandleRuntimeInput() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() ? palette.focus : palette.border}
+            backgroundColor={palette.panel}
+            flexDirection="column"
+          >
+            <box paddingLeft={1} paddingRight={1}>
+              <text fg={palette.primary} attributes={TextAttributes.BOLD}>{'discode> '}</text>
+            </box>
+            <box paddingLeft={1} paddingRight={1}>
+              <textarea
+                ref={(input: TextareaRenderable) => {
+                  textarea = input;
+                  setComposerReady(true);
+                }}
+                minHeight={1}
+                maxHeight={4}
+                onSubmit={submit}
+                keyBindings={[{ name: 'return', action: 'submit' }]}
+                placeholder={runtimeInputMode() ? 'Type /command and press Enter' : 'Type a command'}
+                textColor={palette.text}
+                focusedTextColor={palette.text}
+                cursorColor={palette.primary}
+                onContentChange={() => {
+                  const next = textarea.plainText;
+                  setValue(next);
+                  setSelected(0);
+                }}
+                onKeyDown={(event) => {
+                  if (paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen()) {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (runtimeInputMode() && !value().startsWith('/') && event.sequence !== '/') {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (matches().length === 0) return;
+                  if (event.name === 'up') {
+                    event.preventDefault();
+                    clampSelection(-1);
+                    return;
+                  }
+                  if (event.name === 'down') {
+                    event.preventDefault();
+                    clampSelection(1);
+                    return;
+                  }
+                  if (event.name === 'tab') {
+                    event.preventDefault();
+                    applySelection();
+                    return;
+                  }
+                  if (event.name === 'return' && query() !== null) {
+                    event.preventDefault();
+                    applySelection();
+                  }
+                }}
+              />
+            </box>
+          </box>
         </box>
       </box>
 

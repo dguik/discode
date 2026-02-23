@@ -80,18 +80,18 @@ async function chooseRuntimeMode(
   }
 
   if (!interactive) {
-    console.log(chalk.yellow('⚠️ Non-interactive shell: using runtime mode pty.'));
-    return 'pty';
+    console.log(chalk.yellow('⚠️ Non-interactive shell: using runtime mode tmux.'));
+    return 'tmux';
   }
 
   console.log(chalk.white('\nChoose runtime mode'));
-  console.log(chalk.gray('   1. pty (default)'));
-  console.log(chalk.gray('   2. tmux (only for users comfortable with tmux)'));
+  console.log(chalk.gray('   1. tmux (default)'));
+  console.log(chalk.gray('   2. pty'));
 
   while (true) {
     const answer = await prompt(chalk.white('\nSelect runtime mode [1-2] (Enter = default): '));
-    if (!answer || answer === '1') return 'pty';
-    if (answer === '2') return 'tmux';
+    if (!answer || answer === '1') return 'tmux';
+    if (answer === '2') return 'pty';
     console.log(chalk.yellow('Please enter a valid number.'));
   }
 }
