@@ -354,6 +354,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     styled?: TerminalStyledLine[];
     cursorRow?: number;
     cursorCol?: number;
+    cursorVisible?: boolean;
   }) => void>();
   const streamSubscriptions = new Map<string, { cols: number; rows: number; subscribedAt: number }>();
 
@@ -390,6 +391,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             styled: undefined,
             cursorRow: undefined,
             cursorCol: undefined,
+            cursorVisible: undefined,
           });
         }
       }
@@ -411,6 +413,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             styled: frame.lines,
             cursorRow: frame.cursorRow,
             cursorCol: frame.cursorCol,
+            cursorVisible: frame.cursorVisible,
           });
         }
       }
@@ -472,6 +475,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             styled: next,
             cursorRow: patch.cursorRow,
             cursorCol: patch.cursorCol,
+            cursorVisible: patch.cursorVisible,
           });
         }
       }
@@ -502,6 +506,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             styled: undefined,
             cursorRow: undefined,
             cursorCol: undefined,
+            cursorVisible: undefined,
           });
         }
       }
@@ -522,6 +527,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             styled: undefined,
             cursorRow: undefined,
             cursorCol: undefined,
+            cursorVisible: undefined,
           });
         }
       }
@@ -532,10 +538,11 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       });
     },
     onError: (message) => {
+      const isSocketDown = message.includes('runtime stream socket error');
       setTransportStatus({
         mode: 'stream',
-        connected: false,
-        detail: 'stream error',
+        connected: isSocketDown ? false : (runtimeStreamConnected && streamClient.isConnected()),
+        detail: isSocketDown ? 'stream error' : 'stream warning',
         lastError: message,
       });
     },
@@ -812,6 +819,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     styled?: TerminalStyledLine[];
     cursorRow?: number;
     cursorCol?: number;
+    cursorVisible?: boolean;
   }) => void): (() => void) => {
     runtimeFrameListeners.add(listener);
     return () => {
@@ -1331,6 +1339,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
         styled?: TerminalStyledLine[];
         cursorRow?: number;
         cursorCol?: number;
+        cursorVisible?: boolean;
       }) => void) => {
         return registerRuntimeFrameListener(listener);
       },

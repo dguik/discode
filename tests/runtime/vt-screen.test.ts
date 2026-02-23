@@ -180,4 +180,235 @@ describe('VtScreen', () => {
     expect(lines.some((line) => line.includes('after-scroll'))).toBe(true);
     expect(lines.some((line) => line.includes('fixed-head'))).toBe(true);
   });
+
+  it('keeps combining marks in same cell and cursor column', () => {
+    const screen = new VtScreen(10, 4);
+    screen.write('e\u0301');
+
+    const pos = screen.getCursorPosition();
+    expect(pos.row).toBe(0);
+    expect(pos.col).toBe(1);
+
+    const frame = screen.snapshot(10, 4);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines.some((line) => line.includes('e\u0301'))).toBe(true);
+  });
+
+  it('combining mark after full line does not trigger deferred wrap', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('ABCDEFGHIJ0123456789');
+
+    const before = screen.getCursorPosition();
+    expect(before.row).toBe(0);
+    expect(before.col).toBe(19);
+
+    // Attach accent to the last character. This should NOT wrap.
+    screen.write('\u0301');
+    const mid = screen.getCursorPosition();
+    expect(mid.row).toBe(0);
+    expect(mid.col).toBe(19);
+
+    // Next printable character should do the deferred wrap.
+    screen.write('X');
+    const after = screen.getCursorPosition();
+    expect(after.row).toBe(1);
+    expect(after.col).toBe(1);
+  });
+
+  it('restores cursor position after leaving alt-screen', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b[2;5H');
+    screen.write('\x1b[?1049h');
+    screen.write('\x1b[1;1Halt');
+    screen.write('\x1b[?1049l');
+
+    const pos = screen.getCursorPosition();
+    expect(pos.row).toBe(1);
+    expect(pos.col).toBe(4);
+
+    screen.write('X');
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines.some((line) => line.includes('    X'))).toBe(true);
+  });
+
+  it('handles reverse index at top of scroll region', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b[?1049h');
+    screen.write('\x1b[2;5r');
+
+    screen.write('\x1b[2;1HR1');
+    screen.write('\x1b[3;1HR2');
+    screen.write('\x1b[4;1HR3');
+    screen.write('\x1b[5;1HR4');
+    screen.write('\x1b[2;1H');
+    screen.write('\x1bM');
+    screen.write('N');
+
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines.some((line) => line.startsWith('N'))).toBe(true);
+    expect(lines.some((line) => line.startsWith('R1'))).toBe(true);
+  });
+
+  it('expands tabs to 8-column boundaries', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('A\tB');
+
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines.some((line) => line.startsWith('A       B'))).toBe(true);
+  });
+
+  it('supports backspace overwrite edits', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('abc\bZ');
+
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines.some((line) => line.startsWith('abZ'))).toBe(true);
+  });
+
+  it('supports save and restore cursor with CSI s/u', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b[2;2HAA');
+    screen.write('\x1b[s');
+    screen.write('\x1b[4;5HBB');
+    screen.write('\x1b[u');
+    screen.write('C');
+
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines.some((line) => line.includes(' AAC'))).toBe(true);
+    expect(lines.some((line) => line.includes('    BB'))).toBe(true);
+  });
+
+  it('supports save and restore cursor with ESC 7/8', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b[2;2HAA');
+    screen.write('\x1b7');
+    screen.write('\x1b[4;5HBB');
+    screen.write('\x1b8');
+    screen.write('C');
+
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines.some((line) => line.includes(' AAC'))).toBe(true);
+    expect(lines.some((line) => line.includes('    BB'))).toBe(true);
+  });
+
+  it('tracks cursor visibility with DECSET 25', () => {
+    const screen = new VtScreen(20, 6);
+    expect(screen.snapshot(20, 6).cursorVisible).toBe(true);
+
+    screen.write('\x1b[?25l');
+    expect(screen.snapshot(20, 6).cursorVisible).toBe(false);
+
+    screen.write('\x1b[?25h');
+    expect(screen.snapshot(20, 6).cursorVisible).toBe(true);
+  });
+
+  it('applies DECOM origin mode to cursor addressing', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b[?1049h');
+    screen.write('\x1b[2;5r');
+    screen.write('\x1b[?6h');
+    screen.write('\x1b[1;1HX');
+    screen.write('\x1b[4;1HY');
+
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines[1].startsWith('X')).toBe(true);
+    expect(lines[4].startsWith('Y')).toBe(true);
+
+    screen.write('\x1b[?6l');
+    screen.write('\x1b[1;1HZ');
+    const frame2 = screen.snapshot(20, 6);
+    const lines2 = frame2.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines2[0].startsWith('Z')).toBe(true);
+  });
+
+  it('ignores SCS charset sequences without rendering designator bytes', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b(Bhello\x1b)0world');
+
+    const frame = screen.snapshot(20, 6);
+    const text = frame.lines.map((l) => l.segments.map((s) => s.text).join('')).join('\n');
+    expect(text.includes('hello')).toBe(true);
+    expect(text.includes('world')).toBe(true);
+    expect(text.includes('(B')).toBe(false);
+    expect(text.includes(')0')).toBe(false);
+  });
+
+  it('handles split SCS sequence across chunks', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b(');
+    screen.write('BOK');
+
+    const frame = screen.snapshot(20, 6);
+    const text = frame.lines.map((l) => l.segments.map((s) => s.text).join('')).join('\n');
+    expect(text.includes('OK')).toBe(true);
+    expect(text.includes('BOK')).toBe(false);
+  });
+
+  it('tracks wide characters without corrupting cursor position', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('한글A');
+
+    const pos = screen.getCursorPosition();
+    expect(pos.row).toBe(0);
+    expect(pos.col).toBe(5);
+
+    const frame = screen.snapshot(20, 6);
+    const text = frame.lines.map((l) => l.segments.map((s) => s.text).join('')).join('\n');
+    expect(text.includes('한글A')).toBe(true);
+  });
+
+  it('applies CSI S (scroll up) to current scroll region', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b[?1049h');
+    for (let i = 1; i <= 6; i += 1) {
+      screen.write(`\x1b[${i};1HL${i}`);
+    }
+
+    screen.write('\x1b[1S');
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines[0].startsWith('L2')).toBe(true);
+  });
+
+  it('applies CSI T (scroll down) to current scroll region', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('\x1b[?1049h');
+    for (let i = 1; i <= 6; i += 1) {
+      screen.write(`\x1b[${i};1HL${i}`);
+    }
+
+    screen.write('\x1b[1T');
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines[1].startsWith('L1')).toBe(true);
+  });
+
+  it('does not bottom-anchor short snapshots', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('hello');
+
+    const frame = screen.snapshot(20, 6);
+    const lines = frame.lines.map((l) => l.segments.map((s) => s.text).join(''));
+    expect(lines[0].startsWith('hello')).toBe(true);
+  });
+
+  it('treats zwj emoji sequence as a single glyph cell cluster', () => {
+    const screen = new VtScreen(20, 6);
+    screen.write('👨‍💻A');
+
+    const pos = screen.getCursorPosition();
+    expect(pos.row).toBe(0);
+    expect(pos.col).toBe(3);
+
+    const frame = screen.snapshot(20, 6);
+    const text = frame.lines.map((l) => l.segments.map((s) => s.text).join('')).join('\n');
+    expect(text.includes('👨‍💻A')).toBe(true);
+  });
 });

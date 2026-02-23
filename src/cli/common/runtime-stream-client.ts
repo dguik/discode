@@ -25,6 +25,7 @@ type FrameStyledMessage = {
   lines: TerminalStyledLine[];
   cursorRow?: number;
   cursorCol?: number;
+  cursorVisible?: boolean;
 };
 
 type PatchStyledMessage = {
@@ -35,6 +36,7 @@ type PatchStyledMessage = {
   ops: Array<{ index: number; line: TerminalStyledLine }>;
   cursorRow?: number;
   cursorCol?: number;
+  cursorVisible?: boolean;
 };
 
 type WindowExitMessage = {

@@ -38,6 +38,7 @@ const TUI_VERSION_LABEL = TUI_VERSION.startsWith('v') ? TUI_VERSION : `v${TUI_VE
 const PREFIX_KEY_NAME = 'b';
 const PREFIX_LABEL = 'Ctrl+b';
 const DEBUG_SELECTION = process.env.DISCODE_TUI_DEBUG_SELECTION === '1';
+const ENABLE_RUNTIME_CURSOR_OVERLAY = process.env.DISCODE_TUI_RUNTIME_CURSOR === '1';
 
 type TuiInput = {
   currentSession?: string;
@@ -55,6 +56,7 @@ type TuiInput = {
     styled?: TerminalStyledLine[];
     cursorRow?: number;
     cursorCol?: number;
+    cursorVisible?: boolean;
   }) => void) => () => void;
   getRuntimeStatus?: () =>
     | {
@@ -300,6 +302,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   });
 
   const shouldShowRuntimeCursor = createMemo(() => {
+    if (!ENABLE_RUNTIME_CURSOR_OVERLAY) return false;
     const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen();
     const runtimeActive = runtimeInputMode() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
     return runtimeActive && !dialogOpen && cursorBlinkOn();
@@ -1211,6 +1214,13 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       void syncOutput();
     });
 
+    createEffect(() => {
+      if (canHandleRuntimeInput()) {
+        // Keep the real terminal cursor hidden while drawing our own runtime cursor.
+        renderer.setCursorPosition(0, 0, false);
+      }
+    });
+
     void refreshProjects();
     void syncOutput();
     const projectTimer = setInterval(() => {
@@ -1225,6 +1235,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       clearInterval(projectTimer);
       clearInterval(outputFallbackTimer);
       clearInterval(cursorTimer);
+      renderer.setCursorPosition(0, 0, true);
       detachRuntimeFrame?.();
       if (clipboardToastTimer) {
         clearTimeout(clipboardToastTimer);

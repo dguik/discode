@@ -432,6 +432,7 @@ describe('buffer fallback for interactive prompts', () => {
       ],
       cursorRow: 0,
       cursorCol: 0,
+      cursorVisible: true,
     };
 
     runtime.getWindowFrame = vi.fn().mockReturnValue(styledFrame);
@@ -493,6 +494,7 @@ describe('buffer fallback for interactive prompts', () => {
       ],
       cursorRow: 0,
       cursorCol: 0,
+      cursorVisible: true,
     };
 
     runtime.getWindowFrame = vi.fn().mockReturnValue(styledFrame);

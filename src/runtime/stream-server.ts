@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import type { AgentRuntime } from './interface.js';
 import type { TerminalStyledLine } from './vt-screen.js';
 import { renderTerminalSnapshot } from '../capture/parser.js';
+import { incRuntimeMetric } from './vt-diagnostics.js';
 
 type RuntimeStreamClientState = {
   socket: Socket;
@@ -18,8 +19,12 @@ type RuntimeStreamClientState = {
   lastLines: string[];
   lastEmitAt: number;
   windowMissingNotified: boolean;
+  runtimeErrorNotified: boolean;
   lastStyledSignature: string;
   lastStyledLines: TerminalStyledLine[];
+  lastCursorRow: number;
+  lastCursorCol: number;
+  lastCursorVisible: boolean;
 };
 
 type RuntimeStreamServerOptions = {
@@ -71,8 +76,12 @@ export class RuntimeStreamServer {
         lastLines: [],
         lastEmitAt: 0,
         windowMissingNotified: false,
+        runtimeErrorNotified: false,
         lastStyledSignature: '',
         lastStyledLines: [],
+        lastCursorRow: -1,
+        lastCursorCol: -1,
+        lastCursorVisible: true,
       };
       this.clients.add(state);
 
@@ -160,9 +169,13 @@ export class RuntimeStreamServer {
         client.lastSnapshot = '';
         client.lastLines = [];
         client.windowMissingNotified = false;
+        client.runtimeErrorNotified = false;
         client.lastStyledSignature = '';
         client.lastStyledLines = [];
-        this.flushClientFrame(client);
+        client.lastCursorRow = -1;
+        client.lastCursorCol = -1;
+        client.lastCursorVisible = true;
+        this.flushClientFrame(client, true);
         return;
       }
       case 'focus': {
@@ -175,10 +188,14 @@ export class RuntimeStreamServer {
         client.lastSnapshot = '';
         client.lastLines = [];
         client.windowMissingNotified = false;
+        client.runtimeErrorNotified = false;
         client.lastStyledSignature = '';
         client.lastStyledLines = [];
+        client.lastCursorRow = -1;
+        client.lastCursorCol = -1;
+        client.lastCursorVisible = true;
         this.send(client, { type: 'focus', ok: true, windowId: message.windowId });
-        this.flushClientFrame(client);
+        this.flushClientFrame(client, true);
         return;
       }
       case 'input': {
@@ -193,10 +210,26 @@ export class RuntimeStreamServer {
           return;
         }
         if (!this.runtime.windowExists(parsed.sessionName, parsed.windowName)) {
-          this.send(client, { type: 'error', code: 'window_not_found', message: 'Window not found' });
+          this.send(client, {
+            type: 'window-exit',
+            windowId: message.windowId,
+            code: null,
+            signal: 'missing',
+          });
           return;
         }
-        this.runtime.typeKeysToWindow(parsed.sessionName, parsed.windowName, bytes.toString('utf8'));
+        try {
+          this.runtime.typeKeysToWindow(parsed.sessionName, parsed.windowName, bytes.toString('utf8'));
+        } catch (error) {
+          this.send(client, {
+            type: 'window-exit',
+            windowId: message.windowId,
+            code: null,
+            signal: 'not_running',
+          });
+          incRuntimeMetric('stream_runtime_error');
+          return;
+        }
         this.send(client, { type: 'input', ok: true, windowId: message.windowId });
         return;
       }
@@ -207,14 +240,22 @@ export class RuntimeStreamServer {
         client.rows = clampNumber(message.rows, 10, 120, client.rows);
         const parsed = parseWindowId(message.windowId);
         if (parsed) {
-          this.runtime.resizeWindow?.(parsed.sessionName, parsed.windowName, client.cols, client.rows);
+          try {
+            this.runtime.resizeWindow?.(parsed.sessionName, parsed.windowName, client.cols, client.rows);
+          } catch {
+            // best effort; client-side view still updates with requested size
+          }
         }
         client.lastSnapshot = '';
         client.lastLines = [];
         client.windowMissingNotified = false;
+        client.runtimeErrorNotified = false;
         client.lastStyledSignature = '';
         client.lastStyledLines = [];
-        this.flushClientFrame(client);
+        client.lastCursorRow = -1;
+        client.lastCursorCol = -1;
+        client.lastCursorVisible = true;
+        this.flushClientFrame(client, true);
         return;
       }
       default:
@@ -224,13 +265,16 @@ export class RuntimeStreamServer {
 
   private flushFrames(): void {
     for (const client of this.clients) {
-      this.flushClientFrame(client);
+      this.flushClientFrame(client, false);
     }
   }
 
-  private flushClientFrame(client: RuntimeStreamClientState): void {
+  private flushClientFrame(client: RuntimeStreamClientState, force: boolean = false): void {
     if (!client.windowId) return;
     if (!this.runtime.getWindowBuffer) return;
+    if (force) {
+      incRuntimeMetric('stream_forced_flush');
+    }
 
     const parsed = parseWindowId(client.windowId);
     if (!parsed) return;
@@ -248,19 +292,56 @@ export class RuntimeStreamServer {
     }
     client.windowMissingNotified = false;
 
-    const raw = this.runtime.getWindowBuffer(parsed.sessionName, parsed.windowName);
-
-    const now = Date.now();
-    // Coalesce bursts to reduce CPU/load and improve input responsiveness.
-    if (client.lastBufferLength >= 0 && now - client.lastEmitAt < this.minEmitIntervalMs) {
+    let raw = '';
+    try {
+      raw = this.runtime.getWindowBuffer(parsed.sessionName, parsed.windowName);
+      client.runtimeErrorNotified = false;
+    } catch (error) {
+      if (!client.runtimeErrorNotified) {
+        this.send(client, {
+          type: 'error',
+          code: 'runtime_error',
+          message: `Failed to read runtime buffer: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        incRuntimeMetric('stream_runtime_error');
+        client.runtimeErrorNotified = true;
+      }
       return;
     }
 
-    const styledFrame = this.runtime.getWindowFrame?.(parsed.sessionName, parsed.windowName, client.cols, client.rows);
+    const now = Date.now();
+    // Coalesce bursts to reduce CPU/load and improve input responsiveness.
+    if (
+      !force &&
+      client.lastBufferLength >= 0 &&
+      now - client.lastEmitAt < this.minEmitIntervalMs &&
+      raw.length === client.lastBufferLength
+    ) {
+      incRuntimeMetric('stream_coalesced_skip');
+      return;
+    }
+
+    let styledFrame: ReturnType<NonNullable<AgentRuntime['getWindowFrame']>> | undefined | null =
+      null;
+    try {
+      styledFrame = this.runtime.getWindowFrame?.(
+        parsed.sessionName,
+        parsed.windowName,
+        client.cols,
+        client.rows,
+      );
+    } catch {
+      styledFrame = null;
+    }
     if (styledFrame) {
       const styledLines = cloneStyledLines(styledFrame.lines);
       const signature = buildStyledSignature(styledLines);
-      if (signature !== client.lastStyledSignature) {
+      const cursorChanged =
+        styledFrame.cursorRow !== client.lastCursorRow ||
+        styledFrame.cursorCol !== client.lastCursorCol;
+      const cursorVisible = styledFrame.cursorVisible !== false;
+      const cursorVisibilityChanged = cursorVisible !== client.lastCursorVisible;
+      if (signature !== client.lastStyledSignature || cursorChanged || cursorVisibilityChanged) {
         client.lastStyledSignature = signature;
         client.lastBufferLength = raw.length;
         client.lastEmitAt = now;
@@ -286,6 +367,7 @@ export class RuntimeStreamServer {
             ops: patch.ops,
             cursorRow: styledFrame.cursorRow,
             cursorCol: styledFrame.cursorCol,
+            cursorVisible,
           });
         } else {
           this.send(client, {
@@ -295,10 +377,14 @@ export class RuntimeStreamServer {
             lines: styledLines,
             cursorRow: styledFrame.cursorRow,
             cursorCol: styledFrame.cursorCol,
+            cursorVisible,
           });
         }
 
         client.lastStyledLines = styledLines;
+        client.lastCursorRow = styledFrame.cursorRow;
+        client.lastCursorCol = styledFrame.cursorCol;
+        client.lastCursorVisible = cursorVisible;
       }
       return;
     }
