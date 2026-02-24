@@ -8,12 +8,11 @@ import {
   getProjectInstance,
   normalizeProjectState,
 } from '../state/instances.js';
-import { downloadFileAttachments, buildFileMarkers } from '../infra/file-downloader.js';
 import { cleanCapture } from '../capture/parser.js';
 import { PendingMessageTracker } from './pending-message-tracker.js';
 import type { StreamingMessageUpdater } from './streaming-message-updater.js';
-import { injectFile, WORKSPACE_DIR } from '../container/index.js';
 import type { ClaudeSdkRunner } from '../sdk/index.js';
+import { processAttachments } from './message-file-handler.js';
 
 export interface BridgeMessageRouterDeps {
   messaging: MessagingClient;
@@ -59,24 +58,17 @@ export class BridgeMessageRouter {
       const instanceKey = mappedInstance.instanceId;
       const windowName = mappedInstance.tmuxWindow || instanceKey;
 
+      // Process file attachments (isolated in message-file-handler.ts)
       let enrichedContent = content;
       if (attachments && attachments.length > 0) {
-        try {
-          const downloaded = await downloadFileAttachments(attachments, project.projectPath, attachments[0]?.authHeaders);
-          if (downloaded.length > 0) {
-            // If the instance runs in a container, inject files into it
-            if (mappedInstance.containerMode && mappedInstance.containerId) {
-              const containerFilesDir = `${WORKSPACE_DIR}/.discode/files`;
-              for (const file of downloaded) {
-                injectFile(mappedInstance.containerId, file.localPath, containerFilesDir);
-              }
-            }
-            const markers = buildFileMarkers(downloaded);
-            enrichedContent = content + markers;
-            console.log(`📎 [${projectName}/${agentType}] ${downloaded.length} file(s) attached`);
-          }
-        } catch (error) {
-          console.warn('Failed to process file attachments:', error);
+        const markers = await processAttachments(
+          attachments,
+          project.projectPath,
+          mappedInstance,
+          `${projectName}/${agentType}`,
+        );
+        if (markers) {
+          enrichedContent = content + markers;
         }
       }
 
@@ -98,7 +90,6 @@ export class BridgeMessageRouter {
 
       if (messageId) {
         await this.deps.pendingTracker.markPending(projectName, resolvedAgentType, channelId, messageId, instanceKey);
-        // Streaming updater is started lazily on first activity (thinking/tool events)
       }
 
       if (mappedInstance.runtimeType === 'sdk') {
@@ -109,7 +100,6 @@ export class BridgeMessageRouter {
           this.deps.stateManager.updateLastActive(projectName);
           return;
         }
-        // Fire-and-forget: events stream through handleOpencodeEvent
         runner.submitMessage(sanitized).catch((err) => {
           console.error(`[sdk-runner] submitMessage error for ${instanceKey}:`, err);
         });
@@ -147,11 +137,6 @@ export class BridgeMessageRouter {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  /**
-   * Type text and press Enter with a short delay in between.
-   * The delay allows TUI agents to recognise slash-command prefixes
-   * (e.g. `/model`) before Enter is sent.
-   */
   private async submitToAgent(
     tmuxSession: string,
     windowName: string,
@@ -169,11 +154,6 @@ export class BridgeMessageRouter {
     this.deps.runtime.sendEnterToWindow(tmuxSession, windowName, agentType);
   }
 
-  /**
-   * Execute a shell command on the host and send output to the channel.
-   * Output is wrapped in code blocks. Long output is split into multiple
-   * messages to respect platform character limits.
-   */
   private async executeShellCommand(command: string, projectPath: string, channelId: string): Promise<void> {
     const { messaging } = this.deps;
     let output: string;
@@ -206,11 +186,6 @@ export class BridgeMessageRouter {
     await this.sendShellChunks(channelId, `\`\`\`\n${trimmed}\n\`\`\``);
   }
 
-  /**
-   * Send text to a channel, splitting into multiple messages if it exceeds
-   * the platform character limit. Unlike splitForSlack/splitForDiscord, this
-   * does NOT strip outer code blocks — shell output formatting is preserved.
-   */
   private async sendShellChunks(channelId: string, text: string): Promise<void> {
     const maxLen = this.deps.messaging.platform === 'slack' ? 3900 : 1900;
 
@@ -232,14 +207,6 @@ export class BridgeMessageRouter {
     if (current) await this.deps.messaging.sendToChannel(channelId, current);
   }
 
-  /**
-   * Schedule a fallback mechanism that captures the terminal buffer and sends it
-   * to Slack when the Stop hook doesn't fire (e.g., interactive prompts like /model).
-   *
-   * The mechanism takes two snapshots separated by a delay. If the buffer is stable
-   * (same content in both snapshots) and the pending message hasn't been resolved,
-   * the terminal content is sent to Slack as a code block.
-   */
   private scheduleBufferFallback(
     sessionName: string,
     windowName: string,
@@ -250,7 +217,6 @@ export class BridgeMessageRouter {
   ): void {
     const key = `${projectName}:${instanceKey}`;
 
-    // Cancel any existing fallback timer for this instance
     const existing = this.fallbackTimers.get(key);
     if (existing) clearTimeout(existing);
 
@@ -266,13 +232,11 @@ export class BridgeMessageRouter {
     const check = async () => {
       this.fallbackTimers.delete(key);
 
-      // If the Stop hook already resolved this pending message, nothing to do
       if (!this.deps.pendingTracker.hasPending(projectName, agentType, instanceKey)) {
         console.log(`${tag} fallback check #${checkCount}: pending already resolved, skipping`);
         return;
       }
 
-      // If hook events are active, defer to hook handler instead of capturing raw buffer
       if (this.deps.pendingTracker.isHookActive(projectName, agentType, instanceKey)) {
         console.log(`${tag} fallback: hook events active, deferring to hook handler`);
         return;
@@ -285,11 +249,9 @@ export class BridgeMessageRouter {
       }
 
       if (snapshot === lastSnapshot) {
-        // Buffer is stable — likely an interactive prompt waiting for user input
         if (snapshot.trim().length > 0) {
           const relevant = this.extractLastCommandBlock(snapshot);
           if (relevant.trim().length === 0) {
-            // Extracted block is empty (idle prompt with status bar only) — skip
             console.log(`${tag} fallback: buffer stable but idle prompt detected, skipping`);
             return;
           }
@@ -304,7 +266,6 @@ export class BridgeMessageRouter {
         return;
       }
 
-      // Buffer changed — agent is still processing, schedule another check
       console.log(`${tag} fallback check #${checkCount}: buffer changed (${snapshot.length} chars), retrying`);
       lastSnapshot = snapshot;
       checkCount++;
@@ -321,14 +282,9 @@ export class BridgeMessageRouter {
     this.fallbackTimers.set(key, timer);
   }
 
-  /**
-   * Capture the current terminal screen content as plain text.
-   * Uses getWindowFrame (pty runtime) or getWindowBuffer (tmux runtime).
-   */
   private captureWindowText(sessionName: string, windowName: string): string | null {
     const runtime = this.deps.runtime;
 
-    // Prefer getWindowFrame for pty runtime — it gives a properly rendered screen
     if (runtime.getWindowFrame) {
       try {
         const frame = runtime.getWindowFrame(sessionName, windowName);
@@ -341,13 +297,11 @@ export class BridgeMessageRouter {
           }
           return lines.join('\n');
         }
-        // frame is null — fall through to getWindowBuffer
       } catch {
-        // fall through to getWindowBuffer
+        // fall through
       }
     }
 
-    // For tmux runtime: capture-pane returns clean text
     if (runtime.getWindowBuffer) {
       try {
         const buffer = runtime.getWindowBuffer(sessionName, windowName);
@@ -361,20 +315,9 @@ export class BridgeMessageRouter {
     return null;
   }
 
-  /**
-   * Extract the last command block from terminal output.
-   * Looks for the last `❯` prompt and returns everything from that line onward,
-   * so only the relevant command + its output is sent to the channel.
-   *
-   * Returns empty string when the extracted block is just an idle prompt with
-   * status bar chrome (separator lines + status text) and no meaningful agent
-   * output — this avoids sending useless terminal UI to the channel.
-   */
   private extractLastCommandBlock(text: string): string {
     const lines = text.split('\n');
 
-    // Find the last line that starts with the Claude Code prompt marker (❯ at column 0).
-    // Menu selection markers like " ❯ 4. opus" have leading spaces, so we skip those.
     let lastPromptIdx = -1;
     for (let i = lines.length - 1; i >= 0; i--) {
       if (/^❯\s/.test(lines[i])) {
@@ -385,14 +328,11 @@ export class BridgeMessageRouter {
 
     if (lastPromptIdx < 0) return text;
 
-    // Take everything from the last prompt to the end, trimming trailing blank lines
     const block = lines.slice(lastPromptIdx);
     while (block.length > 0 && block[block.length - 1].trim() === '') {
       block.pop();
     }
 
-    // Check if the block is just an idle prompt + UI chrome (separator lines, status bar).
-    // If so, suppress — the Stop hook should handle the response delivery.
     if (this.isIdlePromptBlock(block)) {
       return '';
     }
@@ -400,28 +340,9 @@ export class BridgeMessageRouter {
     return block.join('\n');
   }
 
-  /**
-   * Detect whether a block of lines is just an idle Claude Code prompt with
-   * status bar chrome — no meaningful agent output.
-   *
-   * An idle block has this structure:
-   *   ❯ [optional user text]
-   *   ─────────────────────  (separator — immediately after prompt)
-   *   status bar text...     (1-2 lines)
-   *
-   * The key signal is a separator line immediately after the prompt (skipping blanks).
-   * When a separator follows the prompt, subsequent lines are status bar chrome.
-   * If the first non-blank line after the prompt is NOT a separator, the content
-   * is agent output (help text, error messages, etc.) and should not be suppressed.
-   *
-   * Interactive menus (e.g. /model) also start with a separator, but they have
-   * 3+ substantive lines after it (menu items, instructions). Idle prompts have
-   * at most 2 status bar lines.
-   */
   private isIdlePromptBlock(block: string[]): boolean {
     if (block.length === 0) return true;
 
-    // A separator line is mostly box-drawing or dash characters
     const isSeparator = (line: string) => {
       const trimmed = line.trim();
       if (trimmed.length === 0) return false;
@@ -429,7 +350,6 @@ export class BridgeMessageRouter {
       return chromeChars.length === 0 || chromeChars.length / trimmed.length < 0.1;
     };
 
-    // Find the first non-blank line after the prompt
     let firstContentIdx = -1;
     for (let i = 1; i < block.length; i++) {
       if (block[i].trim().length > 0) {
@@ -438,16 +358,9 @@ export class BridgeMessageRouter {
       }
     }
 
-    // Nothing after prompt — idle
     if (firstContentIdx < 0) return true;
-
-    // If the first non-blank line after the prompt is NOT a separator,
-    // this is command output (help text, error messages, etc.) — not idle.
     if (!isSeparator(block[firstContentIdx])) return false;
 
-    // Separator found right after the prompt. Count substantive lines after
-    // the separator to distinguish idle (1-2 status lines) from interactive
-    // menus (3+ content lines).
     let substantiveLines = 0;
     for (let i = firstContentIdx + 1; i < block.length; i++) {
       const trimmed = block[i].trim();

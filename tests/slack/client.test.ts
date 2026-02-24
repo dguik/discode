@@ -1,10 +1,12 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { MessageCallback } from '../../src/messaging/interface.js';
 
 // Capture the message handler registered via app.message()
 let capturedMessageHandler: ((args: { message: any }) => Promise<void>) | undefined;
 // Capture the app_mention event handler registered via app.event('app_mention')
 let capturedAppMentionHandler: ((args: { event: any }) => Promise<void>) | undefined;
+
+const mockConversationsHistory = vi.fn().mockResolvedValue({ messages: [] });
 
 vi.mock('@slack/bolt', () => {
   return {
@@ -17,6 +19,7 @@ vi.mock('@slack/bolt', () => {
           create: vi.fn().mockResolvedValue({ channel: { id: 'C_NEW' } }),
           join: vi.fn().mockResolvedValue({ ok: true }),
           setTopic: vi.fn().mockResolvedValue({ ok: true }),
+          history: mockConversationsHistory,
         },
         reactions: {
           add: vi.fn().mockResolvedValue({ ok: true }),
@@ -33,6 +36,7 @@ vi.mock('@slack/bolt', () => {
         }
       }
       action(_pattern: any, _handler: any) {}
+      use(_middleware: any) {}
       start = vi.fn().mockResolvedValue(undefined);
       stop = vi.fn().mockResolvedValue(undefined);
     },
@@ -46,14 +50,21 @@ describe('SlackClient message handling', () => {
   let callback: ReturnType<typeof vi.fn<MessageCallback>>;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     capturedMessageHandler = undefined;
     capturedAppMentionHandler = undefined;
+    mockConversationsHistory.mockReset().mockResolvedValue({ messages: [] });
     client = new SlackClient('xoxb-test-token', 'xapp-test-token');
     callback = vi.fn();
     client.onMessage(callback);
     client.registerChannelMappings([
       { channelId: 'C_TEST', projectName: 'proj', agentType: 'claude', instanceId: 'claude' },
     ]);
+  });
+
+  afterEach(async () => {
+    await client.disconnect();
+    vi.useRealTimers();
   });
 
   function sendMessage(message: any) {
@@ -348,6 +359,81 @@ describe('SlackClient message handling', () => {
       });
 
       expect(callback.mock.calls[0][6]).toBeUndefined();
+    });
+  });
+
+  describe('conversations.history polling fallback', () => {
+    it('dispatches missed messages from polling', async () => {
+      await client.connect();
+
+      // Simulate a message the WebSocket missed
+      mockConversationsHistory.mockResolvedValueOnce({
+        messages: [
+          { user: 'U_USER', text: 'missed message', ts: '9999.0001', channel: 'C_TEST' },
+        ],
+      });
+
+      // Advance timer to trigger poll
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(mockConversationsHistory).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'C_TEST', limit: 20 }),
+      );
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(
+        'claude', 'missed message', 'proj', 'C_TEST', '9999.0001', 'claude', undefined,
+      );
+    });
+
+    it('does not re-dispatch messages already seen via WebSocket', async () => {
+      await client.connect();
+
+      // Deliver a message via WebSocket first
+      await sendMessage({
+        user: 'U_USER',
+        text: 'realtime msg',
+        channel: 'C_TEST',
+        ts: '9999.0002',
+      });
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      // Now polling returns the same message
+      mockConversationsHistory.mockResolvedValueOnce({
+        messages: [
+          { user: 'U_USER', text: 'realtime msg', ts: '9999.0002', channel: 'C_TEST' },
+        ],
+      });
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      // Should NOT have dispatched again
+      expect(callback).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips polling when no messageCallback is registered', async () => {
+      // Create a client without onMessage callback
+      const noCallbackClient = new SlackClient('xoxb-test-token', 'xapp-test-token');
+      noCallbackClient.registerChannelMappings([
+        { channelId: 'C_TEST', projectName: 'proj', agentType: 'claude' },
+      ]);
+      await noCallbackClient.connect();
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(mockConversationsHistory).not.toHaveBeenCalled();
+      await noCallbackClient.disconnect();
+    });
+
+    it('clears polling timer on disconnect', async () => {
+      await client.connect();
+
+      await client.disconnect();
+
+      // Reset the mock to verify no further calls after disconnect
+      mockConversationsHistory.mockClear();
+      await vi.advanceTimersByTimeAsync(10000);
+
+      expect(mockConversationsHistory).not.toHaveBeenCalled();
     });
   });
 });

@@ -2,7 +2,7 @@
  * Tests for ClaudeAdapter from src/agents/claude.ts
  */
 
-import { ClaudeAdapter } from '../../src/agents/claude.js';
+import { ClaudeAdapter } from '../../src/agents/claude/index.js';
 
 describe('ClaudeAdapter', () => {
   it('should have correct config values', () => {

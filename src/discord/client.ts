@@ -520,6 +520,17 @@ export class DiscordClient implements MessagingClient {
     }
   }
 
+  async updateMessage(channelId: string, messageId: string, content: string): Promise<void> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel?.isTextBased() || !('messages' in channel)) return;
+      const message = await (channel as TextChannel).messages.fetch(messageId);
+      await message.edit(content);
+    } catch (error) {
+      console.error(`Failed to update message on Discord channel ${channelId}:`, error);
+    }
+  }
+
   /**
    * Send a message with file attachments to a specific channel.
    * If content is empty but files are present, sends files only.
