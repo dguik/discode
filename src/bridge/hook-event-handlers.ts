@@ -12,6 +12,12 @@ import type { PendingMessageTracker } from './pending-message-tracker.js';
 import type { PendingEntry } from './pending-message-tracker.js';
 import type { StreamingMessageUpdater } from './streaming-message-updater.js';
 import type { EventContext } from './hook-event-pipeline.js';
+import {
+  handleTaskProgress,
+  handleGitActivity,
+  handleSubagentDone,
+  clearTaskChecklist,
+} from './hook-structured-handlers.js';
 
 export interface EventHandlerDeps {
   messaging: MessagingClient;
@@ -33,12 +39,23 @@ const THINKING_INTERVAL_MS = 10_000;
 const SESSION_LIFECYCLE_DELAY_MS = 5_000;
 
 export async function handleSessionError(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
-  deps.clearThinkingTimer(`${ctx.projectName}:${ctx.instanceKey}`);
-  deps.threadActivityMessages.delete(`${ctx.projectName}:${ctx.instanceKey}`);
+  const k = `${ctx.projectName}:${ctx.instanceKey}`;
+  deps.clearThinkingTimer(k);
+
+  // Collect recent tool activity lines before clearing (error context for Slack users)
+  const recentActivity = deps.threadActivityMessages.get(k);
+  const recentLines = recentActivity?.lines.slice(-5) || [];
+
+  deps.threadActivityMessages.delete(k);
+  clearTaskChecklist(k);
   deps.streamingUpdater.discard(ctx.projectName, ctx.instanceKey);
   deps.pendingTracker.markError(ctx.projectName, ctx.agentType, ctx.instanceId).catch(() => {});
   const msg = ctx.text || 'unknown error';
-  await deps.messaging.sendToChannel(ctx.channelId, `\u26A0\uFE0F OpenCode session error: ${msg}`);
+  let errorMessage = `\u26A0\uFE0F OpenCode session error: ${msg}`;
+  if (recentLines.length > 0) {
+    errorMessage += '\n\n최근 활동:\n' + recentLines.join('\n');
+  }
+  await deps.messaging.sendToChannel(ctx.channelId, errorMessage);
   return true;
 }
 
@@ -141,6 +158,17 @@ export async function handleToolActivity(deps: EventHandlerDeps, ctx: EventConte
   deps.clearSessionLifecycleTimer(`${ctx.projectName}:${ctx.instanceKey}`);
   await deps.ensureStartMessageAndStreaming(ctx);
 
+  // Structured event prefixes — dispatch to specialized handlers
+  if (ctx.text?.startsWith('TASK_CREATE:') || ctx.text?.startsWith('TASK_UPDATE:')) {
+    return handleTaskProgress(deps, ctx);
+  }
+  if (ctx.text?.startsWith('GIT_COMMIT:') || ctx.text?.startsWith('GIT_PUSH:')) {
+    return handleGitActivity(deps, ctx);
+  }
+  if (ctx.text?.startsWith('SUBAGENT_DONE:')) {
+    return handleSubagentDone(deps, ctx);
+  }
+
   const pending = ctx.pendingSnapshot;
 
   if (ctx.text && pending?.startMessageId) {
@@ -179,9 +207,11 @@ export async function handleToolActivity(deps: EventHandlerDeps, ctx: EventConte
 }
 
 export async function handleSessionIdle(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
-  deps.clearThinkingTimer(`${ctx.projectName}:${ctx.instanceKey}`);
-  deps.clearSessionLifecycleTimer(`${ctx.projectName}:${ctx.instanceKey}`);
-  deps.threadActivityMessages.delete(`${ctx.projectName}:${ctx.instanceKey}`);
+  const idleKey = `${ctx.projectName}:${ctx.instanceKey}`;
+  deps.clearThinkingTimer(idleKey);
+  deps.clearSessionLifecycleTimer(idleKey);
+  deps.threadActivityMessages.delete(idleKey);
+  clearTaskChecklist(idleKey);
 
   const livePending = deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
   const startMessageId = livePending?.startMessageId;
@@ -316,6 +346,14 @@ async function postResponseFiles(messaging: MessagingClient, ctx: EventContext):
 async function postPromptChoices(messaging: MessagingClient, ctx: EventContext): Promise<void> {
   const promptText = typeof ctx.event.promptText === 'string' ? ctx.event.promptText.trim() : '';
   if (!promptText) return;
+
+  // Attach plan file if present (ExitPlanMode with plan content)
+  const planFilePath = typeof ctx.event.planFilePath === 'string' ? ctx.event.planFilePath.trim() : '';
+  if (planFilePath && existsSync(planFilePath)) {
+    await messaging.sendToChannelWithFiles(ctx.channelId, promptText, [planFilePath]);
+    return;
+  }
+
   await splitAndSendToChannel(messaging, ctx.channelId, promptText);
 }
 

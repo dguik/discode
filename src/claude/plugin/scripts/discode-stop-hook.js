@@ -159,7 +159,7 @@ function readTail(filePath, maxBytes) {
  * entry is flushed to disk — earlier entries in the turn may still contain file paths.
  */
 function parseTurnTexts(tail) {
-  if (!tail) return { displayText: "", intermediateText: "", turnText: "", thinking: "", promptText: "" };
+  if (!tail) return { displayText: "", intermediateText: "", turnText: "", thinking: "", promptText: "", planFilePath: "" };
 
   const lines = tail.split("\n");
   let latestMessageId = "";
@@ -233,12 +233,25 @@ function parseTurnTexts(tail) {
   allThinkingParts.reverse();
   allToolUseBlocks.reverse();
 
+  // Extract plan file path from ExitPlanMode tool use blocks
+  var planFilePath = "";
+  for (var bi = 0; bi < allToolUseBlocks.length; bi++) {
+    if (allToolUseBlocks[bi].name === "ExitPlanMode") {
+      // Plan file path is typically in system-reminder context — scan all text for it
+      var allText = allTextParts.join("\n") + "\n" + allThinkingParts.join("\n");
+      var planMatch = allText.match(/plan file[^:]*:\s*([^\n]+\.md)/i);
+      if (planMatch) planFilePath = planMatch[1].trim();
+      break;
+    }
+  }
+
   return {
     displayText: latestTextParts.join("\n").trim(),
     intermediateText: intermediateTextParts.join("\n").trim(),
     turnText: allTextParts.join("\n").trim(),
     thinking: allThinkingParts.join("\n").trim(),
     promptText: formatPromptText(allToolUseBlocks),
+    planFilePath: planFilePath,
   };
 }
 
@@ -251,7 +264,7 @@ function sleep(ms) {
  * where the Stop hook fires before the final assistant entry is flushed to disk.
  */
 async function readTurnTexts(transcriptPath) {
-  if (!transcriptPath) return { displayText: "", intermediateText: "", turnText: "", thinking: "", promptText: "" };
+  if (!transcriptPath) return { displayText: "", intermediateText: "", turnText: "", thinking: "", promptText: "", planFilePath: "" };
 
   // Retry up to 3 times with 150ms delay to let the transcript writer flush
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -337,7 +350,7 @@ async function main() {
   const port = process.env.DISCODE_PORT || process.env.AGENT_DISCORD_PORT || "18470";
   const transcriptPath = typeof input.transcript_path === "string" ? input.transcript_path : "";
 
-  const { displayText, intermediateText, turnText, thinking, promptText } = await readTurnTexts(transcriptPath);
+  const { displayText, intermediateText, turnText, thinking, promptText, planFilePath } = await readTurnTexts(transcriptPath);
   let text = displayText;
   if (!text && typeof input.message === "string" && input.message.trim().length > 0) {
     text = input.message;
@@ -357,6 +370,7 @@ async function main() {
       ...(intermediateText ? { intermediateText } : {}),
       ...(thinking ? { thinking } : {}),
       ...(promptText ? { promptText } : {}),
+      ...(planFilePath ? { planFilePath } : {}),
     });
   } catch {
     // ignore bridge delivery failures

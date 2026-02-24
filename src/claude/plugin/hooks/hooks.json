@@ -53,6 +53,17 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/discode-subagent-hook.js",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }

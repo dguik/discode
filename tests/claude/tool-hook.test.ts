@@ -15,7 +15,7 @@ import { Script, createContext } from 'vm';
 const __dir = dirname(fileURLToPath(import.meta.url));
 const hookPath = join(__dir, '../../src/claude/plugin/scripts/discode-tool-hook.js');
 
-type FormatToolLineFn = (toolName: string, toolInput: Record<string, unknown>) => string;
+type FormatToolLineFn = (toolName: string, toolInput: Record<string, unknown>, toolResponse?: string) => string;
 type ShortenPathFn = (fp: string, maxSegments: number) => string;
 type FirstLinePreviewFn = (str: string, maxLen: number) => string;
 
@@ -38,6 +38,7 @@ function loadHookFunctions() {
     Math,
     Number,
     String,
+    RegExp,
     parseInt,
     parseFloat,
   });
@@ -197,12 +198,71 @@ describe('formatToolLine', () => {
     expect(formatToolLine('Bash', {})).toBe('');
   });
 
-  it('returns empty for non-file tools', () => {
-    expect(formatToolLine('Grep', { pattern: 'foo' })).toBe('');
-    expect(formatToolLine('Glob', { pattern: '*.ts' })).toBe('');
+  it('returns empty for non-trackable tools', () => {
     expect(formatToolLine('AskUserQuestion', { questions: [] })).toBe('');
-    expect(formatToolLine('Task', {})).toBe('');
     expect(formatToolLine('ExitPlanMode', {})).toBe('');
+  });
+
+  it('formats Grep with pattern and path', () => {
+    expect(formatToolLine('Grep', { pattern: 'TODO', path: '/home/user/project/src' }))
+      .toBe('🔎 Grep(`TODO` in user/project/src)');
+  });
+
+  it('formats Grep with default path', () => {
+    expect(formatToolLine('Grep', { pattern: 'error' }))
+      .toBe('🔎 Grep(`error` in .)');
+  });
+
+  it('formats Glob with pattern', () => {
+    expect(formatToolLine('Glob', { pattern: '**/*.test.ts' }))
+      .toBe('📂 Glob(`**/*.test.ts`)');
+  });
+
+  it('formats WebSearch with query', () => {
+    expect(formatToolLine('WebSearch', { query: 'Claude Code hooks API' }))
+      .toBe('🌐 Search(`Claude Code hooks API`)');
+  });
+
+  it('formats WebFetch with URL', () => {
+    expect(formatToolLine('WebFetch', { url: 'https://example.com/docs' }))
+      .toBe('🌐 Fetch(`https://example.com/docs`)');
+  });
+
+  it('formats Task with description and subagent type', () => {
+    expect(formatToolLine('Task', { description: 'Explore hooks', subagent_type: 'Explore' }))
+      .toBe('🤖 Explore(`Explore hooks`)');
+  });
+
+  it('formats TaskCreate with subject', () => {
+    const result = formatToolLine('TaskCreate', { subject: 'Write unit tests' });
+    expect(result).toBe('TASK_CREATE:{"subject":"Write unit tests"}');
+  });
+
+  it('formats TaskUpdate with taskId and status', () => {
+    const result = formatToolLine('TaskUpdate', { taskId: '1', status: 'completed', subject: '' });
+    expect(result).toBe('TASK_UPDATE:{"taskId":"1","status":"completed","subject":""}');
+  });
+
+  it('detects git commit in Bash response', () => {
+    const result = formatToolLine('Bash', { command: 'git commit -m "fix bug"' },
+      '[main abc1234] fix bug\n 3 files changed, 10 insertions(+), 2 deletions(-)');
+    const parsed = JSON.parse(result.slice('GIT_COMMIT:'.length));
+    expect(parsed.hash).toBe('abc1234');
+    expect(parsed.message).toBe('fix bug');
+    expect(parsed.stat).toContain('3 files changed');
+  });
+
+  it('detects git push in Bash response', () => {
+    const result = formatToolLine('Bash', { command: 'git push' },
+      'To https://github.com/user/repo.git\n   abc1234..def5678  main -> main');
+    const parsed = JSON.parse(result.slice('GIT_PUSH:'.length));
+    expect(parsed.toHash).toBe('def5678');
+    expect(parsed.remoteRef).toBe('main');
+  });
+
+  it('falls through to normal Bash format when no git match', () => {
+    expect(formatToolLine('Bash', { command: 'git status' }, 'On branch main'))
+      .toBe('💻 `git status`');
   });
 
   it('handles null/undefined toolInput', () => {
@@ -314,6 +374,7 @@ describe('tool-hook integration', () => {
         String,
         Number,
         Math,
+        RegExp,
         parseInt,
         parseFloat,
         fetch: async (url: string, opts: any) => {
@@ -369,12 +430,13 @@ describe('tool-hook integration', () => {
     expect(body.text).toBe('💻 `npm test`');
   });
 
-  it('does not send for non-file tools', async () => {
+  it('sends tool.activity for Grep tool', async () => {
     const { calls } = await runHook(
       { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Grep', tool_input: { pattern: 'foo' } },
     );
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(1);
+    expect((calls[0].body as any).text).toBe('🔎 Grep(`foo` in .)');
   });
 
   it('does not send when DISCODE_PROJECT is empty', async () => {
@@ -424,15 +486,25 @@ describe('tool-hook integration', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('does not send for Glob', async () => {
+  it('sends tool.activity for Glob tool', async () => {
     const { calls } = await runHook(
       { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Glob', tool_input: { pattern: '*.ts' } },
     );
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(1);
+    expect((calls[0].body as any).text).toBe('📂 Glob(`*.ts`)');
   });
 
-  it('does not send for Task', async () => {
+  it('sends TASK_CREATE for TaskCreate tool', async () => {
+    const { calls } = await runHook(
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
+      { tool_name: 'TaskCreate', tool_input: { subject: 'Fix bug' } },
+    );
+    expect(calls).toHaveLength(1);
+    expect((calls[0].body as any).text).toBe('TASK_CREATE:{"subject":"Fix bug"}');
+  });
+
+  it('does not send for Task without description', async () => {
     const { calls } = await runHook(
       { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Task', tool_input: {} },
@@ -462,7 +534,7 @@ describe('tool-hook integration', () => {
           },
         },
         console: { error: () => {} },
-        Promise, setTimeout, Buffer, JSON, Array, Object, String, Number, Math, parseInt, parseFloat,
+        Promise, setTimeout, Buffer, JSON, Array, Object, String, Number, Math, RegExp, parseInt, parseFloat,
         fetch: async (url: string, opts: any) => {
           fetchCalls.push({ url, body: JSON.parse(opts.body) });
           return {};
@@ -552,7 +624,7 @@ describe('tool-hook integration', () => {
           },
         },
         console: { error: () => {} },
-        Promise, setTimeout, Buffer, JSON, Array, Object, String, Number, Math, parseInt, parseFloat,
+        Promise, setTimeout, Buffer, JSON, Array, Object, String, Number, Math, RegExp, parseInt, parseFloat,
         fetch: async () => {
           fetchCallCount++;
           throw new Error('Connection refused');
