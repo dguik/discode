@@ -1,49 +1,48 @@
 import { incRuntimeMetric } from './vt-diagnostics.js';
 import type {
-  TerminalStyle,
   TerminalSegment,
   TerminalStyledLine,
   TerminalStyledFrame,
   Cell,
-  SavedScreenState,
+  VtScreenState,
 } from './vt-types.js';
 import {
   clamp,
   styleKey,
   applyInverse,
   charDisplayWidth,
-  cloneLines,
 } from './vt-utils.js';
 import { applySgr } from './vt-sgr.js';
 import { parseVtStream } from './vt-escape-parser.js';
+import * as bufOps from './vt-screen-buffer-ops.js';
 
 export type { TerminalStyle, TerminalSegment, TerminalStyledLine, TerminalStyledFrame } from './vt-types.js';
 
 export class VtScreen {
-  private cols: number;
-  private rows: number;
-  private scrollback: number;
-  private lines: Cell[][];
-  private cursorRow = 0;
-  private cursorCol = 0;
-  private savedRow = 0;
-  private savedCol = 0;
-  private currentStyle: TerminalStyle = {};
-  private usingAltScreen = false;
-  private savedPrimaryScreen?: SavedScreenState;
+  private state: VtScreenState;
   private pendingInput = '';
-  private scrollTop = 0;
-  private scrollBottom = 0;
-  private wrapPending = false;
-  private originMode = false;
-  private cursorVisible = true;
 
   constructor(cols = 120, rows = 40, scrollback = 2000) {
-    this.cols = clamp(cols, 20, 300);
-    this.rows = clamp(rows, 6, 200);
-    this.scrollback = Math.max(this.rows * 4, scrollback);
-    this.lines = [this.makeLine(this.cols)];
-    this.scrollBottom = this.rows - 1;
+    const c = clamp(cols, 20, 300);
+    const r = clamp(rows, 6, 200);
+    this.state = {
+      cols: c,
+      rows: r,
+      scrollback: Math.max(r * 4, scrollback),
+      lines: [],
+      cursorRow: 0,
+      cursorCol: 0,
+      savedRow: 0,
+      savedCol: 0,
+      currentStyle: {},
+      usingAltScreen: false,
+      scrollTop: 0,
+      scrollBottom: r - 1,
+      wrapPending: false,
+      originMode: false,
+      cursorVisible: true,
+    };
+    this.state.lines = [bufOps.makeLine(this.state, c)];
   }
 
   write(chunk: string): void {
@@ -55,20 +54,21 @@ export class VtScreen {
       data = data.slice(-32_768);
     }
 
+    const s = this.state;
     const carry = parseVtStream(data, (action) => {
       switch (action.type) {
         case 'csi': this.handleCsi(action.raw, action.final); break;
         case 'print': this.writeChar(action.ch); break;
-        case 'cr': this.wrapPending = false; this.cursorCol = 0; break;
-        case 'lf': this.wrapPending = false; this.lineFeed(); break;
-        case 'bs': this.wrapPending = false; this.cursorCol = Math.max(0, this.cursorCol - 1); break;
-        case 'tab': { const spaces = 8 - (this.cursorCol % 8); for (let s = 0; s < spaces; s += 1) this.writeChar(' '); break; }
-        case 'decsc': this.savedRow = this.cursorRow; this.savedCol = this.cursorCol; break;
-        case 'decrc': this.wrapPending = false; this.cursorRow = this.savedRow; this.cursorCol = this.savedCol; this.clampCursor(); this.ensureCursorRow(); break;
-        case 'ris': this.resetToInitialState(); break;
-        case 'index': this.wrapPending = false; this.lineFeed(); break;
-        case 'next_line': this.wrapPending = false; this.cursorCol = 0; this.lineFeed(); break;
-        case 'reverse_index': this.wrapPending = false; this.reverseIndex(); break;
+        case 'cr': s.wrapPending = false; s.cursorCol = 0; break;
+        case 'lf': s.wrapPending = false; bufOps.lineFeed(s); break;
+        case 'bs': s.wrapPending = false; s.cursorCol = Math.max(0, s.cursorCol - 1); break;
+        case 'tab': { const spaces = 8 - (s.cursorCol % 8); for (let t = 0; t < spaces; t += 1) this.writeChar(' '); break; }
+        case 'decsc': s.savedRow = s.cursorRow; s.savedCol = s.cursorCol; break;
+        case 'decrc': s.wrapPending = false; s.cursorRow = s.savedRow; s.cursorCol = s.savedCol; bufOps.clampCursor(s); bufOps.ensureCursorRow(s); break;
+        case 'ris': bufOps.resetToInitialState(s); break;
+        case 'index': s.wrapPending = false; bufOps.lineFeed(s); break;
+        case 'next_line': s.wrapPending = false; s.cursorCol = 0; bufOps.lineFeed(s); break;
+        case 'reverse_index': s.wrapPending = false; bufOps.reverseIndex(s); break;
         case 'noop': break;
       }
     });
@@ -77,40 +77,42 @@ export class VtScreen {
   }
 
   resize(cols: number, rows: number): void {
+    const s = this.state;
     const nextCols = clamp(cols, 20, 300);
     const nextRows = clamp(rows, 6, 200);
-    if (nextCols === this.cols && nextRows === this.rows) return;
+    if (nextCols === s.cols && nextRows === s.rows) return;
 
-    for (let r = 0; r < this.lines.length; r += 1) {
-      const line = this.lines[r];
+    for (let r = 0; r < s.lines.length; r += 1) {
+      const line = s.lines[r];
       if (line.length < nextCols) {
-        this.lines[r] = line.concat(this.makeLine(nextCols - line.length));
+        s.lines[r] = line.concat(bufOps.makeLine(s, nextCols - line.length));
       } else if (line.length > nextCols) {
-        this.lines[r] = line.slice(0, nextCols);
+        s.lines[r] = line.slice(0, nextCols);
       }
     }
 
-    this.cols = nextCols;
-    this.rows = nextRows;
-    this.scrollback = Math.max(this.rows * 4, this.scrollback);
-    this.cursorCol = Math.min(this.cursorCol, this.cols - 1);
-    this.scrollTop = Math.max(0, Math.min(this.rows - 1, this.scrollTop));
-    this.scrollBottom = Math.max(this.scrollTop, Math.min(this.rows - 1, this.scrollBottom));
-    this.wrapPending = false;
+    s.cols = nextCols;
+    s.rows = nextRows;
+    s.scrollback = Math.max(s.rows * 4, s.scrollback);
+    s.cursorCol = Math.min(s.cursorCol, s.cols - 1);
+    s.scrollTop = Math.max(0, Math.min(s.rows - 1, s.scrollTop));
+    s.scrollBottom = Math.max(s.scrollTop, Math.min(s.rows - 1, s.scrollBottom));
+    s.wrapPending = false;
   }
 
   snapshot(cols?: number, rows?: number): TerminalStyledFrame {
-    const viewCols = clamp(cols || this.cols, 20, 300);
-    const viewRows = clamp(rows || this.rows, 6, 200);
-    const start = Math.max(0, this.lines.length - viewRows);
-    const lines = this.lines.slice(start, start + viewRows).map((line) => this.toStyledLine(line, viewCols));
+    const s = this.state;
+    const viewCols = clamp(cols || s.cols, 20, 300);
+    const viewRows = clamp(rows || s.rows, 6, 200);
+    const start = Math.max(0, s.lines.length - viewRows);
+    const lines = s.lines.slice(start, start + viewRows).map((line) => this.toStyledLine(line, viewCols));
 
     while (lines.length < viewRows) {
       lines.push({ segments: [{ text: ' '.repeat(viewCols) }] });
     }
 
-    const cursorRow = Math.max(0, Math.min(viewRows - 1, this.cursorRow - start));
-    const cursorCol = Math.max(0, Math.min(viewCols - 1, this.cursorCol));
+    const cursorRow = Math.max(0, Math.min(viewRows - 1, s.cursorRow - start));
+    const cursorCol = Math.max(0, Math.min(viewCols - 1, s.cursorCol));
 
     return {
       cols: viewCols,
@@ -118,29 +120,22 @@ export class VtScreen {
       lines,
       cursorRow,
       cursorCol,
-      cursorVisible: this.cursorVisible,
+      cursorVisible: s.cursorVisible,
     };
   }
 
   getCursorPosition(): { row: number; col: number } {
-    return {
-      row: this.cursorRow,
-      col: this.cursorCol,
-    };
+    return { row: this.state.cursorRow, col: this.state.cursorCol };
   }
 
   getDimensions(): { cols: number; rows: number } {
-    return {
-      cols: this.cols,
-      rows: this.rows,
-    };
+    return { cols: this.state.cols, rows: this.state.rows };
   }
 
   private handleCsi(rawParams: string, final: string): void {
-    // Clear deferred wrap for cursor-moving and erase operations.
-    // SGR ('m') and mode-set ('h'/'l') do NOT cancel the pending wrap.
+    const s = this.state;
     if (final !== 'm' && final !== 'h' && final !== 'l') {
-      this.wrapPending = false;
+      s.wrapPending = false;
     }
     const isPrivate = rawParams.startsWith('?');
     const clean = isPrivate ? rawParams.slice(1) : rawParams;
@@ -155,83 +150,83 @@ export class VtScreen {
 
     switch (final) {
       case 'A':
-        this.cursorRow -= param(0, 1);
+        s.cursorRow -= param(0, 1);
         break;
       case 'B':
-        this.cursorRow += param(0, 1);
+        s.cursorRow += param(0, 1);
         break;
       case 'C':
-        this.cursorCol += param(0, 1);
+        s.cursorCol += param(0, 1);
         break;
       case 'D':
-        this.cursorCol -= param(0, 1);
+        s.cursorCol -= param(0, 1);
         break;
       case 'E':
-        this.cursorRow += param(0, 1);
-        this.cursorCol = 0;
+        s.cursorRow += param(0, 1);
+        s.cursorCol = 0;
         break;
       case 'F':
-        this.cursorRow -= param(0, 1);
-        this.cursorCol = 0;
+        s.cursorRow -= param(0, 1);
+        s.cursorCol = 0;
         break;
       case 'G':
-        this.cursorCol = Math.max(0, param(0, 1) - 1);
+        s.cursorCol = Math.max(0, param(0, 1) - 1);
         break;
       case 'H':
       case 'f':
-        this.setCursorPosition(param(0, 1) - 1, param(1, 1) - 1);
+        bufOps.setCursorPosition(s, param(0, 1) - 1, param(1, 1) - 1);
         break;
       case 'd':
-        this.setCursorRow(param(0, 1) - 1);
+        bufOps.setCursorRow(s, param(0, 1) - 1);
         break;
       case 'r': {
         const top = Math.max(1, param(0, 1));
-        const bottom = parts.length >= 2 ? Math.max(1, param(1, this.rows)) : this.rows;
-        if (top < bottom && bottom <= this.rows) {
-          this.scrollTop = top - 1;
-          this.scrollBottom = bottom - 1;
-          this.cursorRow = this.originMode ? this.absoluteRowFromViewport(this.scrollTop) : 0;
-          this.cursorCol = 0;
+        const bottom = parts.length >= 2 ? Math.max(1, param(1, s.rows)) : s.rows;
+        if (top < bottom && bottom <= s.rows) {
+          s.scrollTop = top - 1;
+          s.scrollBottom = bottom - 1;
+          s.cursorRow = s.originMode ? bufOps.absoluteRowFromViewport(s, s.scrollTop) : 0;
+          s.cursorCol = 0;
         }
         break;
       }
       case 'J':
-        this.clearDisplay(param(0, 0));
+        bufOps.clearDisplay(s, param(0, 0));
         break;
       case 'K':
-        this.clearLine(param(0, 0));
+        bufOps.clearLine(s, param(0, 0));
         break;
       case '@':
-        this.insertChars(param(0, 1));
+        bufOps.insertChars(s, param(0, 1));
         break;
       case 'P':
-        this.deleteChars(param(0, 1));
+        bufOps.deleteChars(s, param(0, 1));
         break;
       case 'X':
-        this.eraseChars(param(0, 1));
+        bufOps.eraseChars(s, param(0, 1));
         break;
       case 'L':
-        this.insertLines(param(0, 1));
+        bufOps.insertLines(s, param(0, 1));
         break;
       case 'M':
-        this.deleteLines(param(0, 1));
+        bufOps.deleteLines(s, param(0, 1));
         break;
       case 'S':
-        this.scrollUp(param(0, 1));
+        bufOps.scrollUp(s, param(0, 1));
         break;
       case 'T':
-        this.scrollDown(param(0, 1));
+        bufOps.scrollDown(s, param(0, 1));
         break;
       case 's':
-        this.savedRow = this.cursorRow;
-        this.savedCol = this.cursorCol;
+        s.savedRow = s.cursorRow;
+        s.savedCol = s.cursorCol;
         break;
       case 'u':
-        this.cursorRow = this.savedRow;
-        this.cursorCol = this.savedCol;
+        s.cursorRow = s.savedRow;
+        s.cursorCol = s.savedCol;
         break;
       case 'm':
-        this.applySgrParts(parts);
+        s.currentStyle = applySgr(parts, s.currentStyle);
         break;
       case 'h':
       case 'l':
@@ -239,18 +234,18 @@ export class VtScreen {
           const enable = final === 'h';
           for (const mode of privateParams) {
             if (mode === 1049 || mode === 1047 || mode === 47) {
-              if (enable) this.enterAltScreen();
-              else this.leaveAltScreen();
+              if (enable) bufOps.enterAltScreen(s);
+              else bufOps.leaveAltScreen(s);
               continue;
             }
             if (mode === 6) {
-              this.originMode = enable;
-              this.cursorCol = 0;
-              this.cursorRow = enable ? this.absoluteRowFromViewport(this.scrollTop) : 0;
+              s.originMode = enable;
+              s.cursorCol = 0;
+              s.cursorRow = enable ? bufOps.absoluteRowFromViewport(s, s.scrollTop) : 0;
               continue;
             }
             if (mode === 25) {
-              this.cursorVisible = enable;
+              s.cursorVisible = enable;
               continue;
             }
           }
@@ -261,129 +256,14 @@ export class VtScreen {
         break;
     }
 
-    this.clampCursor();
-    this.ensureCursorRow();
-  }
-
-  private clearDisplay(mode: number): void {
-    this.ensureCursorRow();
-    if (mode === 2) {
-      this.lines = [this.makeLine(this.cols)];
-      if (this.usingAltScreen) {
-        while (this.lines.length < this.rows) this.lines.push(this.makeLine(this.cols));
-      }
-      return;
-    }
-
-    if (mode === 1) {
-      for (let r = 0; r < this.cursorRow; r += 1) {
-        this.lines[r] = this.makeLine(this.cols);
-      }
-      this.clearLine(1);
-      return;
-    }
-
-    this.clearLine(0);
-    for (let r = this.cursorRow + 1; r < this.lines.length; r += 1) {
-      this.lines[r] = this.makeLine(this.cols);
-    }
-  }
-
-  private clearLine(mode: number): void {
-    this.ensureCursorRow();
-    const line = this.lines[this.cursorRow];
-
-    if (mode === 2) {
-      this.lines[this.cursorRow] = this.makeLine(this.cols);
-      return;
-    }
-    if (mode === 1) {
-      for (let c = 0; c <= this.cursorCol; c += 1) {
-        line[c] = this.makeCell(' ');
-      }
-      return;
-    }
-    for (let c = this.cursorCol; c < this.cols; c += 1) {
-      line[c] = this.makeCell(' ');
-    }
-  }
-
-  private insertChars(count: number): void {
-    this.ensureCursorRow();
-    const line = this.lines[this.cursorRow];
-    const n = Math.max(1, Math.min(this.cols, count));
-    for (let i = this.cols - 1; i >= this.cursorCol + n; i -= 1) {
-      line[i] = line[i - n];
-    }
-    for (let i = 0; i < n && this.cursorCol + i < this.cols; i += 1) {
-      line[this.cursorCol + i] = this.makeCell(' ');
-    }
-  }
-
-  private deleteChars(count: number): void {
-    this.ensureCursorRow();
-    const line = this.lines[this.cursorRow];
-    const n = Math.max(1, Math.min(this.cols, count));
-    for (let i = this.cursorCol; i < this.cols - n; i += 1) {
-      line[i] = line[i + n];
-    }
-    for (let i = this.cols - n; i < this.cols; i += 1) {
-      line[i] = this.makeCell(' ');
-    }
-  }
-
-  private eraseChars(count: number): void {
-    this.ensureCursorRow();
-    const line = this.lines[this.cursorRow];
-    const n = Math.max(1, Math.min(this.cols - this.cursorCol, count));
-    for (let i = 0; i < n; i += 1) {
-      line[this.cursorCol + i] = this.makeCell(' ');
-    }
-  }
-
-  private insertLines(count: number): void {
-    this.ensureCursorRow();
-    if (!this.cursorWithinScrollRegion()) return;
-    const n = Math.max(1, Math.min(this.absoluteRowFromViewport(this.scrollBottom) - this.cursorRow + 1, count));
-    const bottom = this.absoluteRowFromViewport(this.scrollBottom);
-    for (let i = 0; i < n; i += 1) {
-      this.lines.splice(this.cursorRow, 0, this.makeLine(this.cols));
-      this.lines.splice(bottom + 1, 1);
-    }
-    this.trimBottomToRows();
-  }
-
-  private deleteLines(count: number): void {
-    this.ensureCursorRow();
-    if (!this.cursorWithinScrollRegion()) return;
-    const n = Math.max(1, Math.min(this.absoluteRowFromViewport(this.scrollBottom) - this.cursorRow + 1, count));
-    const bottom = this.absoluteRowFromViewport(this.scrollBottom);
-    for (let i = 0; i < n; i += 1) {
-      if (this.cursorRow < this.lines.length) {
-        this.lines.splice(this.cursorRow, 1);
-      }
-      this.lines.splice(bottom, 0, this.makeLine(this.cols));
-    }
-    this.trimBottomToRows();
-  }
-
-  private scrollUp(count: number): void {
-    const n = Math.max(1, Math.min(this.rows, count));
-    this.scrollRegionUp(this.scrollTop, this.scrollBottom, n);
-    this.trimBottomToRows();
-  }
-
-  private scrollDown(count: number): void {
-    const n = Math.max(1, Math.min(this.rows, count));
-    this.scrollRegionDown(this.scrollTop, this.scrollBottom, n);
-    this.trimBottomToRows();
+    bufOps.clampCursor(s);
+    bufOps.ensureCursorRow(s);
   }
 
   private writeChar(ch: string): void {
+    const s = this.state;
     const width = charDisplayWidth(ch);
     if (width === 0) {
-      // Combining marks should attach to the previous printable cell and must
-      // not trigger deferred wrapping.
       this.appendCombiningChar(ch);
       return;
     }
@@ -392,51 +272,52 @@ export class VtScreen {
       return;
     }
 
-    if (this.wrapPending) {
-      this.wrapPending = false;
-      this.cursorCol = 0;
-      this.lineFeed();
+    if (s.wrapPending) {
+      s.wrapPending = false;
+      s.cursorCol = 0;
+      bufOps.lineFeed(s);
     }
-    this.ensureCursorRow();
-    this.clampCursor();
+    bufOps.ensureCursorRow(s);
+    bufOps.clampCursor(s);
 
     if (width === 1) {
-      this.lines[this.cursorRow][this.cursorCol] = this.makeCell(ch);
-      if (this.cursorCol < this.cols - 1) {
-        this.cursorCol += 1;
+      s.lines[s.cursorRow][s.cursorCol] = bufOps.makeCell(s, ch);
+      if (s.cursorCol < s.cols - 1) {
+        s.cursorCol += 1;
       } else {
-        this.wrapPending = true;
+        s.wrapPending = true;
       }
       return;
     }
 
-    if (this.cursorCol >= this.cols - 1) {
-      this.cursorCol = 0;
-      this.lineFeed();
-      this.ensureCursorRow();
-      this.clampCursor();
+    if (s.cursorCol >= s.cols - 1) {
+      s.cursorCol = 0;
+      bufOps.lineFeed(s);
+      bufOps.ensureCursorRow(s);
+      bufOps.clampCursor(s);
     }
 
-    this.lines[this.cursorRow][this.cursorCol] = this.makeCell(ch);
-    if (this.cursorCol + 1 < this.cols) {
-      this.lines[this.cursorRow][this.cursorCol + 1] = this.makeCell('');
+    s.lines[s.cursorRow][s.cursorCol] = bufOps.makeCell(s, ch);
+    if (s.cursorCol + 1 < s.cols) {
+      s.lines[s.cursorRow][s.cursorCol + 1] = bufOps.makeCell(s, '');
     }
 
-    if (this.cursorCol < this.cols - 2) {
-      this.cursorCol += 2;
+    if (s.cursorCol < s.cols - 2) {
+      s.cursorCol += 2;
     } else {
-      this.cursorCol = this.cols - 1;
-      this.wrapPending = true;
+      s.cursorCol = s.cols - 1;
+      s.wrapPending = true;
     }
   }
 
   private appendCombiningChar(ch: string): void {
-    this.ensureCursorRow();
-    this.clampCursor();
-    const line = this.lines[this.cursorRow];
+    const s = this.state;
+    bufOps.ensureCursorRow(s);
+    bufOps.clampCursor(s);
+    const line = s.lines[s.cursorRow];
     if (!line || line.length === 0) return;
 
-    const targetCol = this.cursorCol > 0 ? this.cursorCol - 1 : this.cursorCol;
+    const targetCol = s.cursorCol > 0 ? s.cursorCol - 1 : s.cursorCol;
     const target = line[targetCol];
     if (!target) return;
 
@@ -444,26 +325,24 @@ export class VtScreen {
   }
 
   private shouldJoinWithPrevious(ch: string): boolean {
-    if (this.cursorCol <= 0) return false;
-    this.ensureCursorRow();
-    this.clampCursor();
-    const line = this.lines[this.cursorRow];
+    const s = this.state;
+    if (s.cursorCol <= 0) return false;
+    bufOps.ensureCursorRow(s);
+    bufOps.clampCursor(s);
+    const line = s.lines[s.cursorRow];
     if (!line) return false;
-    const target = line[this.cursorCol - 1];
+    const target = line[s.cursorCol - 1];
     if (!target || target.ch.length === 0) return false;
     return target.ch.endsWith('\u200d') && charDisplayWidth(ch) > 0;
   }
 
-  private applySgrParts(parts: string[]): void {
-    this.currentStyle = applySgr(parts, this.currentStyle);
-  }
-
   private toStyledLine(line: Cell[], cols: number): TerminalStyledLine {
+    const s = this.state;
     const segments: TerminalSegment[] = [];
 
     let current: TerminalSegment | null = null;
     for (let i = 0; i < cols; i += 1) {
-      const cell = line[i] || this.makeCell(' ');
+      const cell = line[i] || bufOps.makeCell(s, ' ');
       const style = applyInverse(cell.style);
       const nextStyleKey = styleKey(style);
 
@@ -489,211 +368,4 @@ export class VtScreen {
 
     return { segments };
   }
-
-  private ensureCursorRow(): void {
-    if (this.usingAltScreen) {
-      while (this.lines.length < this.rows) {
-        this.lines.push(this.makeLine(this.cols));
-      }
-      while (this.cursorRow >= this.rows) {
-        this.cursorRow = this.rows - 1;
-        this.scrollRegionUp(this.scrollTop, this.scrollBottom, 1);
-      }
-      this.cursorRow = Math.max(0, this.cursorRow);
-      return;
-    }
-
-    while (this.lines.length <= this.cursorRow) {
-      this.lines.push(this.makeLine(this.cols));
-      if (this.lines.length > this.scrollback) {
-        this.lines.shift();
-        this.cursorRow = Math.max(0, this.cursorRow - 1);
-        this.savedRow = Math.max(0, this.savedRow - 1);
-      }
-    }
-  }
-
-  private clampCursor(): void {
-    const minRow = this.originMode ? this.absoluteRowFromViewport(this.scrollTop) : 0;
-    const maxRow = this.originMode ? this.absoluteRowFromViewport(this.scrollBottom) : Number.MAX_SAFE_INTEGER;
-    this.cursorRow = Math.max(minRow, Math.min(maxRow, this.cursorRow));
-    this.cursorCol = Math.max(0, Math.min(this.cols - 1, this.cursorCol));
-  }
-
-  private resetToInitialState(): void {
-    this.lines = [this.makeLine(this.cols)];
-    if (this.usingAltScreen) {
-      while (this.lines.length < this.rows) this.lines.push(this.makeLine(this.cols));
-    }
-    this.cursorRow = 0;
-    this.cursorCol = 0;
-    this.savedRow = 0;
-    this.savedCol = 0;
-    this.currentStyle = {};
-    this.scrollTop = 0;
-    this.scrollBottom = this.rows - 1;
-    this.originMode = false;
-    this.cursorVisible = true;
-    this.wrapPending = false;
-  }
-
-  private setCursorPosition(row: number, col: number): void {
-    const safeCol = Math.max(0, col);
-    const safeRow = Math.max(0, row);
-    this.cursorCol = safeCol;
-    this.cursorRow = this.originMode
-      ? this.absoluteRowFromViewport(this.scrollTop) + safeRow
-      : safeRow;
-  }
-
-  private setCursorRow(row: number): void {
-    const safeRow = Math.max(0, row);
-    this.cursorRow = this.originMode
-      ? this.absoluteRowFromViewport(this.scrollTop) + safeRow
-      : safeRow;
-  }
-
-  private makeLine(cols: number): Cell[] {
-    return Array.from({ length: cols }, () => this.makeCell(' '));
-  }
-
-  private makeCell(ch: string): Cell {
-    return {
-      ch,
-      style: { ...this.currentStyle },
-    };
-  }
-
-  private trimBottomToRows(): void {
-    if (!this.usingAltScreen) return;
-    while (this.lines.length > this.rows) {
-      this.lines.pop();
-    }
-    while (this.lines.length < this.rows) {
-      this.lines.push(this.makeLine(this.cols));
-    }
-  }
-
-  private enterAltScreen(): void {
-    if (this.usingAltScreen) return;
-    this.savedPrimaryScreen = {
-      lines: cloneLines(this.lines),
-      cursorRow: this.cursorRow,
-      cursorCol: this.cursorCol,
-      savedRow: this.savedRow,
-      savedCol: this.savedCol,
-      scrollTop: this.scrollTop,
-      scrollBottom: this.scrollBottom,
-      originMode: this.originMode,
-      cursorVisible: this.cursorVisible,
-    };
-    this.usingAltScreen = true;
-    this.lines = [];
-    while (this.lines.length < this.rows) this.lines.push(this.makeLine(this.cols));
-    this.cursorRow = 0;
-    this.cursorCol = 0;
-    this.savedRow = 0;
-    this.savedCol = 0;
-    this.scrollTop = 0;
-    this.scrollBottom = this.rows - 1;
-    this.originMode = false;
-    this.cursorVisible = true;
-    this.wrapPending = false;
-  }
-
-  private leaveAltScreen(): void {
-    if (!this.usingAltScreen) return;
-    this.usingAltScreen = false;
-    this.wrapPending = false;
-    if (!this.savedPrimaryScreen) {
-      this.lines = [this.makeLine(this.cols)];
-      this.cursorRow = 0;
-      this.cursorCol = 0;
-      this.savedRow = 0;
-      this.savedCol = 0;
-      this.scrollTop = 0;
-      this.scrollBottom = this.rows - 1;
-      return;
-    }
-    this.lines = cloneLines(this.savedPrimaryScreen.lines);
-    this.cursorRow = this.savedPrimaryScreen.cursorRow;
-    this.cursorCol = this.savedPrimaryScreen.cursorCol;
-    this.savedRow = this.savedPrimaryScreen.savedRow;
-    this.savedCol = this.savedPrimaryScreen.savedCol;
-    this.scrollTop = this.savedPrimaryScreen.scrollTop;
-    this.scrollBottom = this.savedPrimaryScreen.scrollBottom;
-    this.originMode = this.savedPrimaryScreen.originMode;
-    this.cursorVisible = this.savedPrimaryScreen.cursorVisible;
-    this.savedPrimaryScreen = undefined;
-  }
-
-  private lineFeed(): void {
-    this.ensureCursorRow();
-    const top = this.absoluteRowFromViewport(this.scrollTop);
-    const bottom = this.absoluteRowFromViewport(this.scrollBottom);
-
-    if (this.cursorRow >= top && this.cursorRow <= bottom) {
-      if (this.cursorRow === bottom) {
-        this.scrollRegionUp(this.scrollTop, this.scrollBottom, 1);
-      } else {
-        this.cursorRow += 1;
-      }
-      return;
-    }
-
-    this.cursorRow += 1;
-    this.ensureCursorRow();
-  }
-
-  private reverseIndex(): void {
-    this.ensureCursorRow();
-    const top = this.absoluteRowFromViewport(this.scrollTop);
-    const bottom = this.absoluteRowFromViewport(this.scrollBottom);
-
-    if (this.cursorRow >= top && this.cursorRow <= bottom) {
-      if (this.cursorRow === top) {
-        this.scrollRegionDown(this.scrollTop, this.scrollBottom, 1);
-      } else {
-        this.cursorRow -= 1;
-      }
-      return;
-    }
-
-    this.cursorRow = Math.max(0, this.cursorRow - 1);
-  }
-
-  private cursorWithinScrollRegion(): boolean {
-    const top = this.absoluteRowFromViewport(this.scrollTop);
-    const bottom = this.absoluteRowFromViewport(this.scrollBottom);
-    return this.cursorRow >= top && this.cursorRow <= bottom;
-  }
-
-  private scrollRegionUp(topLocal: number, bottomLocal: number, count: number): void {
-    const top = this.absoluteRowFromViewport(topLocal);
-    const bottom = this.absoluteRowFromViewport(bottomLocal);
-    const n = Math.max(1, Math.min(bottom - top + 1, count));
-
-    for (let i = 0; i < n; i += 1) {
-      this.lines.splice(top, 1);
-      this.lines.splice(bottom, 0, this.makeLine(this.cols));
-    }
-  }
-
-  private scrollRegionDown(topLocal: number, bottomLocal: number, count: number): void {
-    const top = this.absoluteRowFromViewport(topLocal);
-    const bottom = this.absoluteRowFromViewport(bottomLocal);
-    const n = Math.max(1, Math.min(bottom - top + 1, count));
-
-    for (let i = 0; i < n; i += 1) {
-      this.lines.splice(bottom, 1);
-      this.lines.splice(top, 0, this.makeLine(this.cols));
-    }
-  }
-
-  private absoluteRowFromViewport(localRow: number): number {
-    if (this.usingAltScreen) return localRow;
-    const base = Math.max(0, this.lines.length - this.rows);
-    return base + localRow;
-  }
 }
-

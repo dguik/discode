@@ -49,3 +49,26 @@ export type SavedScreenState = {
   originMode: boolean;
   cursorVisible: boolean;
 };
+
+/**
+ * Mutable state bag for VtScreen buffer operations.
+ * All fields are directly read/written by buffer-ops functions.
+ */
+export interface VtScreenState {
+  cols: number;
+  rows: number;
+  scrollback: number;
+  lines: Cell[][];
+  cursorRow: number;
+  cursorCol: number;
+  savedRow: number;
+  savedCol: number;
+  currentStyle: TerminalStyle;
+  usingAltScreen: boolean;
+  savedPrimaryScreen?: SavedScreenState;
+  scrollTop: number;
+  scrollBottom: number;
+  wrapPending: boolean;
+  originMode: boolean;
+  cursorVisible: boolean;
+}
