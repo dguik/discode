@@ -67,36 +67,51 @@ describe('HookEventPipeline', () => {
   });
 
   describe('handleOpencodeEvent', () => {
-    it('returns false for null payload', async () => {
+    it('returns false and warns for null payload', async () => {
       const deps = createMockDeps();
       const pipeline = new HookEventPipeline(deps);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(await pipeline.handleOpencodeEvent(null)).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('invalid payload'));
+      warnSpy.mockRestore();
     });
 
-    it('returns false for non-object payload', async () => {
+    it('returns false and warns for non-object payload', async () => {
       const deps = createMockDeps();
       const pipeline = new HookEventPipeline(deps);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(await pipeline.handleOpencodeEvent('string')).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('invalid payload'));
+      warnSpy.mockRestore();
     });
 
-    it('returns false when projectName is missing', async () => {
+    it('returns false and warns when projectName is missing', async () => {
       const deps = createMockDeps();
       const pipeline = new HookEventPipeline(deps);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(await pipeline.handleOpencodeEvent({ type: 'session.start' })).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('missing projectName'));
+      warnSpy.mockRestore();
     });
 
-    it('returns false when project not found in state', async () => {
+    it('returns false and warns when project not found in state', async () => {
       const deps = createMockDeps();
       const pipeline = new HookEventPipeline(deps);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(await pipeline.handleOpencodeEvent({ projectName: 'unknown', type: 'session.start' })).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('project not found: unknown'));
+      warnSpy.mockRestore();
     });
 
-    it('returns false when no channelId resolved', async () => {
+    it('returns false and warns when no channelId resolved', async () => {
       const deps = createMockDeps();
       const { getPrimaryInstanceForAgent } = await import('../../src/state/instances.js');
       (getPrimaryInstanceForAgent as any).mockReturnValueOnce(undefined);
       const pipeline = new HookEventPipeline(deps);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(await pipeline.handleOpencodeEvent({ projectName: 'myProject', type: 'session.start' })).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no channel for myProject'));
+      warnSpy.mockRestore();
     });
 
     it('routes to correct handler for known event types', async () => {

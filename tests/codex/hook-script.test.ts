@@ -274,6 +274,122 @@ describe('codex notify hook script', () => {
     expect(requests[0].body.agentType).toBe('codex');
   });
 
+  // ---------- Legacy env var fallback (AGENT_DISCORD_*) ----------
+
+  it('falls back to AGENT_DISCORD_PROJECT when DISCODE_PROJECT is not set', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'legacy env',
+    });
+
+    await runHookScript(scriptPath, payload, {
+      AGENT_DISCORD_PROJECT: 'legacy-proj',
+      DISCODE_PORT: String(port),
+      DISCODE_HOSTNAME: '127.0.0.1',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.projectName).toBe('legacy-proj');
+  });
+
+  it('falls back to AGENT_DISCORD_AGENT when DISCODE_AGENT is not set', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'test',
+    });
+
+    await runHookScript(scriptPath, payload, {
+      DISCODE_PROJECT: 'test-project',
+      AGENT_DISCORD_AGENT: 'legacy-agent',
+      DISCODE_PORT: String(port),
+      DISCODE_HOSTNAME: '127.0.0.1',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.agentType).toBe('legacy-agent');
+  });
+
+  it('falls back to AGENT_DISCORD_PORT and AGENT_DISCORD_HOSTNAME', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'port test',
+    });
+
+    await runHookScript(scriptPath, payload, {
+      DISCODE_PROJECT: 'test-project',
+      AGENT_DISCORD_PORT: String(port),
+      AGENT_DISCORD_HOSTNAME: '127.0.0.1',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.text).toBe('port test');
+  });
+
+  it('DISCODE_* takes precedence over AGENT_DISCORD_*', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'priority',
+    });
+
+    await runHookScript(scriptPath, payload, {
+      DISCODE_PROJECT: 'new-proj',
+      AGENT_DISCORD_PROJECT: 'old-proj',
+      DISCODE_AGENT: 'new-agent',
+      AGENT_DISCORD_AGENT: 'old-agent',
+      DISCODE_PORT: String(port),
+      AGENT_DISCORD_PORT: '99999',
+      DISCODE_HOSTNAME: '127.0.0.1',
+      AGENT_DISCORD_HOSTNAME: '10.0.0.1',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.projectName).toBe('new-proj');
+    expect(requests[0].body.agentType).toBe('new-agent');
+  });
+
+  it('falls back to AGENT_DISCORD_INSTANCE for instanceId', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'inst',
+    });
+
+    await runHookScript(scriptPath, payload, {
+      DISCODE_PROJECT: 'test-project',
+      AGENT_DISCORD_INSTANCE: 'legacy-inst',
+      DISCODE_PORT: String(port),
+      DISCODE_HOSTNAME: '127.0.0.1',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.instanceId).toBe('legacy-inst');
+  });
+
+  it('works with only AGENT_DISCORD_* env vars (no DISCODE_* set)', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'full legacy',
+    });
+
+    await runHookScript(scriptPath, payload, {
+      AGENT_DISCORD_PROJECT: 'legacy-proj',
+      AGENT_DISCORD_AGENT: 'legacy-agent',
+      AGENT_DISCORD_INSTANCE: 'legacy-inst',
+      AGENT_DISCORD_PORT: String(port),
+      AGENT_DISCORD_HOSTNAME: '127.0.0.1',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body).toEqual({
+      projectName: 'legacy-proj',
+      agentType: 'legacy-agent',
+      instanceId: 'legacy-inst',
+      type: 'session.idle',
+      text: 'full legacy',
+    });
+  });
+
+  // ---------- Error resilience ----------
+
   it('silently handles bridge connection failure (no crash)', async () => {
     const payload = JSON.stringify({
       type: 'agent-turn-complete',

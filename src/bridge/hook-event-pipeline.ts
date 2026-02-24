@@ -80,7 +80,10 @@ export class HookEventPipeline {
   }
 
   async handleOpencodeEvent(payload: unknown): Promise<boolean> {
-    if (!payload || typeof payload !== 'object') return false;
+    if (!payload || typeof payload !== 'object') {
+      console.warn('⚠️ [event-pipeline] invalid payload (not an object)');
+      return false;
+    }
 
     const event = payload as Record<string, unknown>;
     const projectName = typeof event.projectName === 'string' ? event.projectName : undefined;
@@ -88,17 +91,26 @@ export class HookEventPipeline {
     const instanceId = typeof event.instanceId === 'string' ? event.instanceId : undefined;
     const eventType = typeof event.type === 'string' ? event.type : undefined;
 
-    if (!projectName) return false;
+    if (!projectName) {
+      console.warn('⚠️ [event-pipeline] missing projectName in event');
+      return false;
+    }
 
     const project = this.deps.stateManager.getProject(projectName);
-    if (!project) return false;
+    if (!project) {
+      console.warn(`⚠️ [event-pipeline] project not found: ${projectName}`);
+      return false;
+    }
 
     const normalizedProject = normalizeProjectState(project);
     const instance =
       (instanceId ? getProjectInstance(normalizedProject, instanceId) : undefined) ||
       getPrimaryInstanceForAgent(normalizedProject, agentType);
     const channelId = instance?.channelId;
-    if (!channelId) return false;
+    if (!channelId) {
+      console.warn(`⚠️ [event-pipeline] no channel for ${projectName}/${agentType}${instanceId ? `#${instanceId}` : ''} (instance ${instance ? 'found but missing channelId' : 'not found'})`);
+      return false;
+    }
 
     const text = this.getEventText(event);
     const resolvedAgentType = instance?.agentType || agentType;
@@ -166,7 +178,7 @@ export class HookEventPipeline {
     let result = true;
     const next = previous
       .then(async () => { result = await fn(); })
-      .catch(() => {})
+      .catch((error) => { console.error('⚠️ [event-pipeline] handler error:', error); })
       .finally(() => {
         if (this.channelQueues.get(channelId) === next) {
           this.channelQueues.delete(channelId);
