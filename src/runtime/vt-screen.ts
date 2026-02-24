@@ -11,12 +11,11 @@ import {
   clamp,
   styleKey,
   applyInverse,
-  toHex,
-  ANSI_16_COLORS,
-  xterm256Color,
   charDisplayWidth,
   cloneLines,
 } from './vt-utils.js';
+import { applySgr } from './vt-sgr.js';
+import { parseVtStream } from './vt-escape-parser.js';
 
 export type { TerminalStyle, TerminalSegment, TerminalStyledLine, TerminalStyledFrame } from './vt-types.js';
 
@@ -53,196 +52,28 @@ export class VtScreen {
 
     if (data.length === 0) return;
     if (data.length > 32_768) {
-      // Guard against pathological accumulation.
       data = data.slice(-32_768);
     }
 
-    let i = 0;
-    while (i < data.length) {
-      const cp = data.codePointAt(i);
-      if (cp === undefined) break;
-      const ch = String.fromCodePoint(cp);
-      const step = ch.length;
-
-      if (ch === '\x1b') {
-        const next = data[i + 1];
-        if (next === undefined) {
-          incRuntimeMetric('vt_partial_sequence_carry', { kind: 'escape' });
-          this.pendingInput = data.slice(i);
-          break;
-        }
-
-        if (next === '[') {
-          let j = i + 2;
-          while (j < data.length && (data.charCodeAt(j) < 0x40 || data.charCodeAt(j) > 0x7e)) j += 1;
-          if (j >= data.length) {
-            incRuntimeMetric('vt_partial_sequence_carry', { kind: 'csi' });
-            this.pendingInput = data.slice(i);
-            break;
-          }
-          const final = data[j];
-          const raw = data.slice(i + 2, j);
-          this.handleCsi(raw, final);
-          i = j + 1;
-          continue;
-        }
-
-        if (next === '7') {
-          // DECSC: save cursor (legacy escape form).
-          this.savedRow = this.cursorRow;
-          this.savedCol = this.cursorCol;
-          i += 2;
-          continue;
-        }
-
-        if (next === '8') {
-          // DECRC: restore cursor (legacy escape form).
-          this.wrapPending = false;
-          this.cursorRow = this.savedRow;
-          this.cursorCol = this.savedCol;
-          this.clampCursor();
-          this.ensureCursorRow();
-          i += 2;
-          continue;
-        }
-
-        if (next === 'c') {
-          // RIS: full reset.
-          this.resetToInitialState();
-          i += 2;
-          continue;
-        }
-
-        if (next === '=' || next === '>' || next === '\\') {
-          // DECKPAM/DECKPNM or ST - no-op for rendering.
-          i += 2;
-          continue;
-        }
-
-        if (next === '(' || next === ')' || next === '*' || next === '+' || next === '-' || next === '.' || next === '/') {
-          // Designate G0/G1/G2/G3 character set (SCS): ESC ( B, ESC ) 0, ...
-          if (data[i + 2] === undefined) {
-            incRuntimeMetric('vt_partial_sequence_carry', { kind: 'escape' });
-            this.pendingInput = data.slice(i);
-            break;
-          }
-          i += 3;
-          continue;
-        }
-
-        if (next === 'D') {
-          this.wrapPending = false;
-          this.lineFeed();
-          i += 2;
-          continue;
-        }
-
-        if (next === 'E') {
-          this.wrapPending = false;
-          this.cursorCol = 0;
-          this.lineFeed();
-          i += 2;
-          continue;
-        }
-
-        if (next === 'M') {
-          this.wrapPending = false;
-          this.reverseIndex();
-          i += 2;
-          continue;
-        }
-
-        if (next === ']') {
-          // OSC
-          let j = i + 2;
-          let terminated = false;
-          while (j < data.length) {
-            if (data[j] === '\x07') {
-              j += 1;
-              terminated = true;
-              break;
-            }
-            if (data[j] === '\x1b' && data[j + 1] === '\\') {
-              j += 2;
-              terminated = true;
-              break;
-            }
-            j += 1;
-          }
-          if (!terminated) {
-            incRuntimeMetric('vt_partial_sequence_carry', { kind: 'osc' });
-            this.pendingInput = data.slice(i);
-            break;
-          }
-          i = j;
-          continue;
-        }
-
-        if (next === 'P' || next === 'X' || next === '^' || next === '_') {
-          // DCS/SOS/PM/APC - consume until ST.
-          let j = i + 2;
-          let terminated = false;
-          while (j < data.length) {
-            if (data[j] === '\x1b' && data[j + 1] === '\\') {
-              j += 2;
-              terminated = true;
-              break;
-            }
-            j += 1;
-          }
-          if (!terminated) {
-            incRuntimeMetric('vt_partial_sequence_carry', { kind: 'escape' });
-            this.pendingInput = data.slice(i);
-            break;
-          }
-          i = j;
-          continue;
-        }
-
-        incRuntimeMetric('vt_unknown_escape', { next });
-        i += 2;
-        continue;
+    const carry = parseVtStream(data, (action) => {
+      switch (action.type) {
+        case 'csi': this.handleCsi(action.raw, action.final); break;
+        case 'print': this.writeChar(action.ch); break;
+        case 'cr': this.wrapPending = false; this.cursorCol = 0; break;
+        case 'lf': this.wrapPending = false; this.lineFeed(); break;
+        case 'bs': this.wrapPending = false; this.cursorCol = Math.max(0, this.cursorCol - 1); break;
+        case 'tab': { const spaces = 8 - (this.cursorCol % 8); for (let s = 0; s < spaces; s += 1) this.writeChar(' '); break; }
+        case 'decsc': this.savedRow = this.cursorRow; this.savedCol = this.cursorCol; break;
+        case 'decrc': this.wrapPending = false; this.cursorRow = this.savedRow; this.cursorCol = this.savedCol; this.clampCursor(); this.ensureCursorRow(); break;
+        case 'ris': this.resetToInitialState(); break;
+        case 'index': this.wrapPending = false; this.lineFeed(); break;
+        case 'next_line': this.wrapPending = false; this.cursorCol = 0; this.lineFeed(); break;
+        case 'reverse_index': this.wrapPending = false; this.reverseIndex(); break;
+        case 'noop': break;
       }
+    });
 
-      if (ch === '\r') {
-        this.wrapPending = false;
-        this.cursorCol = 0;
-        i += step;
-        continue;
-      }
-
-      if (ch === '\n') {
-        this.wrapPending = false;
-        this.lineFeed();
-        i += step;
-        continue;
-      }
-
-      if (ch === '\b') {
-        this.wrapPending = false;
-        this.cursorCol = Math.max(0, this.cursorCol - 1);
-        i += step;
-        continue;
-      }
-
-      if (ch === '\t') {
-        const spaces = 8 - (this.cursorCol % 8);
-        for (let s = 0; s < spaces; s += 1) {
-          this.writeChar(' ');
-        }
-        i += step;
-        continue;
-      }
-
-      const code = ch.charCodeAt(0);
-      if (code < 0x20 || code === 0x7f) {
-        i += step;
-        continue;
-      }
-
-      this.writeChar(ch);
-      i += step;
-    }
+    this.pendingInput = carry;
   }
 
   resize(cols: number, rows: number): void {
@@ -400,7 +231,7 @@ export class VtScreen {
         this.cursorCol = this.savedCol;
         break;
       case 'm':
-        this.applySgr(parts);
+        this.applySgrParts(parts);
         break;
       case 'h':
       case 'l':
@@ -623,103 +454,8 @@ export class VtScreen {
     return target.ch.endsWith('\u200d') && charDisplayWidth(ch) > 0;
   }
 
-  private applySgr(parts: string[]): void {
-    if (parts.length === 0) {
-      this.currentStyle = {};
-      return;
-    }
-
-    for (let i = 0; i < parts.length; i += 1) {
-      const code = parseInt(parts[i] || '0', 10);
-      if (!Number.isFinite(code) || code === 0) {
-        this.currentStyle = {};
-        continue;
-      }
-
-      if (code === 1) {
-        this.currentStyle.bold = true;
-        continue;
-      }
-      if (code === 3) {
-        this.currentStyle.italic = true;
-        continue;
-      }
-      if (code === 4) {
-        this.currentStyle.underline = true;
-        continue;
-      }
-      if (code === 7) {
-        this.currentStyle.inverse = true;
-        continue;
-      }
-      if (code === 22) {
-        this.currentStyle.bold = false;
-        continue;
-      }
-      if (code === 23) {
-        this.currentStyle.italic = false;
-        continue;
-      }
-      if (code === 24) {
-        this.currentStyle.underline = false;
-        continue;
-      }
-      if (code === 27) {
-        this.currentStyle.inverse = false;
-        continue;
-      }
-      if (code === 39) {
-        this.currentStyle.fg = undefined;
-        continue;
-      }
-      if (code === 49) {
-        this.currentStyle.bg = undefined;
-        continue;
-      }
-
-      if (code >= 30 && code <= 37) {
-        this.currentStyle.fg = ANSI_16_COLORS[code - 30];
-        continue;
-      }
-      if (code >= 90 && code <= 97) {
-        this.currentStyle.fg = ANSI_16_COLORS[8 + (code - 90)];
-        continue;
-      }
-      if (code >= 40 && code <= 47) {
-        this.currentStyle.bg = ANSI_16_COLORS[code - 40];
-        continue;
-      }
-      if (code >= 100 && code <= 107) {
-        this.currentStyle.bg = ANSI_16_COLORS[8 + (code - 100)];
-        continue;
-      }
-
-      if ((code === 38 || code === 48) && i + 1 < parts.length) {
-        const mode = parseInt(parts[i + 1] || '', 10);
-        if (mode === 5 && i + 2 < parts.length) {
-          const idx = parseInt(parts[i + 2] || '', 10);
-          const color = xterm256Color(idx);
-          if (color) {
-            if (code === 38) this.currentStyle.fg = color;
-            else this.currentStyle.bg = color;
-          }
-          i += 2;
-          continue;
-        }
-        if (mode === 2 && i + 4 < parts.length) {
-          const r = parseInt(parts[i + 2] || '', 10);
-          const g = parseInt(parts[i + 3] || '', 10);
-          const b = parseInt(parts[i + 4] || '', 10);
-          if ([r, g, b].every((v) => Number.isFinite(v))) {
-            const color = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-            if (code === 38) this.currentStyle.fg = color;
-            else this.currentStyle.bg = color;
-          }
-          i += 4;
-          continue;
-        }
-      }
-    }
+  private applySgrParts(parts: string[]): void {
+    this.currentStyle = applySgr(parts, this.currentStyle);
   }
 
   private toStyledLine(line: Cell[], cols: number): TerminalStyledLine {
