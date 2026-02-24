@@ -1,6 +1,7 @@
 import { RuntimeStreamClient, getDefaultRuntimeSocketPath } from './runtime-stream-client.js';
 import { runtimeApiRequest, parseRuntimeWindowsResponse } from './runtime-api.js';
 import type { RuntimeWindowsResponse } from './runtime-api.js';
+import { applyStyledPatch, applyPlainPatch, styledLinesToPlainText } from './runtime-frame-ops.js';
 import type { TerminalStyledLine } from '../../runtime/vt-screen.js';
 
 export type RuntimeTransportStatus = {
@@ -51,9 +52,7 @@ export class RuntimeSessionManager {
         this.runtimeSupported = true;
       },
       onFrameStyled: (frame) => {
-        const output = frame.lines
-          .map((line) => line.segments.map((seg) => seg.text).join(''))
-          .join('\n');
+        const output = styledLinesToPlainText(frame.lines);
         this.runtimeFrameCache.set(frame.windowId, output);
         this.runtimeStyledCache.set(frame.windowId, frame.lines);
         this.notifyListeners(frame.windowId, output, frame.lines, frame.cursorRow, frame.cursorCol, frame.cursorVisible);
@@ -61,47 +60,8 @@ export class RuntimeSessionManager {
       },
       onPatchStyled: (patch) => {
         const current = this.runtimeStyledCache.get(patch.windowId) || [];
-        const next = current.slice(0, patch.lineCount).map((line) => ({
-          segments: line.segments.map((seg) => ({
-            text: seg.text,
-            fg: seg.fg,
-            bg: seg.bg,
-            bold: seg.bold,
-            italic: seg.italic,
-            underline: seg.underline,
-          })),
-        }));
-        while (next.length < patch.lineCount) {
-          next.push({
-            segments: [{
-              text: '',
-              fg: undefined,
-              bg: undefined,
-              bold: undefined,
-              italic: undefined,
-              underline: undefined,
-            }],
-          });
-        }
-
-        for (const op of patch.ops) {
-          if (op.index >= 0 && op.index < patch.lineCount) {
-            next[op.index] = {
-              segments: op.line.segments.map((seg) => ({
-                text: seg.text,
-                fg: seg.fg,
-                bg: seg.bg,
-                bold: seg.bold,
-                italic: seg.italic,
-                underline: seg.underline,
-              })),
-            };
-          }
-        }
-
-        const output = next
-          .map((line) => line.segments.map((seg) => seg.text).join(''))
-          .join('\n');
+        const next = applyStyledPatch(current, patch.lineCount, patch.ops);
+        const output = styledLinesToPlainText(next);
         this.runtimeFrameCache.set(patch.windowId, output);
         this.runtimeStyledCache.set(patch.windowId, next);
         this.notifyListeners(patch.windowId, output, next, patch.cursorRow, patch.cursorCol, patch.cursorVisible);
@@ -109,14 +69,7 @@ export class RuntimeSessionManager {
       },
       onPatch: (patch) => {
         const current = this.runtimeFrameLines.get(patch.windowId) || [];
-        const next = current.slice(0, patch.lineCount);
-        while (next.length < patch.lineCount) next.push('');
-        for (const op of patch.ops) {
-          if (op.index >= 0 && op.index < patch.lineCount) {
-            next[op.index] = op.line;
-          }
-        }
-
+        const next = applyPlainPatch(current, patch.lineCount, patch.ops);
         const output = next.join('\n');
         this.runtimeFrameLines.set(patch.windowId, next);
         this.runtimeFrameCache.set(patch.windowId, output);
@@ -319,38 +272,18 @@ export class RuntimeSessionManager {
     width?: number,
     height?: number,
   ): Promise<string | undefined> {
-    if (!this.runtimeStreamConnected || !this.streamClient.isConnected()) {
-      return undefined;
-    }
-
-    if (this.runtimeSupported === false) {
-      return undefined;
-    }
-
+    if (!this.isStreamReady()) return undefined;
     const windowId = `${sessionName}:${windowName}`;
-
     try {
       this.ensureSubscribed(windowId, width, height);
       const frame = this.runtimeFrameCache.get(windowId);
       if (frame !== undefined) {
-        this.setTransportStatus({
-          mode: 'stream',
-          connected: true,
-          detail: 'stream live',
-        });
+        this.setTransportStatus({ mode: 'stream', connected: true, detail: 'stream live' });
         return frame;
       }
-
       const subscribed = this.streamSubscriptions.get(windowId);
-      if (subscribed && Date.now() - subscribed.subscribedAt < 1500) {
-        return undefined;
-      }
-
-      this.setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: 'waiting for stream frame',
-      });
+      if (subscribed && Date.now() - subscribed.subscribedAt < 1500) return undefined;
+      this.setTransportStatus({ mode: 'stream', connected: true, detail: 'waiting for stream frame' });
       return undefined;
     } catch {
       return undefined;
@@ -363,37 +296,11 @@ export class RuntimeSessionManager {
 
   async sendRawKey(sessionName: string, windowName: string, raw: string): Promise<void> {
     if (!raw) return;
-
-    if (!this.runtimeStreamConnected || !this.streamClient.isConnected()) {
-      return;
-    }
-
-    if (this.runtimeSupported === false) {
-      return;
-    }
-
-    const windowId = `${sessionName}:${windowName}`;
-    try {
-      this.streamClient.input(windowId, Buffer.from(raw, 'utf8'));
-      this.setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: 'stream input',
-      });
-    } catch {
-      // Silently ignore errors when sending to disconnected/closed windows
-    }
+    this.sendInput(`${sessionName}:${windowName}`, Buffer.from(raw, 'utf8'));
   }
 
   async sendResize(sessionName: string, windowName: string, width: number, height: number): Promise<void> {
-    if (!this.runtimeStreamConnected || !this.streamClient.isConnected()) {
-      return;
-    }
-
-    if (this.runtimeSupported === false) {
-      return;
-    }
-
+    if (!this.isStreamReady()) return;
     const windowId = `${sessionName}:${windowName}`;
     try {
       this.streamClient.resize(windowId, width, height);
@@ -404,14 +311,10 @@ export class RuntimeSessionManager {
   }
 
   sendInput(windowId: string, data: Buffer): void {
-    if (!this.runtimeStreamConnected || !this.streamClient.isConnected()) return;
+    if (!this.isStreamReady()) return;
     try {
       this.streamClient.input(windowId, data);
-      this.setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: 'stream input',
-      });
+      this.setTransportStatus({ mode: 'stream', connected: true, detail: 'stream input' });
     } catch {
       // Silently ignore
     }
@@ -422,6 +325,10 @@ export class RuntimeSessionManager {
     return () => {
       this.runtimeFrameListeners.delete(listener);
     };
+  }
+
+  private isStreamReady(): boolean {
+    return this.runtimeStreamConnected && this.streamClient.isConnected() && this.runtimeSupported !== false;
   }
 
   private setTransportStatus(next: Partial<RuntimeTransportStatus>): void {
