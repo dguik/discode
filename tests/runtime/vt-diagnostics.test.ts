@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { VtScreen } from '../../src/runtime/vt-screen.js';
-import { PtyRuntime } from '../../src/runtime/pty-runtime.js';
-import { RuntimeStreamServer } from '../../src/runtime/stream-server.js';
+import { buildTerminalResponse } from '../../src/runtime/pty-query-handler.js';
+import { flushClientFrame } from '../../src/runtime/stream-frame-renderer.js';
+import type { RuntimeStreamClientState } from '../../src/runtime/stream-utilities.js';
 import {
   getRuntimeMetric,
   resetRuntimeMetrics,
@@ -25,15 +26,14 @@ describe('runtime diagnostics metrics', () => {
 
   it('tracks PTY query responses and partial carries', () => {
     resetRuntimeMetrics();
-    const runtime = new PtyRuntime({ useNodePty: false }) as any;
     const record = {
       screen: new VtScreen(20, 6),
       queryCarry: '',
       privateModes: new Map<number, boolean>(),
     };
 
-    runtime.buildTerminalResponse(record, '\x1b['); // partial escape
-    runtime.buildTerminalResponse(record, '6n'); // completes prior CSI and responds
+    buildTerminalResponse(record, '\x1b['); // partial escape
+    buildTerminalResponse(record, '6n'); // completes prior CSI and responds
 
     expect(getRuntimeMetric('pty_query_partial_carry', { kind: 'csi' })).toBeGreaterThan(0);
     expect(getRuntimeMetric('pty_query_response', { kind: 'csi_6n' })).toBeGreaterThan(0);
@@ -52,9 +52,6 @@ describe('runtime diagnostics metrics', () => {
       getWindowBuffer: () => 'abc',
       getWindowFrame: undefined,
     };
-    const server = new RuntimeStreamServer(runtime, '/tmp/discode-metrics.sock', {
-      minEmitIntervalMs: 250,
-    }) as any;
     const writes: unknown[] = [];
     const client = {
       socket: {
@@ -78,12 +75,18 @@ describe('runtime diagnostics metrics', () => {
       lastStyledLines: [],
       lastCursorRow: -1,
       lastCursorCol: -1,
-    };
+      lastCursorVisible: true,
+    } as unknown as RuntimeStreamClientState;
 
-    server.flushClientFrame(client, true);
+    const sendFn = (c: RuntimeStreamClientState, payload: unknown) => {
+      try { c.socket.write(`${JSON.stringify(payload)}\n`); } catch { /* ignore */ }
+    };
+    const opts = { enablePatchDiff: false, patchThresholdRatio: 0.55, minEmitIntervalMs: 250 };
+
+    flushClientFrame(client, runtime, opts, sendFn, true);
     client.lastBufferLength = 3;
     client.lastEmitAt = Date.now();
-    server.flushClientFrame(client, false);
+    flushClientFrame(client, runtime, opts, sendFn, false);
 
     expect(getRuntimeMetric('stream_forced_flush')).toBeGreaterThan(0);
     expect(getRuntimeMetric('stream_coalesced_skip')).toBeGreaterThan(0);
