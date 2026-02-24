@@ -146,7 +146,7 @@ export class BridgeMessageRouter {
     this.deps.runtime.typeKeysToWindow(tmuxSession, windowName, prompt.trimEnd(), agentType);
     const envKey =
       agentType === 'opencode'
-        ? 'AGENT_DISCORD_OPENCODE_SUBMIT_DELAY_MS'
+        ? 'DISCODE_OPENCODE_SUBMIT_DELAY_MS'
         : 'DISCODE_SUBMIT_DELAY_MS';
     const defaultMs = agentType === 'opencode' ? 75 : 300;
     const delayMs = this.getEnvInt(envKey, defaultMs);

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { buildContainerEnv, buildAgentLaunchEnv } from '../../src/policy/agent-launch.js';
 
 describe('buildContainerEnv', () => {
-  it('sets AGENT_DISCORD_HOSTNAME to host.docker.internal', () => {
+  it('sets DISCODE_HOSTNAME to host.docker.internal', () => {
     const env = buildContainerEnv({
       projectName: 'my-project',
       port: 18470,
@@ -15,7 +15,7 @@ describe('buildContainerEnv', () => {
       permissionAllow: false,
     });
 
-    expect(env.AGENT_DISCORD_HOSTNAME).toBe('host.docker.internal');
+    expect(env.DISCODE_HOSTNAME).toBe('host.docker.internal');
   });
 
   it('includes all standard bridge env vars', () => {
@@ -27,10 +27,10 @@ describe('buildContainerEnv', () => {
       permissionAllow: false,
     });
 
-    expect(env.AGENT_DISCORD_PROJECT).toBe('my-project');
-    expect(env.AGENT_DISCORD_PORT).toBe('19999');
-    expect(env.AGENT_DISCORD_AGENT).toBe('claude');
-    expect(env.AGENT_DISCORD_INSTANCE).toBe('claude-2');
+    expect(env.DISCODE_PROJECT).toBe('my-project');
+    expect(env.DISCODE_PORT).toBe('19999');
+    expect(env.DISCODE_AGENT).toBe('claude');
+    expect(env.DISCODE_INSTANCE).toBe('claude-2');
   });
 
   it('includes OPENCODE_PERMISSION when permissionAllow is true', () => {
@@ -59,7 +59,7 @@ describe('buildContainerEnv', () => {
 });
 
 describe('buildAgentLaunchEnv with hostname', () => {
-  it('includes AGENT_DISCORD_HOSTNAME when provided', () => {
+  it('includes DISCODE_HOSTNAME when provided', () => {
     const env = buildAgentLaunchEnv({
       projectName: 'test',
       port: 18470,
@@ -69,10 +69,10 @@ describe('buildAgentLaunchEnv with hostname', () => {
       hostname: 'host.docker.internal',
     });
 
-    expect(env.AGENT_DISCORD_HOSTNAME).toBe('host.docker.internal');
+    expect(env.DISCODE_HOSTNAME).toBe('host.docker.internal');
   });
 
-  it('omits AGENT_DISCORD_HOSTNAME when not provided', () => {
+  it('omits DISCODE_HOSTNAME when not provided', () => {
     const env = buildAgentLaunchEnv({
       projectName: 'test',
       port: 18470,
@@ -81,6 +81,6 @@ describe('buildAgentLaunchEnv with hostname', () => {
       permissionAllow: false,
     });
 
-    expect(env.AGENT_DISCORD_HOSTNAME).toBeUndefined();
+    expect(env.DISCODE_HOSTNAME).toBeUndefined();
   });
 });

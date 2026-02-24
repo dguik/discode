@@ -347,7 +347,7 @@ describe('AgentBridge', () => {
     });
 
     it('submits all agents via type-then-enter with short delay', async () => {
-      process.env.AGENT_DISCORD_OPENCODE_SUBMIT_DELAY_MS = '0';
+      process.env.DISCODE_OPENCODE_SUBMIT_DELAY_MS = '0';
 
       const mockTmux = createMockTmux();
       bridge = new AgentBridge({
@@ -378,7 +378,7 @@ describe('AgentBridge', () => {
     });
 
     it('shows English recovery guidance when tmux window is missing', async () => {
-      process.env.AGENT_DISCORD_OPENCODE_SUBMIT_DELAY_MS = '0';
+      process.env.DISCODE_OPENCODE_SUBMIT_DELAY_MS = '0';
 
       const mockTmux = createMockTmux();
       mockTmux.typeKeysToWindow.mockImplementation(() => {

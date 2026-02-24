@@ -29,9 +29,9 @@ describe('gemini hook installer', () => {
     expect(existsSync(getGeminiHookSourcePath())).toBe(true);
   });
 
-  it('hook source respects AGENT_DISCORD_HOSTNAME for container mode', () => {
+  it('hook source respects DISCODE_HOSTNAME for container mode', () => {
     const content = readFileSync(getGeminiHookSourcePath(), 'utf-8');
-    expect(content).toContain('AGENT_DISCORD_HOSTNAME');
+    expect(content).toContain('DISCODE_HOSTNAME');
     expect(content).not.toMatch(/fetch\(['"]http:\/\/127\.0\.0\.1/);
   });
 
@@ -168,7 +168,7 @@ describe('gemini hook installer', () => {
   it('notification hook source contains expected bridge logic', () => {
     const source = readFileSync(getGeminiHookSourcePath(GEMINI_NOTIFICATION_HOOK_FILENAME), 'utf-8');
     expect(source).toContain('/opencode-event');
-    expect(source).toContain("process.env.AGENT_DISCORD_AGENT || 'gemini'");
+    expect(source).toContain("process.env.DISCODE_AGENT || process.env.AGENT_DISCORD_AGENT || 'gemini'");
     expect(source).toContain("type: 'session.notification'");
     expect(source).toContain('notification_type');
   });
@@ -176,7 +176,7 @@ describe('gemini hook installer', () => {
   it('session hook source contains expected bridge logic', () => {
     const source = readFileSync(getGeminiHookSourcePath(GEMINI_SESSION_HOOK_FILENAME), 'utf-8');
     expect(source).toContain('/opencode-event');
-    expect(source).toContain("process.env.AGENT_DISCORD_AGENT || 'gemini'");
+    expect(source).toContain("process.env.DISCODE_AGENT || process.env.AGENT_DISCORD_AGENT || 'gemini'");
     expect(source).toContain("type: 'session.start'");
     expect(source).toContain("type: 'session.end'");
     expect(source).toContain('hook_event_name');

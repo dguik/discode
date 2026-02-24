@@ -90,7 +90,7 @@ function readStdin() {
 }
 
 async function postToBridge(port, payload) {
-  var hostname = process.env.AGENT_DISCORD_HOSTNAME || "127.0.0.1";
+  var hostname = process.env.DISCODE_HOSTNAME || process.env.AGENT_DISCORD_HOSTNAME || "127.0.0.1";
   await fetch("http://" + hostname + ":" + port + "/opencode-event", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -107,12 +107,12 @@ async function main() {
     input = {};
   }
 
-  var projectName = process.env.AGENT_DISCORD_PROJECT || "";
+  var projectName = process.env.DISCODE_PROJECT || process.env.AGENT_DISCORD_PROJECT || "";
   if (!projectName) return;
 
-  var agentType = process.env.AGENT_DISCORD_AGENT || "claude";
-  var instanceId = process.env.AGENT_DISCORD_INSTANCE || "";
-  var port = process.env.AGENT_DISCORD_PORT || "18470";
+  var agentType = process.env.DISCODE_AGENT || process.env.AGENT_DISCORD_AGENT || "claude";
+  var instanceId = process.env.DISCODE_INSTANCE || process.env.AGENT_DISCORD_INSTANCE || "";
+  var port = process.env.DISCODE_PORT || process.env.AGENT_DISCORD_PORT || "18470";
 
   var toolName = typeof input.tool_name === "string" ? input.tool_name : "";
   var toolInput = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};

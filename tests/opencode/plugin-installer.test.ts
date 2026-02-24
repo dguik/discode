@@ -37,8 +37,8 @@ function createPluginHarness(extraEnv?: Record<string, string>) {
 
   const processStub = {
     env: {
-      AGENT_DISCORD_PROJECT: 'demo-project',
-      AGENT_DISCORD_PORT: '18470',
+      DISCODE_PROJECT: 'demo-project',
+      DISCODE_PORT: '18470',
       ...extraEnv,
     },
   };
@@ -81,8 +81,8 @@ describe('opencode plugin installer', () => {
     expect(content).toContain('/opencode-event');
   });
 
-  it('uses AGENT_DISCORD_HOSTNAME for endpoint when set', async () => {
-    const harness = createPluginHarness({ AGENT_DISCORD_HOSTNAME: 'host.docker.internal' });
+  it('uses DISCODE_HOSTNAME for endpoint when set', async () => {
+    const harness = createPluginHarness({ DISCODE_HOSTNAME: 'host.docker.internal' });
     const plugin = await harness.create();
 
     await plugin.event({
@@ -107,7 +107,7 @@ describe('opencode plugin installer', () => {
     expect(harness.calls[0].url).toBe('http://host.docker.internal:18470/opencode-event');
   });
 
-  it('defaults to 127.0.0.1 when AGENT_DISCORD_HOSTNAME is not set', async () => {
+  it('defaults to 127.0.0.1 when DISCODE_HOSTNAME is not set', async () => {
     const harness = createPluginHarness();
     const plugin = await harness.create();
 
@@ -332,7 +332,7 @@ describe('opencode plugin installer', () => {
     });
 
     it('includes instanceId when set', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_INSTANCE: 'inst-1' });
+      const harness = createPluginHarness({ DISCODE_INSTANCE: 'inst-1' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -345,7 +345,7 @@ describe('opencode plugin installer', () => {
     });
 
     it('omits instanceId when empty', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_INSTANCE: '' });
+      const harness = createPluginHarness({ DISCODE_INSTANCE: '' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -357,8 +357,8 @@ describe('opencode plugin installer', () => {
       expect(payload.instanceId).toBeUndefined();
     });
 
-    it('does nothing when AGENT_DISCORD_PROJECT is empty', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_PROJECT: '' });
+    it('does nothing when DISCODE_PROJECT is empty', async () => {
+      const harness = createPluginHarness({ DISCODE_PROJECT: '' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -390,7 +390,7 @@ describe('opencode plugin installer', () => {
     });
 
     it('includes instanceId when set', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_INSTANCE: 'inst-2' });
+      const harness = createPluginHarness({ DISCODE_INSTANCE: 'inst-2' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -402,8 +402,8 @@ describe('opencode plugin installer', () => {
       expect(payload.instanceId).toBe('inst-2');
     });
 
-    it('does nothing when AGENT_DISCORD_PROJECT is empty', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_PROJECT: '' });
+    it('does nothing when DISCODE_PROJECT is empty', async () => {
+      const harness = createPluginHarness({ DISCODE_PROJECT: '' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -508,7 +508,7 @@ describe('opencode plugin installer', () => {
     });
 
     it('includes instanceId when set', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_INSTANCE: 'inst-3' });
+      const harness = createPluginHarness({ DISCODE_INSTANCE: 'inst-3' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -523,8 +523,8 @@ describe('opencode plugin installer', () => {
       expect(payload.instanceId).toBe('inst-3');
     });
 
-    it('does nothing when AGENT_DISCORD_PROJECT is empty', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_PROJECT: '' });
+    it('does nothing when DISCODE_PROJECT is empty', async () => {
+      const harness = createPluginHarness({ DISCODE_PROJECT: '' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -610,7 +610,7 @@ describe('opencode plugin installer', () => {
     });
 
     it('includes instanceId when set', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_INSTANCE: 'inst-err' });
+      const harness = createPluginHarness({ DISCODE_INSTANCE: 'inst-err' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -622,8 +622,8 @@ describe('opencode plugin installer', () => {
       expect(payload.instanceId).toBe('inst-err');
     });
 
-    it('does nothing when AGENT_DISCORD_PROJECT is empty', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_PROJECT: '' });
+    it('does nothing when DISCODE_PROJECT is empty', async () => {
+      const harness = createPluginHarness({ DISCODE_PROJECT: '' });
       const plugin = await harness.create();
 
       await plugin.event({
@@ -649,8 +649,8 @@ describe('opencode plugin installer', () => {
       expect(payload.text).toBe('');
     });
 
-    it('does not post when AGENT_DISCORD_PROJECT is empty', async () => {
-      const harness = createPluginHarness({ AGENT_DISCORD_PROJECT: '' });
+    it('does not post when DISCODE_PROJECT is empty', async () => {
+      const harness = createPluginHarness({ DISCODE_PROJECT: '' });
       const plugin = await harness.create();
 
       await plugin.event({

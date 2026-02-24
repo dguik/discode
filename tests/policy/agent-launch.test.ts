@@ -20,8 +20,8 @@ describe('agent launch policy', () => {
       agentType: 'claude',
       instanceId: 'claude',
     });
-    expect(env.AGENT_DISCORD_PROJECT).toBe('my-project');
-    expect(env.AGENT_DISCORD_PORT).toBe('18470');
+    expect(env.DISCODE_PROJECT).toBe('my-project');
+    expect(env.DISCODE_PORT).toBe('18470');
     expect(env.OPENCODE_PERMISSION).toBeUndefined();
   });
 

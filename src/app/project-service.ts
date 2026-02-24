@@ -142,9 +142,9 @@ export async function resumeProjectInstance(params: {
   const sharedFull = `${prefix}${params.config.tmux.sharedSessionName || 'bridge'}`;
   const isSharedSession = fullSessionName === sharedFull;
   if (!isSharedSession) {
-    runtime.setSessionEnv(fullSessionName, 'AGENT_DISCORD_PROJECT', params.projectName);
+    runtime.setSessionEnv(fullSessionName, 'DISCODE_PROJECT', params.projectName);
   }
-  runtime.setSessionEnv(fullSessionName, 'AGENT_DISCORD_PORT', String(params.port));
+  runtime.setSessionEnv(fullSessionName, 'DISCODE_PORT', String(params.port));
 
   const windowName = resolveProjectWindowName(params.project, params.instance.agentType, params.config.tmux, params.instance.instanceId);
   if (runtime.windowExists(fullSessionName, windowName)) {

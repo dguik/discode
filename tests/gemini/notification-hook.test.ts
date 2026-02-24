@@ -64,7 +64,7 @@ function runHook(env: Record<string, string>, stdinJson: unknown): Promise<{ cal
 describe('gemini discode-notification-hook', () => {
   it('posts session.notification event with ToolPermission type', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproject', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproject', DISCODE_PORT: '18470' },
       { message: 'Allow running npm install?', notification_type: 'ToolPermission' },
     );
 
@@ -79,7 +79,7 @@ describe('gemini discode-notification-hook', () => {
 
   it('outputs {} to stdout', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
       { message: 'test', notification_type: 'ToolPermission' },
     );
 
@@ -88,7 +88,7 @@ describe('gemini discode-notification-hook', () => {
 
   it('includes instanceId when set', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470', AGENT_DISCORD_INSTANCE: 'inst-1' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470', DISCODE_INSTANCE: 'inst-1' },
       { message: 'test', notification_type: 'ToolPermission' },
     );
 
@@ -96,9 +96,9 @@ describe('gemini discode-notification-hook', () => {
     expect((result.calls[0].body as any).instanceId).toBe('inst-1');
   });
 
-  it('omits instanceId when AGENT_DISCORD_INSTANCE is empty', async () => {
+  it('omits instanceId when DISCODE_INSTANCE is empty', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470', AGENT_DISCORD_INSTANCE: '' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470', DISCODE_INSTANCE: '' },
       { message: 'test', notification_type: 'ToolPermission' },
     );
 
@@ -106,9 +106,9 @@ describe('gemini discode-notification-hook', () => {
     expect((result.calls[0].body as any).instanceId).toBeUndefined();
   });
 
-  it('uses custom AGENT_DISCORD_AGENT', async () => {
+  it('uses custom DISCODE_AGENT', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470', AGENT_DISCORD_AGENT: 'custom' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470', DISCODE_AGENT: 'custom' },
       { message: 'test', notification_type: 'ToolPermission' },
     );
 
@@ -116,9 +116,9 @@ describe('gemini discode-notification-hook', () => {
     expect((result.calls[0].body as any).agentType).toBe('custom');
   });
 
-  it('uses custom AGENT_DISCORD_HOSTNAME in fetch URL', async () => {
+  it('uses custom DISCODE_HOSTNAME in fetch URL', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '9999', AGENT_DISCORD_HOSTNAME: 'host.docker.internal' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '9999', DISCODE_HOSTNAME: 'host.docker.internal' },
       { message: 'test', notification_type: 'ToolPermission' },
     );
 
@@ -126,9 +126,9 @@ describe('gemini discode-notification-hook', () => {
     expect(result.calls[0].url).toBe('http://host.docker.internal:9999/opencode-event');
   });
 
-  it('does nothing when AGENT_DISCORD_PROJECT is not set', async () => {
+  it('does nothing when DISCODE_PROJECT is not set', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PORT: '18470' },
       { message: 'test', notification_type: 'ToolPermission' },
     );
 
@@ -138,7 +138,7 @@ describe('gemini discode-notification-hook', () => {
 
   it('handles missing notification_type gracefully', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
       { message: 'some notification' },
     );
 
@@ -148,7 +148,7 @@ describe('gemini discode-notification-hook', () => {
 
   it('handles missing message field', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
       { notification_type: 'ToolPermission' },
     );
 
@@ -158,7 +158,7 @@ describe('gemini discode-notification-hook', () => {
 
   it('trims whitespace from message', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
       { message: '  some message  ', notification_type: 'ToolPermission' },
     );
 
@@ -175,7 +175,7 @@ describe('gemini discode-notification-hook', () => {
     const ctx = createContext({
       require: () => ({}),
       process: {
-        env: { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         stdin: {
           isTTY: false,
           setEncoding: () => {},
@@ -219,7 +219,7 @@ describe('gemini discode-notification-hook', () => {
     const ctx = createContext({
       require: () => ({}),
       process: {
-        env: { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         stdin: {
           isTTY: false,
           setEncoding: () => {},

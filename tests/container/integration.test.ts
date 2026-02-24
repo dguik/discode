@@ -211,8 +211,8 @@ describe('container mode integration', () => {
           containerName: 'discode-test-project-claude',
           projectPath: '/test/path',
           env: expect.objectContaining({
-            AGENT_DISCORD_PROJECT: 'test-project',
-            AGENT_DISCORD_HOSTNAME: 'host.docker.internal',
+            DISCODE_PROJECT: 'test-project',
+            DISCODE_HOSTNAME: 'host.docker.internal',
           }),
         }),
       );
@@ -490,7 +490,7 @@ describe('container mode integration', () => {
       expect(mockRuntime.startAgentInWindow).toHaveBeenCalledWith(
         'agent-test',
         'test-project-claude',
-        expect.stringContaining('export AGENT_DISCORD_PROJECT='),
+        expect.stringContaining('export DISCODE_PROJECT='),
       );
     });
 
@@ -633,7 +633,7 @@ describe('container mode integration', () => {
       expect(mockRuntime.startAgentInWindow).toHaveBeenCalledWith(
         'agent-test',
         'test-project-claude',
-        expect.stringContaining('export AGENT_DISCORD_PROJECT='),
+        expect.stringContaining('export DISCODE_PROJECT='),
       );
 
       // No container sync should have been started

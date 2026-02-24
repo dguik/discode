@@ -335,7 +335,7 @@ describe('tool-hook integration', () => {
 
   it('sends tool.activity for Read tool', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Read', tool_input: { file_path: '/src/index.ts' } },
     );
     expect(calls).toHaveLength(1);
@@ -349,7 +349,7 @@ describe('tool-hook integration', () => {
 
   it('sends tool.activity for Edit tool with line delta', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Edit', tool_input: { file_path: '/src/app.ts', old_string: 'a', new_string: 'a\nb\nc' } },
     );
     expect(calls).toHaveLength(1);
@@ -361,7 +361,7 @@ describe('tool-hook integration', () => {
 
   it('sends tool.activity for Bash tool', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Bash', tool_input: { command: 'npm test' } },
     );
     expect(calls).toHaveLength(1);
@@ -371,15 +371,15 @@ describe('tool-hook integration', () => {
 
   it('does not send for non-file tools', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Grep', tool_input: { pattern: 'foo' } },
     );
     expect(calls).toHaveLength(0);
   });
 
-  it('does not send when AGENT_DISCORD_PROJECT is empty', async () => {
+  it('does not send when DISCODE_PROJECT is empty', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PORT: '18470' },
       { tool_name: 'Read', tool_input: { file_path: '/src/index.ts' } },
     );
     expect(calls).toHaveLength(0);
@@ -387,7 +387,7 @@ describe('tool-hook integration', () => {
 
   it('includes instanceId when provided', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_INSTANCE: 'inst-A', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_INSTANCE: 'inst-A', DISCODE_PORT: '18470' },
       { tool_name: 'Write', tool_input: { file_path: '/src/new.ts', content: 'hello\nworld' } },
     );
     expect(calls).toHaveLength(1);
@@ -398,7 +398,7 @@ describe('tool-hook integration', () => {
 
   it('uses custom hostname from env', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_HOSTNAME: '192.168.1.5', AGENT_DISCORD_PORT: '9999' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_HOSTNAME: '192.168.1.5', DISCODE_PORT: '9999' },
       { tool_name: 'Bash', tool_input: { command: 'ls' } },
     );
     expect(calls).toHaveLength(1);
@@ -407,7 +407,7 @@ describe('tool-hook integration', () => {
 
   it('sends tool.activity for Write tool', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Write', tool_input: { file_path: '/src/new.ts', content: 'a\nb\nc' } },
     );
     expect(calls).toHaveLength(1);
@@ -418,7 +418,7 @@ describe('tool-hook integration', () => {
 
   it('does not send for AskUserQuestion', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'AskUserQuestion', tool_input: { questions: [] } },
     );
     expect(calls).toHaveLength(0);
@@ -426,7 +426,7 @@ describe('tool-hook integration', () => {
 
   it('does not send for Glob', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Glob', tool_input: { pattern: '*.ts' } },
     );
     expect(calls).toHaveLength(0);
@@ -434,7 +434,7 @@ describe('tool-hook integration', () => {
 
   it('does not send for Task', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Task', tool_input: {} },
     );
     expect(calls).toHaveLength(0);
@@ -451,7 +451,7 @@ describe('tool-hook integration', () => {
       const ctx = createContext({
         require: () => ({}),
         process: {
-          env: { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+          env: { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
           stdin: {
             isTTY: false,
             setEncoding: () => {},
@@ -480,7 +480,7 @@ describe('tool-hook integration', () => {
 
   it('handles empty tool_name gracefully', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: '', tool_input: { file_path: '/src/a.ts' } },
     );
     expect(calls).toHaveLength(0);
@@ -488,7 +488,7 @@ describe('tool-hook integration', () => {
 
   it('handles missing tool_input gracefully', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Read' },
     );
     // tool_input defaults to {}, Read needs file_path → empty → skipped
@@ -497,15 +497,15 @@ describe('tool-hook integration', () => {
 
   it('handles non-string tool_name gracefully', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 42, tool_input: { file_path: '/src/a.ts' } },
     );
     expect(calls).toHaveLength(0);
   });
 
-  it('uses default port 18470 when AGENT_DISCORD_PORT not set', async () => {
+  it('uses default port 18470 when DISCODE_PORT not set', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude' },
       { tool_name: 'Read', tool_input: { file_path: '/src/index.ts' } },
     );
     expect(calls).toHaveLength(1);
@@ -514,7 +514,7 @@ describe('tool-hook integration', () => {
 
   it('uses default agentType "claude" when not set', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_PORT: '18470' },
       { tool_name: 'Read', tool_input: { file_path: '/src/index.ts' } },
     );
     expect(calls).toHaveLength(1);
@@ -523,7 +523,7 @@ describe('tool-hook integration', () => {
 
   it('does not include instanceId when not set', async () => {
     const { calls } = await runHook(
-      { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
       { tool_name: 'Read', tool_input: { file_path: '/src/index.ts' } },
     );
     expect(calls).toHaveLength(1);
@@ -541,7 +541,7 @@ describe('tool-hook integration', () => {
       const ctx = createContext({
         require: () => ({}),
         process: {
-          env: { AGENT_DISCORD_PROJECT: 'myproj', AGENT_DISCORD_AGENT: 'claude', AGENT_DISCORD_PORT: '18470' },
+          env: { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
           stdin: {
             isTTY: false,
             setEncoding: () => {},

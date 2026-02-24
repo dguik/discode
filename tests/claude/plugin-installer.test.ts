@@ -75,7 +75,7 @@ describe('claude plugin installer', () => {
     const sourceDir = getPluginSourceDir();
     const source = readFileSync(join(sourceDir, 'scripts', CLAUDE_STOP_HOOK_FILENAME), 'utf-8');
     expect(source).toContain('/opencode-event');
-    expect(source).toContain('process.env.AGENT_DISCORD_AGENT || "claude"');
+    expect(source).toContain('process.env.DISCODE_AGENT || process.env.AGENT_DISCORD_AGENT || "claude"');
     expect(source).toContain('type: "session.idle"');
   });
 
@@ -83,7 +83,7 @@ describe('claude plugin installer', () => {
     const sourceDir = getPluginSourceDir();
     const source = readFileSync(join(sourceDir, 'scripts', CLAUDE_NOTIFICATION_HOOK_FILENAME), 'utf-8');
     expect(source).toContain('/opencode-event');
-    expect(source).toContain('process.env.AGENT_DISCORD_AGENT || "claude"');
+    expect(source).toContain('process.env.DISCODE_AGENT || process.env.AGENT_DISCORD_AGENT || "claude"');
     expect(source).toContain('type: "session.notification"');
     expect(source).toContain('notificationType');
     expect(source).toContain('input.notification_type');
@@ -93,7 +93,7 @@ describe('claude plugin installer', () => {
     const sourceDir = getPluginSourceDir();
     const source = readFileSync(join(sourceDir, 'scripts', CLAUDE_SESSION_HOOK_FILENAME), 'utf-8');
     expect(source).toContain('/opencode-event');
-    expect(source).toContain('process.env.AGENT_DISCORD_AGENT || "claude"');
+    expect(source).toContain('process.env.DISCODE_AGENT || process.env.AGENT_DISCORD_AGENT || "claude"');
     expect(source).toContain('type: "session.start"');
     expect(source).toContain('type: "session.end"');
     expect(source).toContain('hook_event_name');

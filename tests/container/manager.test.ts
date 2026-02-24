@@ -290,7 +290,7 @@ describe('container/manager', () => {
         agentType: 'claude',
         containerName: 'my-container',
         projectPath: '/home/user/project',
-        env: { AGENT_DISCORD_PROJECT: 'myapp', FOO: 'bar' },
+        env: { DISCODE_PROJECT: 'myapp', FOO: 'bar' },
       });
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -304,7 +304,7 @@ describe('container/manager', () => {
           '-v', '/home/user/project:/workspace',
           '--add-host', 'host.docker.internal:host-gateway',
           '-u', '1000:1000',
-          '-e', 'AGENT_DISCORD_PROJECT=myapp',
+          '-e', 'DISCODE_PROJECT=myapp',
           '-e', 'FOO=bar',
           'discode-agent-claude:1',
         ]),

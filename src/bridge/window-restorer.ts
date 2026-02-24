@@ -41,7 +41,7 @@ export function restoreRuntimeWindowsIfNeeded(deps: WindowRestorerDeps): void {
 
   for (const raw of deps.stateManager.listProjects()) {
     const project = normalizeProjectState(raw);
-    deps.runtime.setSessionEnv(project.tmuxSession, 'AGENT_DISCORD_PORT', String(port));
+    deps.runtime.setSessionEnv(project.tmuxSession, 'DISCODE_PORT', String(port));
 
     for (const instance of listProjectInstances(project)) {
       const adapter = deps.registry.get(instance.agentType);

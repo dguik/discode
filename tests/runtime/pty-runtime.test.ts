@@ -28,8 +28,8 @@ describe('PtyRuntime', () => {
     const runtime = track(new PtyRuntime());
 
     runtime.getOrCreateSession('bridge', 'claude');
-    runtime.setSessionEnv('bridge', 'AGENT_DISCORD_PORT', '18470');
-    runtime.startAgentInWindow('bridge', 'claude', 'printf "%s\\n" "$AGENT_DISCORD_PORT"');
+    runtime.setSessionEnv('bridge', 'DISCODE_PORT', '18470');
+    runtime.startAgentInWindow('bridge', 'claude', 'printf "%s\\n" "$DISCODE_PORT"');
 
     await waitFor(() => {
       const window = runtime.listWindows('bridge').find((item) => item.windowName === 'claude');

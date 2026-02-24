@@ -95,7 +95,7 @@ export async function setupProject(
 
   const channelId = channels[adapter.config.name];
   const port = overridePort || deps.bridgeConfig.hookServerPort || 18470;
-  deps.runtime.setSessionEnv(tmuxSession, 'AGENT_DISCORD_PORT', String(port));
+  deps.runtime.setSessionEnv(tmuxSession, 'DISCODE_PORT', String(port));
 
   const permissionAllow = deps.bridgeConfig.opencode?.permissionMode === 'allow';
   const integration = installAgentIntegration(adapter.config.name, projectPath, 'install');

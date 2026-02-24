@@ -152,7 +152,7 @@ export class HookRuntimeRoutes {
     const sessionName = project.tmuxSession;
     if (!windowName || !sessionName) return { status: 400, message: 'Invalid project state' };
 
-    this.deps.runtime.setSessionEnv(sessionName, 'AGENT_DISCORD_PORT', String(this.deps.port));
+    this.deps.runtime.setSessionEnv(sessionName, 'DISCODE_PORT', String(this.deps.port));
     if (this.deps.runtime.windowExists(sessionName, windowName)) {
       return { status: 200, message: 'OK' };
     }

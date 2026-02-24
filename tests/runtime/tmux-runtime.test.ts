@@ -24,14 +24,14 @@ describe('TmuxRuntime', () => {
     const runtime = new TmuxRuntime(tmux as any);
 
     const session = runtime.getOrCreateSession('bridge', 'project-claude');
-    runtime.setSessionEnv('agent-bridge', 'AGENT_DISCORD_PORT', '18470');
+    runtime.setSessionEnv('agent-bridge', 'DISCODE_PORT', '18470');
     const exists = runtime.windowExists('agent-bridge', 'project-claude');
     runtime.startAgentInWindow('agent-bridge', 'project-claude', 'claude');
 
     expect(session).toBe('agent-bridge');
     expect(exists).toBe(true);
     expect(tmux.getOrCreateSession).toHaveBeenCalledWith('bridge', 'project-claude');
-    expect(tmux.setSessionEnv).toHaveBeenCalledWith('agent-bridge', 'AGENT_DISCORD_PORT', '18470');
+    expect(tmux.setSessionEnv).toHaveBeenCalledWith('agent-bridge', 'DISCODE_PORT', '18470');
     expect(tmux.windowExists).toHaveBeenCalledWith('agent-bridge', 'project-claude');
     expect(tmux.startAgentInWindow).toHaveBeenCalledWith('agent-bridge', 'project-claude', 'claude');
   });

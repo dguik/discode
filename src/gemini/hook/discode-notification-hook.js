@@ -38,16 +38,16 @@ async function main() {
     input = {};
   }
 
-  const projectName = process.env.AGENT_DISCORD_PROJECT || '';
+  const projectName = process.env.DISCODE_PROJECT || process.env.AGENT_DISCORD_PROJECT || '';
   if (!projectName) {
     process.stdout.write('{}');
     return;
   }
 
-  const agentType = process.env.AGENT_DISCORD_AGENT || 'gemini';
-  const instanceId = process.env.AGENT_DISCORD_INSTANCE || '';
-  const port = process.env.AGENT_DISCORD_PORT || '18470';
-  const hostname = process.env.AGENT_DISCORD_HOSTNAME || '127.0.0.1';
+  const agentType = process.env.DISCODE_AGENT || process.env.AGENT_DISCORD_AGENT || 'gemini';
+  const instanceId = process.env.DISCODE_INSTANCE || process.env.AGENT_DISCORD_INSTANCE || '';
+  const port = process.env.DISCODE_PORT || process.env.AGENT_DISCORD_PORT || '18470';
+  const hostname = process.env.DISCODE_HOSTNAME || process.env.AGENT_DISCORD_HOSTNAME || '127.0.0.1';
 
   const message = typeof input.message === 'string' ? input.message.trim() : '';
   const notificationType = typeof input.notification_type === 'string' ? input.notification_type : 'unknown';

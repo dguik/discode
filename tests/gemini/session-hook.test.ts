@@ -67,7 +67,7 @@ describe('gemini discode-session-hook', () => {
   describe('SessionStart', () => {
     it('posts session.start event with source', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'myproject', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'myproject', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionStart', source: 'startup' },
       );
 
@@ -82,7 +82,7 @@ describe('gemini discode-session-hook', () => {
 
     it('outputs {} to stdout', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionStart', source: 'startup' },
       );
 
@@ -91,7 +91,7 @@ describe('gemini discode-session-hook', () => {
 
     it('handles resume source', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionStart', source: 'resume' },
       );
 
@@ -101,7 +101,7 @@ describe('gemini discode-session-hook', () => {
 
     it('handles clear source', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionStart', source: 'clear' },
       );
 
@@ -111,7 +111,7 @@ describe('gemini discode-session-hook', () => {
 
     it('handles missing source field', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionStart' },
       );
 
@@ -121,7 +121,7 @@ describe('gemini discode-session-hook', () => {
 
     it('includes instanceId when set', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470', AGENT_DISCORD_INSTANCE: 'inst-2' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470', DISCODE_INSTANCE: 'inst-2' },
         { hook_event_name: 'SessionStart', source: 'startup' },
       );
 
@@ -129,9 +129,9 @@ describe('gemini discode-session-hook', () => {
       expect((result.calls[0].body as any).instanceId).toBe('inst-2');
     });
 
-    it('omits instanceId when AGENT_DISCORD_INSTANCE is empty', async () => {
+    it('omits instanceId when DISCODE_INSTANCE is empty', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470', AGENT_DISCORD_INSTANCE: '' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470', DISCODE_INSTANCE: '' },
         { hook_event_name: 'SessionStart', source: 'startup' },
       );
 
@@ -143,7 +143,7 @@ describe('gemini discode-session-hook', () => {
   describe('SessionEnd', () => {
     it('posts session.end event with reason', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'myproject', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'myproject', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionEnd', reason: 'logout' },
       );
 
@@ -157,7 +157,7 @@ describe('gemini discode-session-hook', () => {
 
     it('handles exit reason', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionEnd', reason: 'exit' },
       );
 
@@ -167,7 +167,7 @@ describe('gemini discode-session-hook', () => {
 
     it('handles prompt_input_exit reason', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionEnd', reason: 'prompt_input_exit' },
       );
 
@@ -177,7 +177,7 @@ describe('gemini discode-session-hook', () => {
 
     it('handles missing reason field', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         { hook_event_name: 'SessionEnd' },
       );
 
@@ -187,7 +187,7 @@ describe('gemini discode-session-hook', () => {
 
     it('includes instanceId when set', async () => {
       const result = await runHook(
-        { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470', AGENT_DISCORD_INSTANCE: 'inst-3' },
+        { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470', DISCODE_INSTANCE: 'inst-3' },
         { hook_event_name: 'SessionEnd', reason: 'logout' },
       );
 
@@ -196,9 +196,9 @@ describe('gemini discode-session-hook', () => {
     });
   });
 
-  it('does nothing when AGENT_DISCORD_PROJECT is not set (SessionStart)', async () => {
+  it('does nothing when DISCODE_PROJECT is not set (SessionStart)', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PORT: '18470' },
       { hook_event_name: 'SessionStart', source: 'startup' },
     );
 
@@ -206,9 +206,9 @@ describe('gemini discode-session-hook', () => {
     expect(result.stdout).toBe('{}');
   });
 
-  it('does nothing when AGENT_DISCORD_PROJECT is not set (SessionEnd)', async () => {
+  it('does nothing when DISCODE_PROJECT is not set (SessionEnd)', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PORT: '18470' },
       { hook_event_name: 'SessionEnd', reason: 'logout' },
     );
 
@@ -218,7 +218,7 @@ describe('gemini discode-session-hook', () => {
 
   it('does nothing for unknown hook_event_name', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
       { hook_event_name: 'UnknownEvent' },
     );
 
@@ -228,7 +228,7 @@ describe('gemini discode-session-hook', () => {
 
   it('does nothing for missing hook_event_name', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
       { source: 'startup' },
     );
 
@@ -236,9 +236,9 @@ describe('gemini discode-session-hook', () => {
     expect(result.stdout).toBe('{}');
   });
 
-  it('uses custom AGENT_DISCORD_AGENT', async () => {
+  it('uses custom DISCODE_AGENT', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470', AGENT_DISCORD_AGENT: 'custom' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470', DISCODE_AGENT: 'custom' },
       { hook_event_name: 'SessionStart', source: 'startup' },
     );
 
@@ -246,9 +246,9 @@ describe('gemini discode-session-hook', () => {
     expect((result.calls[0].body as any).agentType).toBe('custom');
   });
 
-  it('uses custom AGENT_DISCORD_HOSTNAME in fetch URL', async () => {
+  it('uses custom DISCODE_HOSTNAME in fetch URL', async () => {
     const result = await runHook(
-      { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '9999', AGENT_DISCORD_HOSTNAME: 'host.docker.internal' },
+      { DISCODE_PROJECT: 'proj', DISCODE_PORT: '9999', DISCODE_HOSTNAME: 'host.docker.internal' },
       { hook_event_name: 'SessionEnd', reason: 'logout' },
     );
 
@@ -265,7 +265,7 @@ describe('gemini discode-session-hook', () => {
     const ctx = createContext({
       require: () => ({}),
       process: {
-        env: { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         stdin: {
           isTTY: false,
           setEncoding: () => {},
@@ -309,7 +309,7 @@ describe('gemini discode-session-hook', () => {
     const ctx = createContext({
       require: () => ({}),
       process: {
-        env: { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         stdin: {
           isTTY: false,
           setEncoding: () => {},
@@ -353,7 +353,7 @@ describe('gemini discode-session-hook', () => {
     const ctx = createContext({
       require: () => ({}),
       process: {
-        env: { AGENT_DISCORD_PROJECT: 'proj', AGENT_DISCORD_PORT: '18470' },
+        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
         stdin: {
           isTTY: false,
           setEncoding: () => {},

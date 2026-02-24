@@ -29,20 +29,20 @@ describe('getDiscodeSendScriptSource', () => {
     expect(source).toContain('var port     = 12345;');
   });
 
-  it('reads AGENT_DISCORD_AGENT and AGENT_DISCORD_INSTANCE from env vars', () => {
+  it('reads DISCODE_AGENT and DISCODE_INSTANCE from env vars', () => {
     const source = getDiscodeSendScriptSource(defaultConfig);
-    expect(source).toContain('AGENT_DISCORD_AGENT');
-    expect(source).toContain('AGENT_DISCORD_INSTANCE');
+    expect(source).toContain('DISCODE_AGENT');
+    expect(source).toContain('DISCODE_INSTANCE');
   });
 
-  it('does NOT read AGENT_DISCORD_PROJECT from env vars', () => {
+  it('does NOT read DISCODE_PROJECT from env vars', () => {
     const source = getDiscodeSendScriptSource(defaultConfig);
-    expect(source).not.toContain('process.env.AGENT_DISCORD_PROJECT');
+    expect(source).not.toContain('process.env.DISCODE_PROJECT');
   });
 
-  it('does NOT read AGENT_DISCORD_PORT from env vars', () => {
+  it('does NOT read DISCODE_PORT from env vars', () => {
     const source = getDiscodeSendScriptSource(defaultConfig);
-    expect(source).not.toContain('process.env.AGENT_DISCORD_PORT');
+    expect(source).not.toContain('process.env.DISCODE_PORT');
   });
 
   it('POSTs to /send-files endpoint', () => {

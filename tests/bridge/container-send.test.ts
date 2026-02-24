@@ -3,7 +3,7 @@
  *
  * Verifies that agents running inside Docker containers can send messages
  * and files back to Discord/Slack via the hook server, using the
- * AGENT_DISCORD_HOSTNAME environment variable for host resolution.
+ * DISCODE_HOSTNAME environment variable for host resolution.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -128,10 +128,10 @@ describe('container agent → platform send', () => {
     };
   }
 
-  describe('send-script AGENT_DISCORD_HOSTNAME support', () => {
-    it('reads hostname from AGENT_DISCORD_HOSTNAME env var', () => {
+  describe('send-script DISCODE_HOSTNAME support', () => {
+    it('reads hostname from DISCODE_HOSTNAME env var', () => {
       const source = getDiscodeSendScriptSource({ projectName: 'test', port: 18470 });
-      expect(source).toContain('process.env.AGENT_DISCORD_HOSTNAME');
+      expect(source).toContain('process.env.DISCODE_HOSTNAME');
       expect(source).toContain('"127.0.0.1"');
     });
 

@@ -19,11 +19,11 @@ export function buildAgentLaunchEnv(params: {
   hostname?: string;
 }): Record<string, string> {
   return {
-    AGENT_DISCORD_PROJECT: params.projectName,
-    AGENT_DISCORD_PORT: String(params.port),
-    AGENT_DISCORD_AGENT: params.agentType,
-    AGENT_DISCORD_INSTANCE: params.instanceId,
-    ...(params.hostname ? { AGENT_DISCORD_HOSTNAME: params.hostname } : {}),
+    DISCODE_PROJECT: params.projectName,
+    DISCODE_PORT: String(params.port),
+    DISCODE_AGENT: params.agentType,
+    DISCODE_INSTANCE: params.instanceId,
+    ...(params.hostname ? { DISCODE_HOSTNAME: params.hostname } : {}),
   };
 }
 
@@ -40,11 +40,11 @@ export function buildContainerEnv(params: {
   instanceId: string;
 }): Record<string, string> {
   return {
-    AGENT_DISCORD_PROJECT: params.projectName,
-    AGENT_DISCORD_PORT: String(params.port),
-    AGENT_DISCORD_AGENT: params.agentType,
-    AGENT_DISCORD_INSTANCE: params.instanceId,
+    DISCODE_PROJECT: params.projectName,
+    DISCODE_PORT: String(params.port),
+    DISCODE_AGENT: params.agentType,
+    DISCODE_INSTANCE: params.instanceId,
     // Container→host communication via Docker's built-in DNS
-    AGENT_DISCORD_HOSTNAME: 'host.docker.internal',
+    DISCODE_HOSTNAME: 'host.docker.internal',
   };
 }

@@ -196,7 +196,7 @@ describe('resumeProjectInstance with container mode', () => {
     expect(runtime.startAgentInWindow).toHaveBeenCalledWith(
       'bridge',
       'test-claude',
-      expect.stringContaining('export AGENT_DISCORD_PROJECT='),
+      expect.stringContaining('export DISCODE_PROJECT='),
     );
     expect(result.restoredWindow).toBe(true);
   });
