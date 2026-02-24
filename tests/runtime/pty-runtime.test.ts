@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { PtyRuntime } from '../../src/runtime/pty-runtime.js';
 import { VtScreen } from '../../src/runtime/vt-screen.js';
+import { buildTerminalResponse } from '../../src/runtime/pty-query-handler.js';
 
 const runtimes: PtyRuntime[] = [];
 
@@ -64,8 +65,7 @@ describe('PtyRuntime', () => {
   });
 
   it('answers common terminal queries for interactive CLIs', () => {
-    const runtime = track(new PtyRuntime({ useNodePty: false }));
-    const runtimeAny = runtime as any;
+    track(new PtyRuntime({ useNodePty: false }));
 
     const record = {
       screen: new VtScreen(20, 6),
@@ -74,14 +74,13 @@ describe('PtyRuntime', () => {
     };
 
     record.screen.write('abc');
-    expect(runtimeAny.buildTerminalResponse(record, '\x1b[6n')).toBe('\x1b[1;4R');
-    expect(runtimeAny.buildTerminalResponse(record, '\x1b[?6n')).toBe('\x1b[?1;4R');
-    expect(runtimeAny.buildTerminalResponse(record, '\x1b[5n')).toBe('\x1b[0n');
+    expect(buildTerminalResponse(record, '\x1b[6n')).toBe('\x1b[1;4R');
+    expect(buildTerminalResponse(record, '\x1b[?6n')).toBe('\x1b[?1;4R');
+    expect(buildTerminalResponse(record, '\x1b[5n')).toBe('\x1b[0n');
   });
 
   it('reports default and explicit private mode states', () => {
-    const runtime = track(new PtyRuntime({ useNodePty: false }));
-    const runtimeAny = runtime as any;
+    track(new PtyRuntime({ useNodePty: false }));
 
     const record = {
       screen: new VtScreen(20, 6),
@@ -90,15 +89,14 @@ describe('PtyRuntime', () => {
     };
 
     // Cursor visibility mode is commonly enabled by default.
-    expect(runtimeAny.buildTerminalResponse(record, '\x1b[?25$p')).toBe('\x1b[?25;1$y');
+    expect(buildTerminalResponse(record, '\x1b[?25$p')).toBe('\x1b[?25;1$y');
 
     record.privateModes.set(2004, true);
-    expect(runtimeAny.buildTerminalResponse(record, '\x1b[?2004$p')).toBe('\x1b[?2004;1$y');
+    expect(buildTerminalResponse(record, '\x1b[?2004$p')).toBe('\x1b[?2004;1$y');
   });
 
   it('responds to OSC color queries used by terminal-aware tools', () => {
-    const runtime = track(new PtyRuntime({ useNodePty: false }));
-    const runtimeAny = runtime as any;
+    track(new PtyRuntime({ useNodePty: false }));
 
     const record = {
       screen: new VtScreen(20, 6),
@@ -106,9 +104,9 @@ describe('PtyRuntime', () => {
       privateModes: new Map<number, boolean>(),
     };
 
-    const fg = runtimeAny.buildTerminalResponse(record, '\x1b]10;?\x07');
-    const bg = runtimeAny.buildTerminalResponse(record, '\x1b]11;?\x07');
-    const indexed = runtimeAny.buildTerminalResponse(record, '\x1b]4;12;?\x07');
+    const fg = buildTerminalResponse(record, '\x1b]10;?\x07');
+    const bg = buildTerminalResponse(record, '\x1b]11;?\x07');
+    const indexed = buildTerminalResponse(record, '\x1b]4;12;?\x07');
 
     expect(fg).toMatch(/^\x1b]10;rgb:[0-9a-f]{4}\/[0-9a-f]{4}\/[0-9a-f]{4}\x07$/);
     expect(bg).toMatch(/^\x1b]11;rgb:[0-9a-f]{4}\/[0-9a-f]{4}\/[0-9a-f]{4}\x07$/);
