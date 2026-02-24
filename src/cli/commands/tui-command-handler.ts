@@ -1,0 +1,414 @@
+import { basename } from 'path';
+import { config, saveConfig, validateConfig } from '../../config/index.js';
+import { stateManager } from '../../state/index.js';
+import { agentRegistry } from '../../agents/index.js';
+import { listProjectInstances } from '../../state/instances.js';
+import { TmuxManager } from '../../tmux/manager.js';
+import type { BridgeConfig } from '../../types/index.js';
+import type { TmuxCliOptions } from '../common/types.js';
+import { parseNewCommand, parseOnboardCommand } from '../common/tui-command-parsers.js';
+import type { RuntimeSessionManager } from '../common/runtime-session-manager.js';
+import { newCommand } from './new.js';
+import { stopCommand } from './stop.js';
+import { onboardCommand } from './onboard.js';
+
+export type TuiCommandDeps = {
+  session: RuntimeSessionManager;
+  options: TmuxCliOptions;
+  effectiveConfig: BridgeConfig;
+  getKeepChannelOnStop: () => boolean;
+  setKeepChannelOnStop: (value: boolean) => void;
+  nextProjectName: (baseName: string) => string;
+  reloadStateFromDisk: () => void;
+};
+
+export async function handleTuiCommand(
+  command: string,
+  append: (line: string) => void,
+  deps: TuiCommandDeps,
+): Promise<'exit' | 'handled'> {
+  const { session } = deps;
+
+  if (command === '/exit' || command === '/quit') {
+    append('Exiting TUI...');
+    return 'exit';
+  }
+
+  if (command === '/help') {
+    append('Commands: /new [name] [agent] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty|toggle]], /help, /exit');
+    append('Onboard options: --platform [discord|slack], --runtime-mode [tmux|pty], --token, --slack-bot-token, --slack-app-token, --default-agent [name|auto], --telemetry [on|off], --opencode-permission [allow|default]');
+    return 'handled';
+  }
+
+  if (command === '/onboard' || command === 'onboard' || command.startsWith('/onboard ') || command.startsWith('onboard ')) {
+    return handleOnboard(command, append);
+  }
+
+  if (command === '/config' || command === 'config') {
+    return handleConfigShow(append, deps);
+  }
+
+  if (command.startsWith('/config ') || command.startsWith('config ')) {
+    return handleConfigSet(command, append, deps);
+  }
+
+  if (command === '/list') {
+    return handleList(append, deps);
+  }
+
+  if (command === '/projects') {
+    return handleProjects(append, deps);
+  }
+
+  if (command === 'stop' || command === '/stop') {
+    append('Use stop dialog to choose a project.');
+    return 'handled';
+  }
+
+  if (command.startsWith('stop ') || command.startsWith('/stop ')) {
+    return handleStop(command, append, deps);
+  }
+
+  if (command.startsWith('/new')) {
+    return handleNew(command, append, deps);
+  }
+
+  if (session.isSupported() !== false) {
+    const windowsCache = session.getWindowsCache();
+    const focusedWindowId = windowsCache?.activeWindowId;
+    if (focusedWindowId) {
+      await session.requireConnected('command input');
+      session.sendInput(focusedWindowId, Buffer.from(`${command}\r`, 'utf8'));
+      append(`→ sent to ${focusedWindowId}`);
+      return 'handled';
+    }
+  }
+
+  append(`Unknown command: ${command}`);
+  append('Try /help (or focus a runtime window to send direct input)');
+  return 'handled';
+}
+
+async function handleOnboard(command: string, append: (line: string) => void): Promise<'handled'> {
+  const parsed = parseOnboardCommand(command);
+  if (parsed.showUsage) {
+    append('Usage: /onboard [discord|slack] [--platform discord|slack] [--runtime-mode tmux|pty]');
+    append('       [--token TOKEN] [--slack-bot-token TOKEN] [--slack-app-token TOKEN]');
+    append('       [--default-agent claude|gemini|opencode|auto] [--telemetry on|off]');
+    append('       [--opencode-permission allow|default]');
+    append('Discord bot token guide: https://discode.chat/docs/discord-bot');
+    append('TUI onboard runs in non-interactive mode and uses saved values when omitted.');
+    return 'handled';
+  }
+  if (parsed.error) {
+    append(`⚠️ ${parsed.error}`);
+    append('Try: /onboard --help');
+    return 'handled';
+  }
+
+  try {
+    append('Running onboarding inside TUI...');
+    await onboardCommand({
+      ...parsed.options,
+      nonInteractive: true,
+      exitOnError: false,
+    });
+    append('✅ Onboarding complete.');
+  } catch (error) {
+    append(`⚠️ Onboarding failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return 'handled';
+}
+
+function handleConfigShow(append: (line: string) => void, deps: TuiCommandDeps): 'handled' {
+  const keepChannelOnStop = deps.getKeepChannelOnStop();
+  append(`keepChannel: ${keepChannelOnStop ? 'on' : 'off'}`);
+  append(`defaultAgent: ${config.defaultAgentCli || '(auto)'}`);
+  append(`defaultChannel: ${config.discord.channelId || '(auto)'}`);
+  append(`runtimeMode: ${config.runtimeMode || 'tmux'}`);
+  append('Usage: /config keepChannel [on|off|toggle]');
+  append('Usage: /config defaultAgent [agent|auto]');
+  append('Usage: /config defaultChannel [channelId|auto]');
+  append('Usage: /config runtimeMode [tmux|pty|toggle]');
+  return 'handled';
+}
+
+function handleConfigSet(command: string, append: (line: string) => void, deps: TuiCommandDeps): 'handled' {
+  const parts = command.trim().split(/\s+/).filter(Boolean);
+  const key = (parts[1] || '').toLowerCase();
+
+  if (key === 'defaultagent' || key === 'default-agent') {
+    return handleConfigDefaultAgent(parts, append);
+  }
+  if (key === 'defaultchannel' || key === 'default-channel' || key === 'channel') {
+    return handleConfigDefaultChannel(parts, append);
+  }
+  if (key === 'runtimemode' || key === 'runtime-mode' || key === 'runtime') {
+    return handleConfigRuntimeMode(parts, append);
+  }
+  if (key !== 'keepchannel' && key !== 'keep-channel') {
+    append(`⚠️ Unknown config key: ${parts[1] || '(empty)'}`);
+    append('Supported keys: keepChannel, defaultAgent, defaultChannel, runtimeMode');
+    return 'handled';
+  }
+
+  return handleConfigKeepChannel(parts, append, deps);
+}
+
+function handleConfigDefaultAgent(parts: string[], append: (line: string) => void): 'handled' {
+  const availableAgents = agentRegistry.getAll().map((agent) => agent.config.name).sort((a, b) => a.localeCompare(b));
+  const value = (parts[2] || '').trim().toLowerCase();
+
+  if (!value) {
+    append(`defaultAgent: ${config.defaultAgentCli || '(auto)'}`);
+    append(`Available: ${availableAgents.join(', ')}`);
+    append('Use: /config defaultAgent [agent|auto]');
+    return 'handled';
+  }
+
+  if (value === 'auto' || value === 'clear' || value === 'unset') {
+    try {
+      saveConfig({ defaultAgentCli: undefined });
+      append('✅ defaultAgent is now auto (first installed agent).');
+    } catch (error) {
+      append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return 'handled';
+  }
+
+  const selected = agentRegistry.get(value);
+  if (!selected) {
+    append(`⚠️ Unknown agent: ${value}`);
+    append(`Available: ${availableAgents.join(', ')}`);
+    return 'handled';
+  }
+
+  try {
+    saveConfig({ defaultAgentCli: selected.config.name });
+    append(`✅ defaultAgent is now ${selected.config.name}`);
+  } catch (error) {
+    append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return 'handled';
+}
+
+function handleConfigDefaultChannel(parts: string[], append: (line: string) => void): 'handled' {
+  const value = (parts[2] || '').trim();
+  const lowered = value.toLowerCase();
+  if (!value) {
+    append(`defaultChannel: ${config.discord.channelId || '(auto)'}`);
+    append('Use: /config defaultChannel [channelId|auto]');
+    return 'handled';
+  }
+
+  if (lowered === 'auto' || lowered === 'clear' || lowered === 'unset') {
+    try {
+      saveConfig({ channelId: undefined });
+      append('✅ defaultChannel is now auto (per-project channel).');
+    } catch (error) {
+      append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return 'handled';
+  }
+
+  const normalized = value.replace(/^<#(\d+)>$/, '$1');
+  try {
+    saveConfig({ channelId: normalized });
+    append(`✅ defaultChannel is now ${normalized}`);
+  } catch (error) {
+    append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return 'handled';
+}
+
+function handleConfigRuntimeMode(parts: string[], append: (line: string) => void): 'handled' {
+  const currentMode = config.runtimeMode === 'pty' ? 'pty' : 'tmux';
+  const value = (parts[2] || '').trim().toLowerCase();
+
+  if (!value) {
+    append(`runtimeMode: ${currentMode}`);
+    append('Use: /config runtimeMode [tmux|pty|toggle]');
+    return 'handled';
+  }
+
+  let nextMode: 'tmux' | 'pty';
+  if (value === 'toggle') {
+    nextMode = currentMode === 'pty' ? 'tmux' : 'pty';
+  } else if (value === 'tmux' || value === 'pty') {
+    nextMode = value;
+  } else {
+    append(`⚠️ Unknown runtime mode: ${parts[2]}`);
+    append('Use tmux, pty, or toggle');
+    return 'handled';
+  }
+
+  try {
+    saveConfig({ runtimeMode: nextMode });
+    append(`✅ runtimeMode is now ${nextMode}`);
+  } catch (error) {
+    append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return 'handled';
+}
+
+function handleConfigKeepChannel(parts: string[], append: (line: string) => void, deps: TuiCommandDeps): 'handled' {
+  let keepChannelOnStop = deps.getKeepChannelOnStop();
+  const modeRaw = (parts[2] || 'toggle').toLowerCase();
+  if (modeRaw === 'on' || modeRaw === 'true' || modeRaw === '1') {
+    keepChannelOnStop = true;
+  } else if (modeRaw === 'off' || modeRaw === 'false' || modeRaw === '0') {
+    keepChannelOnStop = false;
+  } else if (modeRaw === 'toggle') {
+    keepChannelOnStop = !keepChannelOnStop;
+  } else {
+    append(`⚠️ Unknown mode: ${parts[2]}`);
+    append('Use on, off, or toggle');
+    return 'handled';
+  }
+
+  deps.setKeepChannelOnStop(keepChannelOnStop);
+
+  try {
+    saveConfig({ keepChannelOnStop });
+  } catch (error) {
+    append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  append(`✅ keepChannel is now ${keepChannelOnStop ? 'on' : 'off'}`);
+  append(
+    keepChannelOnStop
+      ? 'stop will preserve Discord channels.'
+      : 'stop will delete Discord channels (default).',
+  );
+  return 'handled';
+}
+
+async function handleList(append: (line: string) => void, deps: TuiCommandDeps): Promise<'handled'> {
+  deps.reloadStateFromDisk();
+  const runtimeWindows = await deps.session.fetchWindows();
+  if (runtimeWindows && runtimeWindows.windows.length > 0) {
+    const sessions = new Map<string, number>();
+    for (const window of runtimeWindows.windows) {
+      sessions.set(window.sessionName, (sessions.get(window.sessionName) || 0) + 1);
+    }
+    [...sessions.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .forEach(([sessionName, count]) => {
+        append(`[session] ${sessionName} (${count} windows)`);
+      });
+    return 'handled';
+  }
+
+  const tmux = new TmuxManager(config.tmux.sessionPrefix);
+  const sessions = new Set(
+    stateManager
+      .listProjects()
+      .map((project) => project.tmuxSession)
+      .filter((name) => tmux.sessionExistsFull(name)),
+  );
+  if (sessions.size === 0) {
+    append('No running sessions.');
+    return 'handled';
+  }
+  [...sessions].sort((a, b) => a.localeCompare(b)).forEach((session) => {
+    append(`[session] ${session}`);
+  });
+  return 'handled';
+}
+
+async function handleProjects(append: (line: string) => void, deps: TuiCommandDeps): Promise<'handled'> {
+  deps.reloadStateFromDisk();
+  const projects = stateManager.listProjects();
+  if (projects.length === 0) {
+    append('No projects configured.');
+    return 'handled';
+  }
+  projects.forEach((project) => {
+    const instances = listProjectInstances(project);
+    const label = instances.length > 0
+      ? instances.map((instance) => `${instance.agentType}#${instance.instanceId}`).join(', ')
+      : 'none';
+    append(`[project] ${project.projectName} (${label})`);
+  });
+  return 'handled';
+}
+
+async function handleStop(command: string, append: (line: string) => void, deps: TuiCommandDeps): Promise<'handled'> {
+  const args = command.replace(/^\/?stop\s+/, '').trim().split(/\s+/).filter(Boolean);
+  let projectName = '';
+  let instanceId: string | undefined;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--instance' && args[i + 1]) {
+      instanceId = args[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--instance=')) {
+      const value = arg.slice('--instance='.length).trim();
+      if (value) instanceId = value;
+      continue;
+    }
+    if (arg.startsWith('--')) continue;
+    if (!projectName) projectName = arg;
+  }
+  if (!projectName) {
+    append('⚠️ Project name is required. Example: stop my-project --instance gemini-2');
+    return 'handled';
+  }
+  await stopCommand(projectName, {
+    instance: instanceId,
+    keepChannel: deps.getKeepChannelOnStop(),
+    tmuxSharedSessionName: deps.options.tmuxSharedSessionName,
+  });
+  append(`✅ Stopped ${instanceId ? `instance ${instanceId}` : 'project'}: ${projectName}`);
+  return 'handled';
+}
+
+async function handleNew(command: string, append: (line: string) => void, deps: TuiCommandDeps): Promise<'handled'> {
+  try {
+    deps.reloadStateFromDisk();
+    validateConfig();
+    const workspaceId = typeof stateManager.getWorkspaceId === 'function'
+      ? stateManager.getWorkspaceId()
+      : stateManager.getGuildId();
+    if (!workspaceId) {
+      append('⚠️ Not set up yet. Run /onboard in TUI.');
+      return 'handled';
+    }
+
+    const installed = agentRegistry.getAll().filter((agent) => agent.isInstalled());
+    if (installed.length === 0) {
+      append('⚠️ No agent CLIs found. Install one first (claude, gemini, opencode).');
+      return 'handled';
+    }
+
+    const parsed = parseNewCommand(command);
+    const cwdName = basename(process.cwd());
+    const projectName = parsed.projectName && parsed.projectName.trim().length > 0
+      ? parsed.projectName.trim()
+      : deps.nextProjectName(cwdName);
+
+    const selected = parsed.agentName
+      ? installed.find((agent) => agent.config.name === parsed.agentName)
+      : installed.find((agent) => agent.config.name === config.defaultAgentCli) || installed[0];
+
+    if (!selected) {
+      append(`⚠️ Unknown agent '${parsed.agentName}'. Try claude, gemini, or opencode.`);
+      return 'handled';
+    }
+
+    append(`Creating session '${projectName}' with ${selected.config.displayName}...`);
+    await newCommand(selected.config.name, {
+      name: projectName,
+      instance: parsed.instanceId,
+      attach: parsed.attach,
+      tmuxSharedSessionName: deps.options.tmuxSharedSessionName,
+    });
+    append(`✅ Session created: ${projectName}`);
+    append(`[project] ${projectName} (${selected.config.name})`);
+  } catch (error) {
+    append(`⚠️ ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return 'handled';
+}

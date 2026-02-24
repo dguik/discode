@@ -1,10 +1,8 @@
-import { basename } from 'path';
-import { execSync, spawnSync } from 'child_process';
-import { request as httpRequest } from 'http';
+import { spawnSync } from 'child_process';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
-import { config, getConfigValue, saveConfig, validateConfig } from '../../config/index.js';
+import { config, getConfigValue } from '../../config/index.js';
 import { stateManager } from '../../state/index.js';
 import { agentRegistry } from '../../agents/index.js';
 import { TmuxManager } from '../../tmux/manager.js';
@@ -12,134 +10,15 @@ import { listProjectInstances } from '../../state/instances.js';
 import type { TmuxCliOptions } from '../common/types.js';
 import {
   applyTmuxCliOverrides,
-  escapeShellArg,
   getEnabledAgentNames,
+  isTmuxPaneAlive,
   resolveProjectWindowName,
+  waitForTmuxPaneAlive,
 } from '../common/tmux.js';
-import { RuntimeStreamClient, getDefaultRuntimeSocketPath } from '../common/runtime-stream-client.js';
+import { RuntimeSessionManager } from '../common/runtime-session-manager.js';
+import { handleTuiCommand } from './tui-command-handler.js';
 import { attachCommand } from './attach.js';
-import { newCommand } from './new.js';
 import { stopCommand } from './stop.js';
-import { onboardCommand } from './onboard.js';
-import type { TerminalStyledLine } from '../../runtime/vt-screen.js';
-
-type RuntimeWindowPayload = {
-  windowId: string;
-  sessionName: string;
-  windowName: string;
-  status?: string;
-  pid?: number;
-};
-
-type RuntimeWindowsPayload = {
-  activeWindowId?: string;
-  windows: RuntimeWindowPayload[];
-};
-
-type HttpJsonResult = {
-  status: number;
-  body: string;
-};
-
-type RuntimeTransportStatus = {
-  mode: 'stream';
-  connected: boolean;
-  detail: string;
-  lastError?: string;
-};
-
-function requestRuntimeApi(params: {
-  port: number;
-  method: 'GET' | 'POST';
-  path: string;
-  payload?: unknown;
-}): Promise<HttpJsonResult> {
-  return new Promise((resolve, reject) => {
-    const body = params.payload === undefined ? '' : JSON.stringify(params.payload);
-    const req = httpRequest(
-      {
-        hostname: '127.0.0.1',
-        port: params.port,
-        path: params.path,
-        method: params.method,
-        headers: params.method === 'POST'
-          ? {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(body),
-          }
-          : undefined,
-      },
-      (res) => {
-        let data = '';
-        res.on('data', (chunk) => {
-          data += chunk.toString('utf8');
-        });
-        res.on('end', () => {
-          resolve({ status: res.statusCode || 0, body: data });
-        });
-      },
-    );
-    req.on('error', reject);
-    req.setTimeout(2000, () => {
-      req.destroy(new Error('Runtime API request timeout'));
-    });
-    if (params.method === 'POST') {
-      req.write(body);
-    }
-    req.end();
-  });
-}
-
-function parseRuntimeWindowsPayload(raw: string): RuntimeWindowsPayload | null {
-  try {
-    const parsed = JSON.parse(raw) as Partial<RuntimeWindowsPayload>;
-    if (!Array.isArray(parsed.windows)) return null;
-    const windows = parsed.windows
-      .filter((item): item is RuntimeWindowPayload => {
-        if (!item || typeof item !== 'object') return false;
-        const event = item as Record<string, unknown>;
-        return typeof event.windowId === 'string' && typeof event.sessionName === 'string' && typeof event.windowName === 'string';
-      })
-      .map((item) => ({
-        windowId: item.windowId,
-        sessionName: item.sessionName,
-        windowName: item.windowName,
-        status: item.status,
-        pid: item.pid,
-      }));
-
-    return {
-      activeWindowId: typeof parsed.activeWindowId === 'string' ? parsed.activeWindowId : undefined,
-      windows,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function isTmuxPaneAlive(paneTarget?: string): boolean {
-  if (!paneTarget || paneTarget.trim().length === 0) return false;
-  try {
-    execSync(`tmux display-message -p -t ${escapeShellArg(paneTarget)} "#{pane_id}"`, {
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForTmuxPaneAlive(paneTarget: string, timeoutMs: number = 1200, intervalMs: number = 100): Promise<boolean> {
-  if (!paneTarget || paneTarget.trim().length === 0) return false;
-  if (isTmuxPaneAlive(paneTarget)) return true;
-
-  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / intervalMs));
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    if (isTmuxPaneAlive(paneTarget)) return true;
-  }
-  return false;
-}
 
 function nextProjectName(baseName: string): string {
   if (!stateManager.getProject(baseName)) return baseName;
@@ -152,164 +31,6 @@ function nextProjectName(baseName: string): string {
 
 function reloadStateFromDisk(): void {
   stateManager.reload();
-}
-
-function parseNewCommand(raw: string): {
-  projectName?: string;
-  agentName?: string;
-  attach: boolean;
-  instanceId?: string;
-} {
-  const parts = raw.split(/\s+/).filter(Boolean);
-  let attach = false;
-  let instanceId: string | undefined;
-  const values: string[] = [];
-
-  for (let i = 1; i < parts.length; i += 1) {
-    const part = parts[i];
-    if (part === '--attach') {
-      attach = true;
-      continue;
-    }
-    if (part === '--instance' && parts[i + 1]) {
-      instanceId = parts[i + 1];
-      i += 1;
-      continue;
-    }
-    if (part.startsWith('--instance=')) {
-      const value = part.slice('--instance='.length).trim();
-      if (value) instanceId = value;
-      continue;
-    }
-    if (part.startsWith('--')) continue;
-    values.push(part);
-  }
-
-  const projectName = values[0];
-  const agentName = values[1];
-  return { projectName, agentName, attach, instanceId };
-}
-
-type ParsedOnboardCommand = {
-  options: {
-    platform?: 'discord' | 'slack';
-    runtimeMode?: 'tmux' | 'pty';
-    token?: string;
-    slackBotToken?: string;
-    slackAppToken?: string;
-    defaultAgentCli?: string;
-    telemetryEnabled?: boolean;
-    opencodePermissionMode?: 'allow' | 'default';
-  };
-  showUsage?: boolean;
-  error?: string;
-};
-
-function parseOnboardCommand(raw: string): ParsedOnboardCommand {
-  const parts = raw.split(/\s+/).filter(Boolean);
-  const options: ParsedOnboardCommand['options'] = {};
-  const toBoolean = (value: string): boolean | undefined => {
-    const lowered = value.trim().toLowerCase();
-    if (lowered === 'on' || lowered === 'true' || lowered === '1' || lowered === 'yes' || lowered === 'y') return true;
-    if (lowered === 'off' || lowered === 'false' || lowered === '0' || lowered === 'no' || lowered === 'n') return false;
-    return undefined;
-  };
-
-  for (let i = 1; i < parts.length; i += 1) {
-    const part = parts[i];
-    if (part === '--help' || part === '-h') {
-      return { options, showUsage: true };
-    }
-
-    const eqIndex = part.indexOf('=');
-    const flag = eqIndex >= 0 ? part.slice(0, eqIndex) : part;
-    const inlineValue = eqIndex >= 0 ? part.slice(eqIndex + 1) : undefined;
-    const readValue = (): string | undefined => {
-      if (inlineValue !== undefined) return inlineValue;
-      const next = parts[i + 1];
-      if (!next || next.startsWith('--')) return undefined;
-      i += 1;
-      return next;
-    };
-
-    if (!part.startsWith('--')) {
-      if (!options.platform && (part === 'discord' || part === 'slack')) {
-        options.platform = part;
-        continue;
-      }
-      return { options, error: `Unknown option: ${part}` };
-    }
-
-    if (flag === '--platform') {
-      const value = (readValue() || '').toLowerCase();
-      if (value !== 'discord' && value !== 'slack') {
-        return { options, error: 'platform must be discord or slack.' };
-      }
-      options.platform = value;
-      continue;
-    }
-
-    if (flag === '--runtime-mode') {
-      const value = (readValue() || '').toLowerCase();
-      if (value !== 'tmux' && value !== 'pty') {
-        return { options, error: 'runtime mode must be tmux or pty.' };
-      }
-      options.runtimeMode = value;
-      continue;
-    }
-
-    if (flag === '--token') {
-      const value = readValue();
-      if (!value) return { options, error: 'token requires a value.' };
-      options.token = value;
-      continue;
-    }
-
-    if (flag === '--slack-bot-token') {
-      const value = readValue();
-      if (!value) return { options, error: 'slack-bot-token requires a value.' };
-      options.slackBotToken = value;
-      continue;
-    }
-
-    if (flag === '--slack-app-token') {
-      const value = readValue();
-      if (!value) return { options, error: 'slack-app-token requires a value.' };
-      options.slackAppToken = value;
-      continue;
-    }
-
-    if (flag === '--default-agent') {
-      const value = readValue();
-      if (!value) return { options, error: 'default-agent requires a value.' };
-      options.defaultAgentCli = value;
-      continue;
-    }
-
-    if (flag === '--telemetry') {
-      const value = readValue();
-      if (!value) return { options, error: 'telemetry requires a value (on/off).' };
-      const telemetryEnabled = toBoolean(value);
-      if (telemetryEnabled === undefined) {
-        return { options, error: 'telemetry must be on/off/true/false.' };
-      }
-      options.telemetryEnabled = telemetryEnabled;
-      continue;
-    }
-
-    if (flag === '--opencode-permission') {
-      const value = (readValue() || '').toLowerCase();
-      if (value !== 'allow' && value !== 'default') {
-        return { options, error: 'opencode-permission must be allow or default.' };
-      }
-      options.opencodePermissionMode = value;
-      continue;
-    }
-
-    return { options, error: `Unknown option: ${flag}` };
-  }
-
-  return { options };
 }
 
 function handoffToBunRuntime(): never {
@@ -333,842 +54,30 @@ function handoffToBunRuntime(): never {
   process.exit(typeof result.status === 'number' ? result.status : 1);
 }
 
+function resolveRuntimeWindowForProject(
+  projectName: string,
+  tmuxConfig: typeof config.tmux,
+): { windowId: string; sessionName: string; windowName: string } | null {
+  const project = stateManager.getProject(projectName);
+  if (!project) return null;
+  const instances = listProjectInstances(project);
+  const firstInstance = instances[0];
+  if (!firstInstance) return null;
+  const windowName = resolveProjectWindowName(project, firstInstance.agentType, tmuxConfig, firstInstance.instanceId);
+  return {
+    windowId: `${project.tmuxSession}:${windowName}`,
+    sessionName: project.tmuxSession,
+    windowName,
+  };
+}
+
 export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   const effectiveConfig = applyTmuxCliOverrides(config, options);
   const runtimePort = effectiveConfig.hookServerPort || 18470;
   let keepChannelOnStop = getConfigValue('keepChannelOnStop') === true;
-  let runtimeSupported: boolean | undefined;
-  let runtimeWindowsCache: RuntimeWindowsPayload | null = null;
-  let transportStatus: RuntimeTransportStatus = {
-    mode: 'stream',
-    connected: false,
-    detail: 'stream disconnected',
-  };
-  const runtimeFrameCache = new Map<string, string>();
-  const runtimeFrameLines = new Map<string, string[]>();
-  const runtimeStyledCache = new Map<string, TerminalStyledLine[]>();
-  const runtimeFrameListeners = new Set<(frame: {
-    sessionName: string;
-    windowName: string;
-    output: string;
-    styled?: TerminalStyledLine[];
-    cursorRow?: number;
-    cursorCol?: number;
-    cursorVisible?: boolean;
-  }) => void>();
-  const streamSubscriptions = new Map<string, { cols: number; rows: number; subscribedAt: number }>();
 
-  const setTransportStatus = (next: Partial<RuntimeTransportStatus>) => {
-    transportStatus = {
-      ...transportStatus,
-      ...next,
-    };
-  };
-
-  const splitWindowId = (windowId: string): { sessionName: string; windowName: string } | null => {
-    const idx = windowId.indexOf(':');
-    if (idx <= 0 || idx >= windowId.length - 1) return null;
-    return {
-      sessionName: windowId.slice(0, idx),
-      windowName: windowId.slice(idx + 1),
-    };
-  };
-
-  let runtimeStreamConnected = false;
-  const streamClient = new RuntimeStreamClient(getDefaultRuntimeSocketPath(), {
-    onFrame: (frame) => {
-      const output = frame.lines.join('\n');
-      runtimeFrameLines.set(frame.windowId, frame.lines.slice());
-      runtimeFrameCache.set(frame.windowId, output);
-      runtimeStyledCache.delete(frame.windowId);
-      const parsed = splitWindowId(frame.windowId);
-      if (parsed) {
-        for (const listener of runtimeFrameListeners) {
-          listener({
-            sessionName: parsed.sessionName,
-            windowName: parsed.windowName,
-            output,
-            styled: undefined,
-            cursorRow: undefined,
-            cursorCol: undefined,
-            cursorVisible: undefined,
-          });
-        }
-      }
-      runtimeSupported = true;
-    },
-    onFrameStyled: (frame) => {
-      const output = frame.lines
-        .map((line) => line.segments.map((seg) => seg.text).join(''))
-        .join('\n');
-      runtimeFrameCache.set(frame.windowId, output);
-      runtimeStyledCache.set(frame.windowId, frame.lines);
-      const parsed = splitWindowId(frame.windowId);
-      if (parsed) {
-        for (const listener of runtimeFrameListeners) {
-          listener({
-            sessionName: parsed.sessionName,
-            windowName: parsed.windowName,
-            output,
-            styled: frame.lines,
-            cursorRow: frame.cursorRow,
-            cursorCol: frame.cursorCol,
-            cursorVisible: frame.cursorVisible,
-          });
-        }
-      }
-      runtimeSupported = true;
-    },
-    onPatchStyled: (patch) => {
-      const current = runtimeStyledCache.get(patch.windowId) || [];
-      const next = current.slice(0, patch.lineCount).map((line) => ({
-        segments: line.segments.map((seg) => ({
-          text: seg.text,
-          fg: seg.fg,
-          bg: seg.bg,
-          bold: seg.bold,
-          italic: seg.italic,
-          underline: seg.underline,
-        })),
-      }));
-      while (next.length < patch.lineCount) {
-        next.push({
-          segments: [{
-            text: '',
-            fg: undefined,
-            bg: undefined,
-            bold: undefined,
-            italic: undefined,
-            underline: undefined,
-          }],
-        });
-      }
-
-      for (const op of patch.ops) {
-        if (op.index >= 0 && op.index < patch.lineCount) {
-          next[op.index] = {
-            segments: op.line.segments.map((seg) => ({
-              text: seg.text,
-              fg: seg.fg,
-              bg: seg.bg,
-              bold: seg.bold,
-              italic: seg.italic,
-              underline: seg.underline,
-            })),
-          };
-        }
-      }
-
-      const output = next
-        .map((line) => line.segments.map((seg) => seg.text).join(''))
-        .join('\n');
-      runtimeFrameCache.set(patch.windowId, output);
-      runtimeStyledCache.set(patch.windowId, next);
-
-      const parsed = splitWindowId(patch.windowId);
-      if (parsed) {
-        for (const listener of runtimeFrameListeners) {
-          listener({
-            sessionName: parsed.sessionName,
-            windowName: parsed.windowName,
-            output,
-            styled: next,
-            cursorRow: patch.cursorRow,
-            cursorCol: patch.cursorCol,
-            cursorVisible: patch.cursorVisible,
-          });
-        }
-      }
-      runtimeSupported = true;
-    },
-    onPatch: (patch) => {
-      const current = runtimeFrameLines.get(patch.windowId) || [];
-      const next = current.slice(0, patch.lineCount);
-      while (next.length < patch.lineCount) next.push('');
-      for (const op of patch.ops) {
-        if (op.index >= 0 && op.index < patch.lineCount) {
-          next[op.index] = op.line;
-        }
-      }
-
-      const output = next.join('\n');
-      runtimeFrameLines.set(patch.windowId, next);
-      runtimeFrameCache.set(patch.windowId, output);
-      runtimeStyledCache.delete(patch.windowId);
-
-      const parsed = splitWindowId(patch.windowId);
-      if (parsed) {
-        for (const listener of runtimeFrameListeners) {
-          listener({
-            sessionName: parsed.sessionName,
-            windowName: parsed.windowName,
-            output,
-            styled: undefined,
-            cursorRow: undefined,
-            cursorCol: undefined,
-            cursorVisible: undefined,
-          });
-        }
-      }
-      runtimeSupported = true;
-    },
-    onWindowExit: (event) => {
-      runtimeFrameCache.delete(event.windowId);
-      runtimeFrameLines.delete(event.windowId);
-      runtimeStyledCache.delete(event.windowId);
-      streamSubscriptions.delete(event.windowId);
-      const parsed = splitWindowId(event.windowId);
-      if (parsed) {
-        for (const listener of runtimeFrameListeners) {
-          listener({
-            sessionName: parsed.sessionName,
-            windowName: parsed.windowName,
-            output: '',
-            styled: undefined,
-            cursorRow: undefined,
-            cursorCol: undefined,
-            cursorVisible: undefined,
-          });
-        }
-      }
-      setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: `window exited: ${event.windowId}`,
-      });
-    },
-    onError: (message) => {
-      const isSocketDown = message.includes('runtime stream socket error');
-      setTransportStatus({
-        mode: 'stream',
-        connected: isSocketDown ? false : (runtimeStreamConnected && streamClient.isConnected()),
-        detail: isSocketDown ? 'stream error' : 'stream warning',
-        lastError: message,
-      });
-    },
-    onStateChange: (state) => {
-      if (state === 'connected') {
-        runtimeStreamConnected = true;
-        streamSubscriptions.clear();
-        setTransportStatus({
-          mode: 'stream',
-          connected: true,
-          detail: 'stream connected',
-          lastError: undefined,
-        });
-      } else {
-        runtimeStreamConnected = false;
-        streamSubscriptions.clear();
-        setTransportStatus({
-          mode: 'stream',
-          connected: false,
-          detail: 'stream disconnected',
-        });
-      }
-    },
-  });
-  runtimeStreamConnected = await streamClient.connect();
-  if (runtimeStreamConnected) {
-    setTransportStatus({
-      mode: 'stream',
-      connected: true,
-      detail: 'stream connected',
-      lastError: undefined,
-    });
-  } else {
-    throw new Error('Runtime stream unavailable. HTTP fallback has been removed; restart the daemon and try again.');
-  }
-  let lastStreamConnectAttemptAt = Date.now();
-  let reconnecting: Promise<boolean> | undefined;
-
-  const ensureStreamConnected = async (): Promise<boolean> => {
-    if (runtimeStreamConnected && streamClient.isConnected()) {
-      return true;
-    }
-
-    if (reconnecting) {
-      return reconnecting;
-    }
-
-    const now = Date.now();
-    if (now - lastStreamConnectAttemptAt < 250) {
-      return runtimeStreamConnected;
-    }
-
-    lastStreamConnectAttemptAt = now;
-    reconnecting = streamClient.connect().catch(() => false);
-
-    try {
-      runtimeStreamConnected = await reconnecting;
-      if (runtimeStreamConnected) {
-        setTransportStatus({
-          mode: 'stream',
-          connected: true,
-          detail: 'stream reconnected',
-          lastError: undefined,
-        });
-      } else {
-        setTransportStatus({
-          mode: 'stream',
-          connected: false,
-          detail: 'stream unavailable',
-        });
-      }
-      return runtimeStreamConnected;
-    } finally {
-      reconnecting = undefined;
-    }
-  };
-
-  const requireStreamConnected = async (context: string): Promise<void> => {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const connected = await ensureStreamConnected();
-      if (connected && streamClient.isConnected()) return;
-      if (attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-    }
-    const detail = transportStatus.lastError ? `${transportStatus.detail}: ${transportStatus.lastError}` : transportStatus.detail;
-    throw new Error(`Runtime stream is required for ${context} (${detail}).`);
-  };
-
-  const ensureStreamSubscribed = (windowId: string, width?: number, height?: number): void => {
-    if (!runtimeStreamConnected) return;
-    const cols = Math.max(30, Math.min(240, Math.floor(width || 120)));
-    const rows = Math.max(10, Math.min(120, Math.floor(height || 40)));
-    const prev = streamSubscriptions.get(windowId);
-    if (prev && prev.cols === cols && prev.rows === rows) return;
-    streamClient.subscribe(windowId, cols, rows);
-    streamSubscriptions.set(windowId, { cols, rows, subscribedAt: Date.now() });
-  };
-
-  const fetchRuntimeWindows = async (): Promise<RuntimeWindowsPayload | null> => {
-    try {
-      const result = await requestRuntimeApi({
-        port: runtimePort,
-        method: 'GET',
-        path: '/runtime/windows',
-      });
-
-      if (result.status === 200) {
-        const payload = parseRuntimeWindowsPayload(result.body);
-        runtimeSupported = !!payload;
-        runtimeWindowsCache = payload;
-        return payload;
-      }
-
-      if (result.status === 501 || result.status === 404 || result.status === 405) {
-        runtimeSupported = false;
-        runtimeWindowsCache = null;
-        return null;
-      }
-
-      return runtimeWindowsCache;
-    } catch {
-      return runtimeWindowsCache;
-    }
-  };
-
-  const focusRuntimeWindow = async (windowId: string): Promise<boolean> => {
-    if (runtimeStreamConnected) {
-      streamClient.focus(windowId);
-    }
-
-    try {
-      const result = await requestRuntimeApi({
-        port: runtimePort,
-        method: 'POST',
-        path: '/runtime/focus',
-        payload: { windowId },
-      });
-      if (result.status === 200) {
-        if (!runtimeWindowsCache || !runtimeWindowsCache.windows.some((item) => item.windowId === windowId)) {
-          await fetchRuntimeWindows();
-        }
-        if (runtimeWindowsCache) {
-          runtimeWindowsCache.activeWindowId = windowId;
-        }
-        runtimeSupported = true;
-        return true;
-      }
-      if (result.status === 501 || result.status === 404 || result.status === 405) {
-        runtimeSupported = false;
-      }
-      if (result.status === 0 && runtimeStreamConnected) {
-        return true;
-      }
-      return false;
-    } catch {
-      return runtimeStreamConnected;
-    }
-  };
-
-  const resolveRuntimeWindowForProject = (projectName: string): { windowId: string; sessionName: string; windowName: string } | null => {
-    const project = stateManager.getProject(projectName);
-    if (!project) return null;
-    const instances = listProjectInstances(project);
-    const firstInstance = instances[0];
-    if (!firstInstance) return null;
-    const windowName = resolveProjectWindowName(project, firstInstance.agentType, effectiveConfig.tmux, firstInstance.instanceId);
-    return {
-      windowId: `${project.tmuxSession}:${windowName}`,
-      sessionName: project.tmuxSession,
-      windowName,
-    };
-  };
-
-  const parseWindowId = (windowId: string | undefined): { sessionName: string; windowName: string } | null => {
-    if (!windowId) return null;
-    return splitWindowId(windowId);
-  };
-
-  const readRuntimeWindowOutput = async (
-    sessionName: string,
-    windowName: string,
-    width?: number,
-    height?: number,
-  ): Promise<string | undefined> => {
-    // Gracefully handle disconnected stream
-    if (!runtimeStreamConnected || !streamClient.isConnected()) {
-      return undefined;
-    }
-
-    if (runtimeSupported === false) {
-      return undefined;
-    }
-
-    const windowId = `${sessionName}:${windowName}`;
-
-    try {
-      ensureStreamSubscribed(windowId, width, height);
-      const frame = runtimeFrameCache.get(windowId);
-      if (frame !== undefined) {
-        setTransportStatus({
-          mode: 'stream',
-          connected: true,
-          detail: 'stream live',
-        });
-        return frame;
-      }
-
-      const subscribed = streamSubscriptions.get(windowId);
-      if (subscribed && Date.now() - subscribed.subscribedAt < 1500) {
-        return undefined;
-      }
-
-      setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: 'waiting for stream frame',
-      });
-      return undefined;
-    } catch {
-      // Silently return undefined if stream operations fail
-      return undefined;
-    }
-  };
-
-  const sendRuntimeRawKey = async (sessionName: string, windowName: string, raw: string): Promise<void> => {
-    if (!raw) return;
-
-    // Gracefully handle disconnected stream (e.g., when window is closing)
-    if (!runtimeStreamConnected || !streamClient.isConnected()) {
-      return;
-    }
-
-    if (runtimeSupported === false) {
-      return;
-    }
-
-    const windowId = `${sessionName}:${windowName}`;
-    try {
-      streamClient.input(windowId, Buffer.from(raw, 'utf8'));
-      setTransportStatus({
-        mode: 'stream',
-        connected: true,
-        detail: 'stream input',
-      });
-    } catch {
-      // Silently ignore errors when sending to disconnected/closed windows
-    }
-  };
-
-  const sendRuntimeResize = async (sessionName: string, windowName: string, width: number, height: number): Promise<void> => {
-    // Gracefully handle disconnected stream (e.g., when window is closing)
-    if (!runtimeStreamConnected || !streamClient.isConnected()) {
-      return;
-    }
-
-    if (runtimeSupported === false) {
-      return;
-    }
-
-    const windowId = `${sessionName}:${windowName}`;
-    try {
-      streamClient.resize(windowId, width, height);
-      ensureStreamSubscribed(windowId, width, height);
-    } catch {
-      // Silently ignore errors when resizing disconnected/closed windows
-    }
-  };
-
-  const registerRuntimeFrameListener = (listener: (frame: {
-    sessionName: string;
-    windowName: string;
-    output: string;
-    styled?: TerminalStyledLine[];
-    cursorRow?: number;
-    cursorCol?: number;
-    cursorVisible?: boolean;
-  }) => void): (() => void) => {
-    runtimeFrameListeners.add(listener);
-    return () => {
-      runtimeFrameListeners.delete(listener);
-    };
-  };
-
-  const handler = async (command: string, append: (line: string) => void): Promise<boolean> => {
-    if (command === '/exit' || command === '/quit') {
-      append('Exiting TUI...');
-      return true;
-    }
-
-    if (command === '/help') {
-      append('Commands: /new [name] [agent] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty|toggle]], /help, /exit');
-      append('Onboard options: --platform [discord|slack], --runtime-mode [tmux|pty], --token, --slack-bot-token, --slack-app-token, --default-agent [name|auto], --telemetry [on|off], --opencode-permission [allow|default]');
-      return false;
-    }
-
-    if (command === '/onboard' || command === 'onboard' || command.startsWith('/onboard ') || command.startsWith('onboard ')) {
-      const parsed = parseOnboardCommand(command);
-      if (parsed.showUsage) {
-        append('Usage: /onboard [discord|slack] [--platform discord|slack] [--runtime-mode tmux|pty]');
-        append('       [--token TOKEN] [--slack-bot-token TOKEN] [--slack-app-token TOKEN]');
-        append('       [--default-agent claude|gemini|opencode|auto] [--telemetry on|off]');
-        append('       [--opencode-permission allow|default]');
-        append('Discord bot token guide: https://discode.chat/docs/discord-bot');
-        append('TUI onboard runs in non-interactive mode and uses saved values when omitted.');
-        return false;
-      }
-      if (parsed.error) {
-        append(`⚠️ ${parsed.error}`);
-        append('Try: /onboard --help');
-        return false;
-      }
-
-      try {
-        append('Running onboarding inside TUI...');
-        await onboardCommand({
-          ...parsed.options,
-          nonInteractive: true,
-          exitOnError: false,
-        });
-        append('✅ Onboarding complete.');
-      } catch (error) {
-        append(`⚠️ Onboarding failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      return false;
-    }
-
-    if (command === '/config' || command === 'config') {
-      append(`keepChannel: ${keepChannelOnStop ? 'on' : 'off'}`);
-      append(`defaultAgent: ${config.defaultAgentCli || '(auto)'}`);
-      append(`defaultChannel: ${config.discord.channelId || '(auto)'}`);
-      append(`runtimeMode: ${config.runtimeMode || 'tmux'}`);
-      append('Usage: /config keepChannel [on|off|toggle]');
-      append('Usage: /config defaultAgent [agent|auto]');
-      append('Usage: /config defaultChannel [channelId|auto]');
-      append('Usage: /config runtimeMode [tmux|pty|toggle]');
-      return false;
-    }
-
-    if (command.startsWith('/config ') || command.startsWith('config ')) {
-      const parts = command.trim().split(/\s+/).filter(Boolean);
-      const key = (parts[1] || '').toLowerCase();
-      if (key === 'defaultagent' || key === 'default-agent') {
-        const availableAgents = agentRegistry.getAll().map((agent) => agent.config.name).sort((a, b) => a.localeCompare(b));
-        const value = (parts[2] || '').trim().toLowerCase();
-
-        if (!value) {
-          append(`defaultAgent: ${config.defaultAgentCli || '(auto)'}`);
-          append(`Available: ${availableAgents.join(', ')}`);
-          append('Use: /config defaultAgent [agent|auto]');
-          return false;
-        }
-
-        if (value === 'auto' || value === 'clear' || value === 'unset') {
-          try {
-            saveConfig({ defaultAgentCli: undefined });
-            append('✅ defaultAgent is now auto (first installed agent).');
-          } catch (error) {
-            append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
-          }
-          return false;
-        }
-
-        const selected = agentRegistry.get(value);
-        if (!selected) {
-          append(`⚠️ Unknown agent: ${value}`);
-          append(`Available: ${availableAgents.join(', ')}`);
-          return false;
-        }
-
-        try {
-          saveConfig({ defaultAgentCli: selected.config.name });
-          append(`✅ defaultAgent is now ${selected.config.name}`);
-        } catch (error) {
-          append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return false;
-      }
-
-      if (key === 'defaultchannel' || key === 'default-channel' || key === 'channel') {
-        const value = (parts[2] || '').trim();
-        const lowered = value.toLowerCase();
-        if (!value) {
-          append(`defaultChannel: ${config.discord.channelId || '(auto)'}`);
-          append('Use: /config defaultChannel [channelId|auto]');
-          return false;
-        }
-
-        if (lowered === 'auto' || lowered === 'clear' || lowered === 'unset') {
-          try {
-            saveConfig({ channelId: undefined });
-            append('✅ defaultChannel is now auto (per-project channel).');
-          } catch (error) {
-            append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
-          }
-          return false;
-        }
-
-        const normalized = value.replace(/^<#(\d+)>$/, '$1');
-        try {
-          saveConfig({ channelId: normalized });
-          append(`✅ defaultChannel is now ${normalized}`);
-        } catch (error) {
-          append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return false;
-      }
-
-      if (key === 'runtimemode' || key === 'runtime-mode' || key === 'runtime') {
-        const currentMode = config.runtimeMode === 'pty' ? 'pty' : 'tmux';
-        const value = (parts[2] || '').trim().toLowerCase();
-
-        if (!value) {
-          append(`runtimeMode: ${currentMode}`);
-          append('Use: /config runtimeMode [tmux|pty|toggle]');
-          return false;
-        }
-
-        let nextMode: 'tmux' | 'pty';
-        if (value === 'toggle') {
-          nextMode = currentMode === 'pty' ? 'tmux' : 'pty';
-        } else if (value === 'tmux' || value === 'pty') {
-          nextMode = value;
-        } else {
-          append(`⚠️ Unknown runtime mode: ${parts[2]}`);
-          append('Use tmux, pty, or toggle');
-          return false;
-        }
-
-        try {
-          saveConfig({ runtimeMode: nextMode });
-          append(`✅ runtimeMode is now ${nextMode}`);
-        } catch (error) {
-          append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return false;
-      }
-
-      if (key !== 'keepchannel' && key !== 'keep-channel') {
-        append(`⚠️ Unknown config key: ${parts[1] || '(empty)'}`);
-        append('Supported keys: keepChannel, defaultAgent, defaultChannel, runtimeMode');
-        return false;
-      }
-
-      const modeRaw = (parts[2] || 'toggle').toLowerCase();
-      if (modeRaw === 'on' || modeRaw === 'true' || modeRaw === '1') {
-        keepChannelOnStop = true;
-      } else if (modeRaw === 'off' || modeRaw === 'false' || modeRaw === '0') {
-        keepChannelOnStop = false;
-      } else if (modeRaw === 'toggle') {
-        keepChannelOnStop = !keepChannelOnStop;
-      } else {
-        append(`⚠️ Unknown mode: ${parts[2]}`);
-        append('Use on, off, or toggle');
-        return false;
-      }
-
-      try {
-        saveConfig({ keepChannelOnStop });
-      } catch (error) {
-        append(`⚠️ Failed to persist config: ${error instanceof Error ? error.message : String(error)}`);
-      }
-
-      append(`✅ keepChannel is now ${keepChannelOnStop ? 'on' : 'off'}`);
-      append(
-        keepChannelOnStop
-          ? 'stop will preserve Discord channels.'
-          : 'stop will delete Discord channels (default).',
-      );
-      return false;
-    }
-
-    if (command === '/list') {
-      reloadStateFromDisk();
-      const runtimeWindows = await fetchRuntimeWindows();
-      if (runtimeWindows && runtimeWindows.windows.length > 0) {
-        const sessions = new Map<string, number>();
-        for (const window of runtimeWindows.windows) {
-          sessions.set(window.sessionName, (sessions.get(window.sessionName) || 0) + 1);
-        }
-        [...sessions.entries()]
-          .sort((a, b) => a[0].localeCompare(b[0]))
-          .forEach(([sessionName, count]) => {
-            append(`[session] ${sessionName} (${count} windows)`);
-          });
-        return false;
-      }
-
-      const sessions = new Set(
-        stateManager
-          .listProjects()
-          .map((project) => project.tmuxSession)
-          .filter((name) => tmux.sessionExistsFull(name)),
-      );
-      if (sessions.size === 0) {
-        append('No running sessions.');
-        return false;
-      }
-      [...sessions].sort((a, b) => a.localeCompare(b)).forEach((session) => {
-        append(`[session] ${session}`);
-      });
-      return false;
-    }
-
-    if (command === '/projects') {
-      reloadStateFromDisk();
-      const projects = stateManager.listProjects();
-      if (projects.length === 0) {
-        append('No projects configured.');
-        return false;
-      }
-      projects.forEach((project) => {
-        const instances = listProjectInstances(project);
-        const label = instances.length > 0
-          ? instances.map((instance) => `${instance.agentType}#${instance.instanceId}`).join(', ')
-          : 'none';
-        append(`[project] ${project.projectName} (${label})`);
-      });
-      return false;
-    }
-
-    if (command === 'stop' || command === '/stop') {
-      append('Use stop dialog to choose a project.');
-      return false;
-    }
-
-    if (command.startsWith('stop ') || command.startsWith('/stop ')) {
-      const args = command.replace(/^\/?stop\s+/, '').trim().split(/\s+/).filter(Boolean);
-      let projectName = '';
-      let instanceId: string | undefined;
-      for (let i = 0; i < args.length; i += 1) {
-        const arg = args[i];
-        if (arg === '--instance' && args[i + 1]) {
-          instanceId = args[i + 1];
-          i += 1;
-          continue;
-        }
-        if (arg.startsWith('--instance=')) {
-          const value = arg.slice('--instance='.length).trim();
-          if (value) instanceId = value;
-          continue;
-        }
-        if (arg.startsWith('--')) continue;
-        if (!projectName) projectName = arg;
-      }
-      if (!projectName) {
-        append('⚠️ Project name is required. Example: stop my-project --instance gemini-2');
-        return false;
-      }
-      await stopCommand(projectName, {
-        instance: instanceId,
-        keepChannel: keepChannelOnStop,
-        tmuxSharedSessionName: options.tmuxSharedSessionName,
-      });
-      append(`✅ Stopped ${instanceId ? `instance ${instanceId}` : 'project'}: ${projectName}`);
-      return false;
-    }
-
-    if (command.startsWith('/new')) {
-      try {
-        reloadStateFromDisk();
-        validateConfig();
-        const workspaceId = typeof stateManager.getWorkspaceId === 'function'
-          ? stateManager.getWorkspaceId()
-          : stateManager.getGuildId();
-        if (!workspaceId) {
-          append('⚠️ Not set up yet. Run /onboard in TUI.');
-          return false;
-        }
-
-        const installed = agentRegistry.getAll().filter((agent) => agent.isInstalled());
-        if (installed.length === 0) {
-          append('⚠️ No agent CLIs found. Install one first (claude, gemini, opencode).');
-          return false;
-        }
-
-        const parsed = parseNewCommand(command);
-        const cwdName = basename(process.cwd());
-        const projectName = parsed.projectName && parsed.projectName.trim().length > 0
-          ? parsed.projectName.trim()
-          : nextProjectName(cwdName);
-
-        const selected = parsed.agentName
-          ? installed.find((agent) => agent.config.name === parsed.agentName)
-          : installed.find((agent) => agent.config.name === config.defaultAgentCli) || installed[0];
-
-        if (!selected) {
-          append(`⚠️ Unknown agent '${parsed.agentName}'. Try claude, gemini, or opencode.`);
-          return false;
-        }
-
-        append(`Creating session '${projectName}' with ${selected.config.displayName}...`);
-        await newCommand(selected.config.name, {
-          name: projectName,
-          instance: parsed.instanceId,
-          attach: parsed.attach,
-          tmuxSharedSessionName: options.tmuxSharedSessionName,
-        });
-        append(`✅ Session created: ${projectName}`);
-        append(`[project] ${projectName} (${selected.config.name})`);
-        return false;
-      } catch (error) {
-        append(`⚠️ ${error instanceof Error ? error.message : String(error)}`);
-        return false;
-      }
-    }
-
-    if (runtimeSupported !== false) {
-      const focusedWindowId = runtimeWindowsCache?.activeWindowId;
-      if (focusedWindowId) {
-        await requireStreamConnected('command input');
-        streamClient.input(focusedWindowId, Buffer.from(`${command}\r`, 'utf8'));
-        setTransportStatus({
-          mode: 'stream',
-          connected: true,
-          detail: 'stream input',
-        });
-        append(`→ sent to ${focusedWindowId}`);
-        return false;
-      }
-    }
-
-    append(`Unknown command: ${command}`);
-    append('Try /help (or focus a runtime window to send direct input)');
-    return false;
-  };
+  const session = new RuntimeSessionManager(runtimePort);
+  await session.connect();
 
   const isBunRuntime = Boolean((process as { versions?: { bun?: string } }).versions?.bun);
   if (!isBunRuntime) {
@@ -1207,7 +116,13 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   process.once('exit', clearTmuxHealthTimer);
 
   const tmux = new TmuxManager(config.tmux.sessionPrefix);
-  const runtimeAtStartup = await fetchRuntimeWindows();
+  const runtimeAtStartup = await session.fetchWindows();
+  const parseWindowId = (windowId: string | undefined): { sessionName: string; windowName: string } | null => {
+    if (!windowId) return null;
+    const idx = windowId.indexOf(':');
+    if (idx <= 0 || idx >= windowId.length - 1) return null;
+    return { sessionName: windowId.slice(0, idx), windowName: windowId.slice(idx + 1) };
+  };
   const runtimeActiveAtStartup = parseWindowId(runtimeAtStartup?.activeWindowId);
   const currentSession = runtimeActiveAtStartup?.sessionName || tmux.getCurrentSession(process.env.TMUX_PANE);
   const currentWindow = runtimeActiveAtStartup?.windowName || tmux.getCurrentWindow(process.env.TMUX_PANE);
@@ -1232,7 +147,6 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       }
     } catch (error) {
       lastImportError = error;
-      // Try next candidate.
     }
   }
   if (!mod) {
@@ -1247,12 +161,23 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       currentSession: currentSession || undefined,
       currentWindow: currentWindow || undefined,
       initialCommand: options.initialTuiCommand,
-      onCommand: handler,
+      onCommand: async (command: string, append: (line: string) => void): Promise<boolean> => {
+        const result = await handleTuiCommand(command, append, {
+          session,
+          options,
+          effectiveConfig,
+          getKeepChannelOnStop: () => keepChannelOnStop,
+          setKeepChannelOnStop: (value: boolean) => { keepChannelOnStop = value; },
+          nextProjectName,
+          reloadStateFromDisk,
+        });
+        return result === 'exit';
+      },
       onAttachProject: async (project: string) => {
         reloadStateFromDisk();
-        const runtimeTarget = resolveRuntimeWindowForProject(project);
-        if (runtimeTarget && runtimeSupported !== false) {
-          const focused = await focusRuntimeWindow(runtimeTarget.windowId);
+        const runtimeTarget = resolveRuntimeWindowForProject(project, effectiveConfig.tmux);
+        if (runtimeTarget && session.isSupported() !== false) {
+          const focused = await session.focusWindow(runtimeTarget.windowId);
           if (focused) {
             return {
               currentSession: runtimeTarget.sessionName,
@@ -1285,7 +210,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       },
       getProjects: async () => {
         reloadStateFromDisk();
-        const runtimeWindows = await fetchRuntimeWindows();
+        const runtimeWindows = await session.fetchWindows();
         const runtimeSet = new Set(
           (runtimeWindows?.windows || []).map((window) => `${window.sessionName}:${window.windowName}`),
         );
@@ -1324,49 +249,41 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
         });
       },
       getCurrentWindowOutput: async (sessionName: string, windowName: string, width?: number, height?: number) => {
-        return readRuntimeWindowOutput(sessionName, windowName, width, height);
+        return session.readWindowOutput(sessionName, windowName, width, height);
       },
       onRuntimeKey: async (sessionName: string, windowName: string, raw: string) => {
-        await sendRuntimeRawKey(sessionName, windowName, raw);
+        await session.sendRawKey(sessionName, windowName, raw);
       },
       onRuntimeResize: async (sessionName: string, windowName: string, width: number, height: number) => {
-        await sendRuntimeResize(sessionName, windowName, width, height);
+        await session.sendResize(sessionName, windowName, width, height);
       },
       onRuntimeFrame: (listener: (frame: {
         sessionName: string;
         windowName: string;
         output: string;
-        styled?: TerminalStyledLine[];
+        styled?: import('../../runtime/vt-screen.js').TerminalStyledLine[];
         cursorRow?: number;
         cursorCol?: number;
         cursorVisible?: boolean;
       }) => void) => {
-        return registerRuntimeFrameListener(listener);
+        return session.registerFrameListener(listener);
       },
       getRuntimeStatus: async () => {
-        await ensureStreamConnected();
-        return {
-          mode: transportStatus.mode,
-          connected: transportStatus.connected,
-          detail: transportStatus.detail,
-          lastError: transportStatus.lastError,
-        };
+        await session.ensureConnected();
+        return session.getTransportStatus();
       },
     });
   } finally {
-    streamClient.disconnect();
+    session.disconnect();
     clearTmuxHealthTimer();
     process.off('exit', clearTmuxHealthTimer);
 
-    // After exiting TUI, return to terminal
     if (effectiveConfig.runtimeMode === 'pty') {
-      // In PTY mode, spawn an interactive shell
       console.log(chalk.cyan('\n📺 Opening terminal...\n'));
       const shell = process.env.SHELL || '/bin/bash';
       const { spawnSync } = await import('child_process');
       spawnSync(shell, [], { stdio: 'inherit' });
     } else if (startedFromTmux && currentSession) {
-      // In tmux mode, attach to the tmux session
       console.log(chalk.cyan('\n📺 Returning to terminal...\n'));
       const { attachToTmux } = await import('../common/tmux.js');
       attachToTmux(currentSession, currentWindow || undefined);

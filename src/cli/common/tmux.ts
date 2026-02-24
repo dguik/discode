@@ -272,6 +272,30 @@ export function pruneStaleProjects(tmux: TmuxManager, tmuxConfig: BridgeConfig['
   return removed;
 }
 
+export function isTmuxPaneAlive(paneTarget?: string): boolean {
+  if (!paneTarget || paneTarget.trim().length === 0) return false;
+  try {
+    execSync(`tmux display-message -p -t ${escapeShellArg(paneTarget)} "#{pane_id}"`, {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function waitForTmuxPaneAlive(paneTarget: string, timeoutMs: number = 1200, intervalMs: number = 100): Promise<boolean> {
+  if (!paneTarget || paneTarget.trim().length === 0) return false;
+  if (isTmuxPaneAlive(paneTarget)) return true;
+
+  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / intervalMs));
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    if (isTmuxPaneAlive(paneTarget)) return true;
+  }
+  return false;
+}
+
 export function ensureProjectTuiPane(
   tmux: TmuxManager,
   sessionName: string,
