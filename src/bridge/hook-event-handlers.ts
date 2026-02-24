@@ -63,6 +63,9 @@ export async function handleSessionNotification(deps: EventHandlerDeps, ctx: Eve
 
 export async function handleSessionStart(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
   const source = typeof ctx.event.source === 'string' ? ctx.event.source : 'unknown';
+  if (source === 'startup') {
+    return true;
+  }
   const model = typeof ctx.event.model === 'string' ? ctx.event.model : '';
   const modelSuffix = model ? `, ${model}` : '';
   await deps.messaging.sendToChannel(ctx.channelId, `\u25B6\uFE0F Session started (${source}${modelSuffix})`);

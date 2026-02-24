@@ -1,3 +1,5 @@
+import { incRuntimeMetric } from './vt-diagnostics.js';
+
 export type TerminalStyle = {
   fg?: string;
   bg?: string;
@@ -26,6 +28,7 @@ export type TerminalStyledFrame = {
   lines: TerminalStyledLine[];
   cursorRow: number;
   cursorCol: number;
+  cursorVisible: boolean;
 };
 
 type Cell = {
@@ -41,6 +44,8 @@ type SavedScreenState = {
   savedCol: number;
   scrollTop: number;
   scrollBottom: number;
+  originMode: boolean;
+  cursorVisible: boolean;
 };
 
 export class VtScreen {
@@ -59,6 +64,8 @@ export class VtScreen {
   private scrollTop = 0;
   private scrollBottom = 0;
   private wrapPending = false;
+  private originMode = false;
+  private cursorVisible = true;
 
   constructor(cols = 120, rows = 40, scrollback = 2000) {
     this.cols = clamp(cols, 20, 300);
@@ -88,6 +95,7 @@ export class VtScreen {
       if (ch === '\x1b') {
         const next = data[i + 1];
         if (next === undefined) {
+          incRuntimeMetric('vt_partial_sequence_carry', { kind: 'escape' });
           this.pendingInput = data.slice(i);
           break;
         }
@@ -96,6 +104,7 @@ export class VtScreen {
           let j = i + 2;
           while (j < data.length && (data.charCodeAt(j) < 0x40 || data.charCodeAt(j) > 0x7e)) j += 1;
           if (j >= data.length) {
+            incRuntimeMetric('vt_partial_sequence_carry', { kind: 'csi' });
             this.pendingInput = data.slice(i);
             break;
           }
@@ -103,6 +112,49 @@ export class VtScreen {
           const raw = data.slice(i + 2, j);
           this.handleCsi(raw, final);
           i = j + 1;
+          continue;
+        }
+
+        if (next === '7') {
+          // DECSC: save cursor (legacy escape form).
+          this.savedRow = this.cursorRow;
+          this.savedCol = this.cursorCol;
+          i += 2;
+          continue;
+        }
+
+        if (next === '8') {
+          // DECRC: restore cursor (legacy escape form).
+          this.wrapPending = false;
+          this.cursorRow = this.savedRow;
+          this.cursorCol = this.savedCol;
+          this.clampCursor();
+          this.ensureCursorRow();
+          i += 2;
+          continue;
+        }
+
+        if (next === 'c') {
+          // RIS: full reset.
+          this.resetToInitialState();
+          i += 2;
+          continue;
+        }
+
+        if (next === '=' || next === '>' || next === '\\') {
+          // DECKPAM/DECKPNM or ST - no-op for rendering.
+          i += 2;
+          continue;
+        }
+
+        if (next === '(' || next === ')' || next === '*' || next === '+' || next === '-' || next === '.' || next === '/') {
+          // Designate G0/G1/G2/G3 character set (SCS): ESC ( B, ESC ) 0, ...
+          if (data[i + 2] === undefined) {
+            incRuntimeMetric('vt_partial_sequence_carry', { kind: 'escape' });
+            this.pendingInput = data.slice(i);
+            break;
+          }
+          i += 3;
           continue;
         }
 
@@ -146,6 +198,7 @@ export class VtScreen {
             j += 1;
           }
           if (!terminated) {
+            incRuntimeMetric('vt_partial_sequence_carry', { kind: 'osc' });
             this.pendingInput = data.slice(i);
             break;
           }
@@ -153,6 +206,28 @@ export class VtScreen {
           continue;
         }
 
+        if (next === 'P' || next === 'X' || next === '^' || next === '_') {
+          // DCS/SOS/PM/APC - consume until ST.
+          let j = i + 2;
+          let terminated = false;
+          while (j < data.length) {
+            if (data[j] === '\x1b' && data[j + 1] === '\\') {
+              j += 2;
+              terminated = true;
+              break;
+            }
+            j += 1;
+          }
+          if (!terminated) {
+            incRuntimeMetric('vt_partial_sequence_carry', { kind: 'escape' });
+            this.pendingInput = data.slice(i);
+            break;
+          }
+          i = j;
+          continue;
+        }
+
+        incRuntimeMetric('vt_unknown_escape', { next });
         i += 2;
         continue;
       }
@@ -228,7 +303,7 @@ export class VtScreen {
     const lines = this.lines.slice(start, start + viewRows).map((line) => this.toStyledLine(line, viewCols));
 
     while (lines.length < viewRows) {
-      lines.unshift({ segments: [{ text: ' '.repeat(viewCols) }] });
+      lines.push({ segments: [{ text: ' '.repeat(viewCols) }] });
     }
 
     const cursorRow = Math.max(0, Math.min(viewRows - 1, this.cursorRow - start));
@@ -240,6 +315,7 @@ export class VtScreen {
       lines,
       cursorRow,
       cursorCol,
+      cursorVisible: this.cursorVisible,
     };
   }
 
@@ -300,11 +376,10 @@ export class VtScreen {
         break;
       case 'H':
       case 'f':
-        this.cursorRow = Math.max(0, param(0, 1) - 1);
-        this.cursorCol = Math.max(0, param(1, 1) - 1);
+        this.setCursorPosition(param(0, 1) - 1, param(1, 1) - 1);
         break;
       case 'd':
-        this.cursorRow = Math.max(0, param(0, 1) - 1);
+        this.setCursorRow(param(0, 1) - 1);
         break;
       case 'r': {
         const top = Math.max(1, param(0, 1));
@@ -312,7 +387,7 @@ export class VtScreen {
         if (top < bottom && bottom <= this.rows) {
           this.scrollTop = top - 1;
           this.scrollBottom = bottom - 1;
-          this.cursorRow = 0;
+          this.cursorRow = this.originMode ? this.absoluteRowFromViewport(this.scrollTop) : 0;
           this.cursorCol = 0;
         }
         break;
@@ -358,17 +433,28 @@ export class VtScreen {
       case 'h':
       case 'l':
         if (isPrivate) {
-          const wantsAlt = privateParams.some((v) => v === 1049 || v === 1047 || v === 47);
-          if (wantsAlt) {
-            if (final === 'h') {
-              this.enterAltScreen();
-            } else {
-              this.leaveAltScreen();
+          const enable = final === 'h';
+          for (const mode of privateParams) {
+            if (mode === 1049 || mode === 1047 || mode === 47) {
+              if (enable) this.enterAltScreen();
+              else this.leaveAltScreen();
+              continue;
+            }
+            if (mode === 6) {
+              this.originMode = enable;
+              this.cursorCol = 0;
+              this.cursorRow = enable ? this.absoluteRowFromViewport(this.scrollTop) : 0;
+              continue;
+            }
+            if (mode === 25) {
+              this.cursorVisible = enable;
+              continue;
             }
           }
         }
         break;
       default:
+        incRuntimeMetric('vt_unknown_csi', { final });
         break;
     }
 
@@ -491,6 +577,18 @@ export class VtScreen {
   }
 
   private writeChar(ch: string): void {
+    const width = charDisplayWidth(ch);
+    if (width === 0) {
+      // Combining marks should attach to the previous printable cell and must
+      // not trigger deferred wrapping.
+      this.appendCombiningChar(ch);
+      return;
+    }
+    if (this.shouldJoinWithPrevious(ch)) {
+      this.appendCombiningChar(ch);
+      return;
+    }
+
     if (this.wrapPending) {
       this.wrapPending = false;
       this.cursorCol = 0;
@@ -498,9 +596,6 @@ export class VtScreen {
     }
     this.ensureCursorRow();
     this.clampCursor();
-
-    const width = charDisplayWidth(ch);
-    if (width <= 0) return;
 
     if (width === 1) {
       this.lines[this.cursorRow][this.cursorCol] = this.makeCell(ch);
@@ -530,6 +625,30 @@ export class VtScreen {
       this.cursorCol = this.cols - 1;
       this.wrapPending = true;
     }
+  }
+
+  private appendCombiningChar(ch: string): void {
+    this.ensureCursorRow();
+    this.clampCursor();
+    const line = this.lines[this.cursorRow];
+    if (!line || line.length === 0) return;
+
+    const targetCol = this.cursorCol > 0 ? this.cursorCol - 1 : this.cursorCol;
+    const target = line[targetCol];
+    if (!target) return;
+
+    target.ch += ch;
+  }
+
+  private shouldJoinWithPrevious(ch: string): boolean {
+    if (this.cursorCol <= 0) return false;
+    this.ensureCursorRow();
+    this.clampCursor();
+    const line = this.lines[this.cursorRow];
+    if (!line) return false;
+    const target = line[this.cursorCol - 1];
+    if (!target || target.ch.length === 0) return false;
+    return target.ch.endsWith('\u200d') && charDisplayWidth(ch) > 0;
   }
 
   private applySgr(parts: string[]): void {
@@ -687,8 +806,43 @@ export class VtScreen {
   }
 
   private clampCursor(): void {
-    this.cursorRow = Math.max(0, this.cursorRow);
+    const minRow = this.originMode ? this.absoluteRowFromViewport(this.scrollTop) : 0;
+    const maxRow = this.originMode ? this.absoluteRowFromViewport(this.scrollBottom) : Number.MAX_SAFE_INTEGER;
+    this.cursorRow = Math.max(minRow, Math.min(maxRow, this.cursorRow));
     this.cursorCol = Math.max(0, Math.min(this.cols - 1, this.cursorCol));
+  }
+
+  private resetToInitialState(): void {
+    this.lines = [this.makeLine(this.cols)];
+    if (this.usingAltScreen) {
+      while (this.lines.length < this.rows) this.lines.push(this.makeLine(this.cols));
+    }
+    this.cursorRow = 0;
+    this.cursorCol = 0;
+    this.savedRow = 0;
+    this.savedCol = 0;
+    this.currentStyle = {};
+    this.scrollTop = 0;
+    this.scrollBottom = this.rows - 1;
+    this.originMode = false;
+    this.cursorVisible = true;
+    this.wrapPending = false;
+  }
+
+  private setCursorPosition(row: number, col: number): void {
+    const safeCol = Math.max(0, col);
+    const safeRow = Math.max(0, row);
+    this.cursorCol = safeCol;
+    this.cursorRow = this.originMode
+      ? this.absoluteRowFromViewport(this.scrollTop) + safeRow
+      : safeRow;
+  }
+
+  private setCursorRow(row: number): void {
+    const safeRow = Math.max(0, row);
+    this.cursorRow = this.originMode
+      ? this.absoluteRowFromViewport(this.scrollTop) + safeRow
+      : safeRow;
   }
 
   private makeLine(cols: number): Cell[] {
@@ -722,6 +876,8 @@ export class VtScreen {
       savedCol: this.savedCol,
       scrollTop: this.scrollTop,
       scrollBottom: this.scrollBottom,
+      originMode: this.originMode,
+      cursorVisible: this.cursorVisible,
     };
     this.usingAltScreen = true;
     this.lines = [];
@@ -732,6 +888,8 @@ export class VtScreen {
     this.savedCol = 0;
     this.scrollTop = 0;
     this.scrollBottom = this.rows - 1;
+    this.originMode = false;
+    this.cursorVisible = true;
     this.wrapPending = false;
   }
 
@@ -756,6 +914,8 @@ export class VtScreen {
     this.savedCol = this.savedPrimaryScreen.savedCol;
     this.scrollTop = this.savedPrimaryScreen.scrollTop;
     this.scrollBottom = this.savedPrimaryScreen.scrollBottom;
+    this.originMode = this.savedPrimaryScreen.originMode;
+    this.cursorVisible = this.savedPrimaryScreen.cursorVisible;
     this.savedPrimaryScreen = undefined;
   }
 
@@ -880,6 +1040,19 @@ function charDisplayWidth(ch: string): number {
   if (cp === undefined || cp === 0) return 0;
 
   if (cp < 32 || (cp >= 0x7f && cp < 0xa0)) return 0;
+
+  // Combining marks and format controls should not advance cursor columns.
+  if (
+    (cp >= 0x0300 && cp <= 0x036f) ||
+    (cp >= 0x1ab0 && cp <= 0x1aff) ||
+    (cp >= 0x1dc0 && cp <= 0x1dff) ||
+    (cp >= 0x20d0 && cp <= 0x20ff) ||
+    (cp >= 0xfe20 && cp <= 0xfe2f) ||
+    cp === 0x200d || // zero-width joiner
+    (cp >= 0xfe00 && cp <= 0xfe0f) // variation selectors
+  ) {
+    return 0;
+  }
 
   if (
     (cp >= 0x1100 && cp <= 0x115f) ||
