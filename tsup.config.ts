@@ -12,6 +12,7 @@ export default defineConfig({
     cpSync('src/claude/plugin', 'dist/claude/plugin', { recursive: true });
     cpSync('src/gemini/hook', 'dist/gemini/hook', { recursive: true });
     cpSync('src/opencode/plugin', 'dist/opencode/plugin', { recursive: true });
+    cpSync('src/codex/hook', 'dist/codex/hook', { recursive: true });
     mkdirSync('dist/container', { recursive: true });
     cpSync('src/container/chrome-mcp-bridge.cjs', 'dist/container/chrome-mcp-bridge.cjs');
   },
