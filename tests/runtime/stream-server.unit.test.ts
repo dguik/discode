@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { RuntimeStreamServer } from '../../src/runtime/stream-server.js';
 import type { AgentRuntime } from '../../src/runtime/interface.js';
 import type { TerminalStyledFrame } from '../../src/runtime/vt-screen.js';
+import { flushClientFrame, type FrameRendererOptions } from '../../src/runtime/stream-frame-renderer.js';
+import type { RuntimeStreamClientState } from '../../src/runtime/stream-utilities.js';
 
 function createStyledFrame(cursorCol: number, cursorVisible: boolean = true): TerminalStyledFrame {
   return {
@@ -98,21 +100,34 @@ function createClientState(windowId: string = 'bridge:demo') {
       lastCursorRow: -1,
       lastCursorCol: -1,
       lastCursorVisible: true,
-    },
+    } as unknown as RuntimeStreamClientState,
   };
 }
+
+function sendToClient(client: RuntimeStreamClientState, payload: unknown): void {
+  try {
+    client.socket.write(`${JSON.stringify(payload)}\n`);
+  } catch {
+    // ignore in tests
+  }
+}
+
+const defaultFrameOptions: FrameRendererOptions = {
+  enablePatchDiff: false,
+  patchThresholdRatio: 0.55,
+  minEmitIntervalMs: 50,
+};
 
 describe('RuntimeStreamServer (unit flush behavior)', () => {
   it('emits styled frame when only cursor changes', () => {
     const frameRef = { frame: createStyledFrame(0) };
-    const server = new RuntimeStreamServer(createRuntimeMock(frameRef), '/tmp/discode-stream-unit.sock', {
-      minEmitIntervalMs: 250,
-    });
+    const runtime = createRuntimeMock(frameRef);
+    const opts = { ...defaultFrameOptions, minEmitIntervalMs: 250 };
     const { writes, client } = createClientState();
 
-    (server as any).flushClientFrame(client, true);
+    flushClientFrame(client, runtime, opts, sendToClient, true);
     frameRef.frame = createStyledFrame(1);
-    (server as any).flushClientFrame(client, true);
+    flushClientFrame(client, runtime, opts, sendToClient, true);
 
     const styledFrames = writes.filter(
       (payload: any) => payload && payload.type === 'frame-styled',
@@ -127,11 +142,11 @@ describe('RuntimeStreamServer (unit flush behavior)', () => {
 
   it('does not emit extra frame when styled content and cursor are unchanged', () => {
     const frameRef = { frame: createStyledFrame(0) };
-    const server = new RuntimeStreamServer(createRuntimeMock(frameRef), '/tmp/discode-stream-unit-2.sock');
+    const runtime = createRuntimeMock(frameRef);
     const { writes, client } = createClientState();
 
-    (server as any).flushClientFrame(client, true);
-    (server as any).flushClientFrame(client, true);
+    flushClientFrame(client, runtime, defaultFrameOptions, sendToClient, true);
+    flushClientFrame(client, runtime, defaultFrameOptions, sendToClient, true);
 
     const styledFrames = writes.filter((payload: any) => payload?.type === 'frame-styled');
     expect(styledFrames.length).toBe(1);
@@ -139,12 +154,12 @@ describe('RuntimeStreamServer (unit flush behavior)', () => {
 
   it('emits styled frame when only cursor visibility changes', () => {
     const frameRef = { frame: createStyledFrame(0, true) };
-    const server = new RuntimeStreamServer(createRuntimeMock(frameRef), '/tmp/discode-stream-unit-vis.sock');
+    const runtime = createRuntimeMock(frameRef);
     const { writes, client } = createClientState();
 
-    (server as any).flushClientFrame(client, true);
+    flushClientFrame(client, runtime, defaultFrameOptions, sendToClient, true);
     frameRef.frame = createStyledFrame(0, false);
-    (server as any).flushClientFrame(client, true);
+    flushClientFrame(client, runtime, defaultFrameOptions, sendToClient, true);
 
     const styledFrames = writes.filter((payload: any) => payload?.type === 'frame-styled');
     expect(styledFrames.length).toBe(2);
@@ -154,11 +169,11 @@ describe('RuntimeStreamServer (unit flush behavior)', () => {
 
   it('returns runtime_error once when buffer read fails', () => {
     const frameRef = { frame: createStyledFrame(0), shouldThrowBuffer: true };
-    const server = new RuntimeStreamServer(createRuntimeMock(frameRef), '/tmp/discode-stream-unit-3.sock');
+    const runtime = createRuntimeMock(frameRef);
     const { writes, client } = createClientState();
 
-    (server as any).flushClientFrame(client, true);
-    (server as any).flushClientFrame(client, true);
+    flushClientFrame(client, runtime, defaultFrameOptions, sendToClient, true);
+    flushClientFrame(client, runtime, defaultFrameOptions, sendToClient, true);
 
     const errors = writes.filter((payload: any) => payload?.type === 'error');
     expect(errors.length).toBe(1);
@@ -166,30 +181,28 @@ describe('RuntimeStreamServer (unit flush behavior)', () => {
   });
 
   it('coalesces non-forced flush when interval is too short and buffer length is unchanged', () => {
-    const server = new RuntimeStreamServer(createPlainRuntime('abc'), '/tmp/discode-stream-unit-4.sock', {
-      minEmitIntervalMs: 250,
-    });
+    const runtime = createPlainRuntime('abc');
+    const opts = { ...defaultFrameOptions, minEmitIntervalMs: 250 };
     const { writes, client } = createClientState();
     client.lastBufferLength = 3;
     client.lastEmitAt = Date.now();
     client.lastSnapshot = 'abc';
     client.lastLines = ['abc'];
 
-    (server as any).flushClientFrame(client, false);
+    flushClientFrame(client, runtime, opts, sendToClient, false);
     expect(writes.length).toBe(0);
   });
 
   it('bypasses coalescing when flush is forced', () => {
-    const server = new RuntimeStreamServer(createPlainRuntime('abc'), '/tmp/discode-stream-unit-5.sock', {
-      minEmitIntervalMs: 250,
-    });
+    const runtime = createPlainRuntime('abc');
+    const opts = { ...defaultFrameOptions, minEmitIntervalMs: 250 };
     const { writes, client } = createClientState();
     client.lastBufferLength = 3;
     client.lastEmitAt = Date.now();
     client.lastSnapshot = '';
     client.lastLines = [];
 
-    (server as any).flushClientFrame(client, true);
+    flushClientFrame(client, runtime, opts, sendToClient, true);
     const frames = writes.filter((payload: any) => payload?.type === 'frame');
     expect(frames.length).toBe(1);
   });
