@@ -1,4 +1,4 @@
-import { GeminiAdapter } from '../../src/agents/gemini.js';
+import { GeminiAdapter } from '../../src/agents/gemini/index.js';
 import { describe, expect, it } from 'vitest';
 
 describe('GeminiAdapter', () => {

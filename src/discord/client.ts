@@ -6,18 +6,14 @@ import {
   Client,
   GatewayIntentBits,
   TextChannel,
-  ChannelType,
-  ButtonBuilder,
-  ButtonStyle,
-  ActionRowBuilder,
-  ComponentType,
-  EmbedBuilder,
-  AttachmentBuilder,
 } from 'discord.js';
 import type { AgentMessage, MessageAttachment } from '../types/index.js';
 import { agentRegistry as defaultAgentRegistry, type AgentConfig, type AgentRegistry } from '../agents/index.js';
 import { normalizeDiscordToken } from '../config/token.js';
 import type { MessagingClient, MessageCallback, ChannelInfo } from '../messaging/interface.js';
+import { DiscordMessaging } from './messaging.js';
+import { DiscordChannels } from './channels.js';
+import { DiscordInteractions } from './interactions.js';
 
 export type { MessageCallback, ChannelInfo };
 
@@ -27,8 +23,11 @@ export class DiscordClient implements MessagingClient {
   private token: string;
   private targetChannel?: TextChannel;
   private messageCallback?: MessageCallback;
-  private channelMapping: Map<string, ChannelInfo> = new Map();
   private registry: AgentRegistry;
+
+  private messaging: DiscordMessaging;
+  private channels: DiscordChannels;
+  private interactions: DiscordInteractions;
 
   constructor(token: string, registry?: AgentRegistry) {
     this.token = normalizeDiscordToken(token);
@@ -42,13 +41,17 @@ export class DiscordClient implements MessagingClient {
       ],
     });
 
+    this.messaging = new DiscordMessaging(this.client);
+    this.channels = new DiscordChannels(this.client, this.registry);
+    this.interactions = new DiscordInteractions(this.client);
+
     this.setupEventHandlers();
   }
 
   private setupEventHandlers(): void {
     this.client.on('clientReady', () => {
       console.log(`Discord bot logged in as ${this.client.user?.tag}`);
-      this.scanExistingChannels();
+      this.channels.scanExistingChannels();
     });
 
     this.client.on('error', (error) => {
@@ -56,16 +59,12 @@ export class DiscordClient implements MessagingClient {
     });
 
     this.client.on('messageCreate', async (message) => {
-      // Ignore bot messages
       if (message.author.bot) return;
-
-      // Only process text channels
       if (!message.channel.isTextBased()) return;
 
-      const channelInfo = this.channelMapping.get(message.channelId);
+      const channelInfo = this.channels.channelMapping.get(message.channelId);
       if (channelInfo && this.messageCallback) {
         try {
-          // Extract attachments from the Discord message
           const attachments: MessageAttachment[] = message.attachments.map((a) => ({
             url: a.url,
             filename: a.name ?? 'unknown',
@@ -90,32 +89,6 @@ export class DiscordClient implements MessagingClient {
         }
       }
     });
-  }
-
-  private scanExistingChannels(): void {
-    this.client.guilds.cache.forEach((guild) => {
-      guild.channels.cache.forEach((channel) => {
-        if (channel.isTextBased() && channel.name) {
-          const parsed = this.parseChannelName(channel.name);
-          if (parsed) {
-            this.channelMapping.set(channel.id, parsed);
-            console.log(`Mapped channel ${channel.name} (${channel.id}) -> ${parsed.projectName}:${parsed.agentType}`);
-          }
-        }
-      });
-    });
-  }
-
-  private parseChannelName(channelName: string): ChannelInfo | null {
-    // Use agent registry to parse channel names dynamically
-    const result = this.registry.parseChannelName(channelName);
-    if (result) {
-      return {
-        projectName: result.projectName,
-        agentType: result.agent.config.name,
-      };
-    }
-    return null;
   }
 
   async connect(): Promise<void> {
@@ -189,202 +162,83 @@ export class DiscordClient implements MessagingClient {
     }
   }
 
-  /**
-   * Send a tool approval request to a channel and wait for user reaction
-   * @returns true if approved, false if denied
-   */
-  async sendApprovalRequest(
-    channelId: string,
-    toolName: string,
-    toolInput: any,
-    timeoutMs: number = 120000
-  ): Promise<boolean> {
-    const channel = await this.client.channels.fetch(channelId);
-    if (!channel?.isTextBased()) {
-      console.warn(`Channel ${channelId} is not a text channel, auto-denying`);
-      return false;
-    }
-
-    const textChannel = channel as TextChannel;
-
-    // Format the approval message
-    let inputPreview = '';
-    if (toolInput) {
-      const inputStr = typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput, null, 2);
-      inputPreview = inputStr.length > 500 ? inputStr.substring(0, 500) + '...' : inputStr;
-    }
-
-    const message = await textChannel.send(
-      `🔒 **Permission Request**\n` +
-      `Tool: \`${toolName}\`\n` +
-      `\`\`\`\n${inputPreview}\n\`\`\`\n` +
-      `React ✅ to allow, ❌ to deny (${Math.round(timeoutMs / 1000)}s timeout, auto-deny on timeout)`
-    );
-
-    await message.react('✅');
-    await message.react('❌');
-
-    try {
-      const collected = await message.awaitReactions({
-        filter: (reaction, user) =>
-          ['✅', '❌'].includes(reaction.emoji.name || '') && !user.bot,
-        max: 1,
-        time: timeoutMs,
-      });
-
-      if (collected.size === 0) {
-        await message.edit(message.content + '\n\n⏰ **Timed out — auto-denied**');
-        return false;
-      }
-
-      const approved = collected.first()?.emoji.name === '✅';
-      await message.edit(
-        message.content + `\n\n${approved ? '✅ **Allowed**' : '❌ **Denied**'}`
-      );
-      return approved;
-    } catch {
-      // On error, default to deny for security
-      await message.edit(message.content + '\n\n⚠️ **Error — auto-denied**').catch(() => {});
-      return false;
-    }
-  }
-
   async disconnect(): Promise<void> {
     await this.client.destroy();
   }
 
-  /**
-   * Register a callback to handle incoming messages from Discord channels
-   */
   onMessage(callback: MessageCallback): void {
     this.messageCallback = callback;
   }
 
-  /**
-   * Create agent channels for a project in a guild
-   * @param guildId - Discord guild ID
-   * @param projectName - Project name
-   * @param agentConfigs - Array of agent configurations to create channels for
-   * @param customChannelName - Optional custom channel name (e.g., "Claude - 내 프로젝트")
-   * @returns Object mapping agent names to channel IDs
-   */
-  async createAgentChannels(
+  // --- Delegate to DiscordChannels ---
+
+  createAgentChannels(
     guildId: string,
     projectName: string,
     agentConfigs: AgentConfig[],
     customChannelName?: string,
     instanceIdByAgent?: { [agentName: string]: string | undefined },
   ): Promise<{ [agentName: string]: string }> {
-    const guild = await this.client.guilds.fetch(guildId);
-    if (!guild) {
-      throw new Error(`Guild ${guildId} not found`);
-    }
-
-    const result: { [agentName: string]: string } = {};
-
-    // Fetch all channels in the guild so we can check for existing ones
-    const allChannels = await guild.channels.fetch();
-
-    for (const config of agentConfigs) {
-      // Use custom channel name if provided, otherwise use default format
-      const channelName = customChannelName || `${projectName}-${config.channelSuffix}`;
-
-      // Discord normalizes channel names to lowercase with hyphens replacing spaces
-      const normalized = channelName.toLowerCase().replace(/\s+/g, '-');
-
-      // Look for an existing text channel with the same name
-      const existing = allChannels.find(
-        (ch) => ch !== null && ch.type === ChannelType.GuildText && ch.name === normalized
-      );
-
-      let channel: TextChannel;
-      if (existing) {
-        channel = existing as TextChannel;
-        console.log(`  - ${config.displayName}: reusing existing channel ${channel.name} (${channel.id})`);
-      } else {
-        channel = await guild.channels.create({
-          name: channelName,
-          type: ChannelType.GuildText,
-          topic: `${config.displayName} agent for ${projectName}`,
-        });
-        console.log(`  - ${config.displayName}: created channel ${channel.name} (${channel.id})`);
-      }
-
-      // Register in mapping
-      this.channelMapping.set(channel.id, {
-        projectName,
-        agentType: config.name,
-        instanceId: instanceIdByAgent?.[config.name],
-      });
-
-      result[config.name] = channel.id;
-    }
-
-    console.log(`Set up ${agentConfigs.length} channels for project ${projectName}`);
-    return result;
+    return this.channels.createAgentChannels(guildId, projectName, agentConfigs, customChannelName, instanceIdByAgent);
   }
 
-  /**
-   * Register channel mappings from external source (e.g., state file)
-   */
   registerChannelMappings(mappings: { channelId: string; projectName: string; agentType: string; instanceId?: string }[]): void {
-    for (const m of mappings) {
-      this.channelMapping.set(m.channelId, {
-        projectName: m.projectName,
-        agentType: m.agentType,
-        instanceId: m.instanceId,
-      });
-      console.log(
-        `Registered channel ${m.channelId} -> ${m.projectName}:${m.agentType}${m.instanceId ? `#${m.instanceId}` : ''}`,
-      );
-    }
+    this.channels.registerChannelMappings(mappings);
   }
 
-  /**
-   * Get list of guilds the bot is in
-   */
   getGuilds(): { id: string; name: string }[] {
-    return this.client.guilds.cache.map((guild) => ({
-      id: guild.id,
-      name: guild.name,
-    }));
+    return this.channels.getGuilds();
   }
 
-  /**
-   * Get the current channel mapping
-   */
   getChannelMapping(): Map<string, ChannelInfo> {
-    return new Map(this.channelMapping);
+    return this.channels.getChannelMapping();
   }
 
-  /**
-   * Delete a Discord channel by ID
-   */
-  async deleteChannel(channelId: string): Promise<boolean> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (channel?.isTextBased()) {
-        await (channel as TextChannel).delete();
-        this.channelMapping.delete(channelId);
-        return true;
-      }
-      return false;
-    } catch (error: any) {
-      // 10003 = Unknown Channel (already deleted), just log briefly
-      if (error?.code === 10003) {
-        console.log(`Channel ${channelId} already deleted`);
-      } else {
-        console.error(`Failed to delete channel ${channelId}:`, error);
-      }
-      return false;
-    }
+  deleteChannel(channelId: string): Promise<boolean> {
+    return this.channels.deleteChannel(channelId);
   }
 
-  /**
-   * Send an AskUserQuestion as an embed with interactive buttons.
-   * Returns the selected option label, or null on timeout.
-   */
-  async sendQuestionWithButtons(
+  // --- Delegate to DiscordMessaging ---
+
+  sendToChannel(channelId: string, content: string): Promise<void> {
+    return this.messaging.sendToChannel(channelId, content);
+  }
+
+  sendToChannelWithId(channelId: string, content: string): Promise<string | undefined> {
+    return this.messaging.sendToChannelWithId(channelId, content);
+  }
+
+  replyInThread(channelId: string, parentMessageId: string, content: string): Promise<void> {
+    return this.messaging.replyInThread(channelId, parentMessageId, content);
+  }
+
+  replyInThreadWithId(channelId: string, parentMessageId: string, content: string): Promise<string | undefined> {
+    return this.messaging.replyInThreadWithId(channelId, parentMessageId, content);
+  }
+
+  updateMessage(channelId: string, messageId: string, content: string): Promise<void> {
+    return this.messaging.updateMessage(channelId, messageId, content);
+  }
+
+  sendToChannelWithFiles(channelId: string, content: string, filePaths: string[]): Promise<void> {
+    return this.messaging.sendToChannelWithFiles(channelId, content, filePaths);
+  }
+
+  addReactionToMessage(channelId: string, messageId: string, emoji: string): Promise<void> {
+    return this.messaging.addReactionToMessage(channelId, messageId, emoji);
+  }
+
+  replaceOwnReactionOnMessage(channelId: string, messageId: string, fromEmoji: string, toEmoji: string): Promise<void> {
+    return this.messaging.replaceOwnReactionOnMessage(channelId, messageId, fromEmoji, toEmoji);
+  }
+
+  // --- Delegate to DiscordInteractions ---
+
+  sendApprovalRequest(channelId: string, toolName: string, toolInput: any, timeoutMs?: number): Promise<boolean> {
+    return this.interactions.sendApprovalRequest(channelId, toolName, toolInput, timeoutMs);
+  }
+
+  sendQuestionWithButtons(
     channelId: string,
     questions: Array<{
       question: string;
@@ -392,192 +246,8 @@ export class DiscordClient implements MessagingClient {
       options: Array<{ label: string; description?: string }>;
       multiSelect?: boolean;
     }>,
-    timeoutMs: number = 300000
+    timeoutMs?: number,
   ): Promise<string | null> {
-    const channel = await this.client.channels.fetch(channelId);
-    if (!channel?.isTextBased()) return null;
-    const textChannel = channel as TextChannel;
-
-    const q = questions[0];
-    if (!q) return null;
-
-    const embed = new EmbedBuilder()
-      .setTitle(`❓ ${q.header || 'Question'}`)
-      .setDescription(q.question)
-      .setColor(0x5865f2);
-
-    if (q.options.some((o) => o.description)) {
-      embed.addFields(
-        q.options.map((opt) => ({
-          name: opt.label,
-          value: opt.description || '\u200b',
-          inline: true,
-        }))
-      );
-    }
-
-    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-    let row = new ActionRowBuilder<ButtonBuilder>();
-
-    for (let i = 0; i < q.options.length; i++) {
-      if (i > 0 && i % 5 === 0) {
-        rows.push(row);
-        row = new ActionRowBuilder<ButtonBuilder>();
-      }
-      row.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`opt_${i}`)
-          .setLabel(q.options[i].label.slice(0, 80))
-          .setStyle(i === 0 ? ButtonStyle.Primary : ButtonStyle.Secondary)
-      );
-    }
-    rows.push(row);
-
-    const message = await textChannel.send({
-      embeds: [embed],
-      components: rows,
-    });
-
-    try {
-      const interaction = await message.awaitMessageComponent({
-        componentType: ComponentType.Button,
-        filter: (i) => !i.user.bot,
-        time: timeoutMs,
-      });
-
-      const optIndex = parseInt(interaction.customId.split('_')[1]);
-      const selected = q.options[optIndex]?.label || '';
-
-      await interaction.update({
-        embeds: [embed.setColor(0x57f287).setFooter({ text: `✅ ${selected}` })],
-        components: [],
-      });
-
-      return selected;
-    } catch {
-      await message
-        .edit({
-          embeds: [embed.setColor(0x95a5a6).setFooter({ text: '⏰ Timed out' })],
-          components: [],
-        })
-        .catch(() => {});
-      return null;
-    }
-  }
-
-  /**
-   * Send a message to a specific channel by ID
-   */
-  async sendToChannel(channelId: string, content: string): Promise<void> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isTextBased()) {
-        console.warn(`Channel ${channelId} is not a text channel`);
-        return;
-      }
-      await (channel as TextChannel).send(content);
-    } catch (error) {
-      console.error(`Failed to send message to channel ${channelId}:`, error);
-    }
-  }
-
-  async sendToChannelWithId(channelId: string, content: string): Promise<string | undefined> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isTextBased()) {
-        console.warn(`Channel ${channelId} is not a text channel`);
-        return undefined;
-      }
-      const message = await (channel as TextChannel).send(content);
-      return message.id;
-    } catch (error) {
-      console.error(`Failed to send message to channel ${channelId}:`, error);
-      return undefined;
-    }
-  }
-
-  async replyInThread(channelId: string, parentMessageId: string, content: string): Promise<void> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isTextBased() || !('messages' in channel)) return;
-      const parentMessage = await (channel as TextChannel).messages.fetch(parentMessageId);
-      await parentMessage.reply(content);
-    } catch (error) {
-      console.error(`Failed to reply in thread on Discord channel ${channelId}:`, error);
-    }
-  }
-
-  async replyInThreadWithId(channelId: string, parentMessageId: string, content: string): Promise<string | undefined> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isTextBased() || !('messages' in channel)) return undefined;
-      const parentMessage = await (channel as TextChannel).messages.fetch(parentMessageId);
-      const reply = await parentMessage.reply(content);
-      return reply.id;
-    } catch (error) {
-      console.error(`Failed to reply in thread on Discord channel ${channelId}:`, error);
-      return undefined;
-    }
-  }
-
-  async updateMessage(channelId: string, messageId: string, content: string): Promise<void> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isTextBased() || !('messages' in channel)) return;
-      const message = await (channel as TextChannel).messages.fetch(messageId);
-      await message.edit(content);
-    } catch (error) {
-      console.error(`Failed to update message on Discord channel ${channelId}:`, error);
-    }
-  }
-
-  /**
-   * Send a message with file attachments to a specific channel.
-   * If content is empty but files are present, sends files only.
-   */
-  async sendToChannelWithFiles(channelId: string, content: string, filePaths: string[]): Promise<void> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isTextBased()) {
-        console.warn(`Channel ${channelId} is not a text channel`);
-        return;
-      }
-      const files = filePaths.map((fp) => new AttachmentBuilder(fp));
-      await (channel as TextChannel).send({
-        content: content || undefined,
-        files,
-      });
-    } catch (error) {
-      console.error(`Failed to send message with files to channel ${channelId}:`, error);
-    }
-  }
-
-  async addReactionToMessage(channelId: string, messageId: string, emoji: string): Promise<void> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isTextBased() || !('messages' in channel)) return;
-      const message = await (channel as TextChannel).messages.fetch(messageId);
-      await message.react(emoji);
-    } catch (error) {
-      console.warn(`Failed to add reaction ${emoji} on ${channelId}/${messageId}:`, error);
-    }
-  }
-
-  async replaceOwnReactionOnMessage(channelId: string, messageId: string, fromEmoji: string, toEmoji: string): Promise<void> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isTextBased() || !('messages' in channel)) return;
-      const message = await (channel as TextChannel).messages.fetch(messageId);
-
-      const fromReaction = message.reactions.cache.find((reaction) => reaction.emoji.name === fromEmoji);
-      const botUserId = this.client.user?.id;
-      if (fromReaction && botUserId) {
-        await fromReaction.users.remove(botUserId).catch(() => undefined);
-      }
-
-      await message.react(toEmoji);
-    } catch (error) {
-      console.warn(`Failed to replace reaction on ${channelId}/${messageId}:`, error);
-    }
+    return this.interactions.sendQuestionWithButtons(channelId, questions, timeoutMs);
   }
 }

@@ -2,7 +2,7 @@
  * Tests for OpenCodeAdapter
  */
 
-import { OpenCodeAdapter } from '../../src/agents/opencode.js';
+import { OpenCodeAdapter } from '../../src/agents/opencode/index.js';
 
 describe('OpenCodeAdapter', () => {
   it('should have correct config values', () => {

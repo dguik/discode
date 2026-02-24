@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildAgentLaunchEnv, buildExportPrefix, withClaudePluginDir } from '../../src/policy/agent-launch.js';
+import { buildAgentLaunchEnv, buildExportPrefix } from '../../src/policy/agent-launch.js';
+import { OpenCodeAdapter } from '../../src/agents/opencode/index.js';
 
 describe('agent launch policy', () => {
   it('builds shell export prefix with escaping', () => {
@@ -12,30 +13,25 @@ describe('agent launch policy', () => {
     expect(prefix).toBe("export A='alpha'; export B='it'\\''s'; ");
   });
 
-  it('injects claude plugin dir only for claude command token', () => {
-    const command = 'cd "/tmp/claude" && claude --print';
-    const next = withClaudePluginDir(command, '/plugins/claude');
-
-    expect(next).toContain("claude --plugin-dir '/plugins/claude' --print");
-  });
-
-  it('builds launch env with optional opencode permission', () => {
-    const withoutPermission = buildAgentLaunchEnv({
+  it('builds launch env without agent-specific vars', () => {
+    const env = buildAgentLaunchEnv({
       projectName: 'my-project',
       port: 18470,
       agentType: 'claude',
       instanceId: 'claude',
-      permissionAllow: false,
     });
-    expect(withoutPermission.OPENCODE_PERMISSION).toBeUndefined();
+    expect(env.AGENT_DISCORD_PROJECT).toBe('my-project');
+    expect(env.AGENT_DISCORD_PORT).toBe('18470');
+    expect(env.OPENCODE_PERMISSION).toBeUndefined();
+  });
 
-    const withPermission = buildAgentLaunchEnv({
-      projectName: 'my-project',
-      port: 18470,
-      agentType: 'opencode',
-      instanceId: 'opencode',
-      permissionAllow: true,
-    });
-    expect(withPermission.OPENCODE_PERMISSION).toBe('{"*":"allow"}');
+  it('opencode adapter provides permission env var via getExtraEnvVars', () => {
+    const adapter = new OpenCodeAdapter();
+
+    const without = adapter.getExtraEnvVars({ permissionAllow: false });
+    expect(without.OPENCODE_PERMISSION).toBeUndefined();
+
+    const withPerm = adapter.getExtraEnvVars({ permissionAllow: true });
+    expect(withPerm.OPENCODE_PERMISSION).toBe('{"*":"allow"}');
   });
 });

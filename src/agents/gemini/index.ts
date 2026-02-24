@@ -2,9 +2,16 @@
  * Gemini CLI agent adapter
  */
 
-import { BaseAgentAdapter, type AgentConfig, type AgentIntegrationMode, type AgentIntegrationResult } from './base.js';
-import { installGeminiHook, getGeminiHookSourcePath, GEMINI_AFTER_AGENT_HOOK_FILENAME, GEMINI_NOTIFICATION_HOOK_FILENAME, GEMINI_SESSION_HOOK_FILENAME } from '../gemini/hook-installer.js';
-import { injectFile } from '../container/index.js';
+import { BaseAgentAdapter, type AgentConfig, type AgentIntegrationMode, type AgentIntegrationResult } from '../base.js';
+import { installGeminiHook, getGeminiHookSourcePath, GEMINI_AFTER_AGENT_HOOK_FILENAME, GEMINI_NOTIFICATION_HOOK_FILENAME, GEMINI_SESSION_HOOK_FILENAME } from './hook-installer.js';
+import { injectFile } from '../../container/index.js';
+
+export {
+  installGeminiHook, removeGeminiHook,
+  getGeminiHookSourcePath, getGeminiConfigDir, getGeminiHookDir, getGeminiSettingsPath,
+  GEMINI_HOOK_NAME, GEMINI_AFTER_AGENT_HOOK_FILENAME, GEMINI_NOTIFICATION_HOOK_FILENAME,
+  GEMINI_SESSION_HOOK_FILENAME, GEMINI_NOTIFICATION_HOOK_NAME, GEMINI_SESSION_HOOK_NAME,
+} from './hook-installer.js';
 
 const geminiConfig: AgentConfig = {
   name: 'gemini',

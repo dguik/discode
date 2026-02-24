@@ -1,4 +1,4 @@
-import { CodexAdapter } from '../../src/agents/codex.js';
+import { CodexAdapter } from '../../src/agents/codex/index.js';
 import { describe, expect, it } from 'vitest';
 
 describe('CodexAdapter', () => {

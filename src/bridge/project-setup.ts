@@ -10,7 +10,6 @@ import type { AgentRegistry, AgentIntegrationResult, BaseAgentAdapter } from '..
 import {
   buildNextInstanceId,
   getProjectInstance,
-  listProjectInstances,
   normalizeProjectState,
 } from '../state/instances.js';
 import { installFileInstruction } from '../infra/file-instruction.js';
@@ -181,7 +180,7 @@ function setupContainerInstance(
       port: p.port,
       agentType: p.agentName,
       instanceId: p.instanceId,
-      permissionAllow: false, // handled by adapter.getExtraEnvVars
+
     }),
     ...extraEnv,
   };
@@ -243,7 +242,7 @@ function setupStandardInstance(deps: ProjectSetupDeps, p: SetupParams): void {
       port: p.port,
       agentType: p.agentName,
       instanceId: p.instanceId,
-      permissionAllow: false, // handled by adapter.getExtraEnvVars
+
     }),
     ...extraEnv,
   });

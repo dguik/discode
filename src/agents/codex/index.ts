@@ -2,8 +2,14 @@
  * Codex (OpenAI) agent adapter
  */
 
-import { BaseAgentAdapter, type AgentConfig, type AgentIntegrationMode, type AgentIntegrationResult } from './base.js';
-import { installCodexHook } from '../codex/hook-installer.js';
+import { BaseAgentAdapter, type AgentConfig, type AgentIntegrationMode, type AgentIntegrationResult } from '../base.js';
+import { installCodexHook } from './hook-installer.js';
+
+export {
+  installCodexHook, removeCodexHook,
+  getCodexConfigDir, getCodexHookDir, getCodexConfigPath, getCodexHookSourcePath,
+  CODEX_HOOK_FILENAME,
+} from './hook-installer.js';
 
 const codexConfig: AgentConfig = {
   name: 'codex',

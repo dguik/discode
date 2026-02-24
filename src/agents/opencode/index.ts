@@ -3,9 +3,11 @@
  * https://opencode.ai/
  */
 
-import { BaseAgentAdapter, type AgentConfig, type AgentIntegrationMode, type AgentIntegrationResult } from './base.js';
-import { installOpencodePlugin, getPluginSourcePath } from '../opencode/plugin-installer.js';
-import { injectFile } from '../container/index.js';
+import { BaseAgentAdapter, type AgentConfig, type AgentIntegrationMode, type AgentIntegrationResult } from '../base.js';
+import { installOpencodePlugin, getPluginSourcePath } from './plugin-installer.js';
+import { injectFile } from '../../container/index.js';
+
+export { installOpencodePlugin, getPluginSourcePath, getOpencodePluginDir, OPENCODE_PLUGIN_FILENAME } from './plugin-installer.js';
 
 const opencodeConfig: AgentConfig = {
   name: 'opencode',

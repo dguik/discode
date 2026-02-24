@@ -4,7 +4,7 @@ import { stateManager, type ProjectState } from '../state/index.js';
 import type { BridgeConfig, ProjectInstanceState } from '../types/index.js';
 import { agentRegistry } from '../agents/index.js';
 import { normalizeProjectState } from '../state/instances.js';
-import { buildAgentLaunchEnv, buildExportPrefix, withClaudePluginDir } from '../policy/agent-launch.js';
+import { buildAgentLaunchEnv, buildExportPrefix } from '../policy/agent-launch.js';
 import { installAgentIntegration } from '../policy/agent-integration.js';
 import { resolveProjectWindowName } from '../policy/window-naming.js';
 import type { AgentRuntime } from '../runtime/interface.js';
@@ -185,29 +185,30 @@ export async function resumeProjectInstance(params: {
     };
   }
 
-  let claudePluginDir: string | undefined;
   let hookEnabled = !!params.instance.eventHook;
   const integration = installAgentIntegration(params.instance.agentType, params.project.projectPath, 'reinstall');
-  claudePluginDir = integration.claudePluginDir;
   hookEnabled = hookEnabled || integration.eventHookInstalled;
   infoMessages.push(...integration.infoMessages);
   warningMessages.push(...integration.warningMessages);
 
   const permissionAllow =
     params.instance.agentType === 'opencode' && params.config.opencode?.permissionMode === 'allow';
-  const baseCommand = withClaudePluginDir(
+  const baseCommand = adapter.buildLaunchCommand(
     adapter.getStartCommand(params.project.projectPath, permissionAllow),
-    claudePluginDir,
+    integration,
   );
+  const extraEnv = adapter.getExtraEnvVars({ permissionAllow: !!permissionAllow });
 
   const startCommand =
-    buildExportPrefix(buildAgentLaunchEnv({
-      projectName: params.projectName,
-      port: params.port,
-      agentType: params.instance.agentType,
-      instanceId: params.instance.instanceId,
-      permissionAllow: !!permissionAllow,
-    })) + baseCommand;
+    buildExportPrefix({
+      ...buildAgentLaunchEnv({
+        projectName: params.projectName,
+        port: params.port,
+        agentType: params.instance.agentType,
+        instanceId: params.instance.instanceId,
+      }),
+      ...extraEnv,
+    }) + baseCommand;
 
   runtime.startAgentInWindow(fullSessionName, windowName, startCommand);
   infoMessages.push(`Restored missing runtime window: ${windowName}`);

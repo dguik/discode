@@ -169,7 +169,7 @@ export class HookRuntimeRoutes {
         port: this.deps.port,
         agentType: instance.agentType,
         instanceId: instance.instanceId,
-        permissionAllow: false,
+
       }),
       ...extraEnv,
     });

@@ -119,7 +119,7 @@ function restoreStandardInstance(
       port,
       agentType: instance.agentType,
       instanceId: instance.instanceId,
-      permissionAllow: false,
+
     }),
     ...extraEnv,
   });
