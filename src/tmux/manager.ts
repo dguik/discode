@@ -186,12 +186,12 @@ export class TmuxManager {
    * @param sessionName Full session name (already includes prefix)
    */
   createWindow(sessionName: string, windowName: string, initialCommand?: string): void {
-    const escapedSession = escapeShellArg(sessionName);
+    const escapedAppendTarget = escapeShellArg(`${sessionName}:$`);
     const escapedWindowName = escapeShellArg(windowName);
     const commandSuffix = initialCommand ? ` ${escapeShellArg(initialCommand)}` : '';
 
     try {
-      this.executor.exec(`tmux new-window -t ${escapedSession} -n ${escapedWindowName}${commandSuffix}`);
+      this.executor.exec(`tmux new-window -a -t ${escapedAppendTarget} -n ${escapedWindowName}${commandSuffix}`);
     } catch (error) {
       throw new Error(`Failed to create window '${windowName}' in session '${sessionName}': ${error instanceof Error ? error.message : String(error)}`);
     }

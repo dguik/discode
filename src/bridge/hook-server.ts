@@ -527,6 +527,9 @@ export class BridgeHookServer {
 
     if (eventType === 'session.start') {
       const source = typeof event.source === 'string' ? event.source : 'unknown';
+      if (source === 'startup') {
+        return true;
+      }
       const model = typeof event.model === 'string' ? event.model : '';
       const modelSuffix = model ? `, ${model}` : '';
       await this.deps.messaging.sendToChannel(channelId, `\u25B6\uFE0F Session started (${source}${modelSuffix})`);

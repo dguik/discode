@@ -820,7 +820,7 @@ describe('BridgeHookServer', () => {
       expect(mockMessaging.sendToChannel.mock.calls[1][1]).toContain('Plan approval needed');
     });
 
-    it('handles session.start event', async () => {
+    it('does not send session.start message for startup source', async () => {
       const mockMessaging = createMockMessaging();
       const stateManager = createMockStateManager({
         test: {
@@ -851,13 +851,7 @@ describe('BridgeHookServer', () => {
         model: 'claude-sonnet-4-6',
       });
       expect(res.status).toBe(200);
-      expect(mockMessaging.sendToChannel).toHaveBeenCalledWith(
-        'ch-123',
-        expect.stringContaining('Session started'),
-      );
-      const sentMsg = mockMessaging.sendToChannel.mock.calls[0][1];
-      expect(sentMsg).toContain('startup');
-      expect(sentMsg).toContain('claude-sonnet-4-6');
+      expect(mockMessaging.sendToChannel).not.toHaveBeenCalled();
     });
 
     it('handles session.start without model', async () => {

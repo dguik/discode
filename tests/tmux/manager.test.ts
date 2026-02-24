@@ -182,7 +182,7 @@ describe('TmuxManager', () => {
       tmux.createWindow('agent-session', 'my-window');
 
       const lastCommand = executor.getLastCommand();
-      expect(lastCommand).toContain("tmux new-window -t 'agent-session' -n");
+      expect(lastCommand).toContain("tmux new-window -a -t 'agent-session:$' -n");
       expect(lastCommand).toContain("'my-window'");
     });
 
@@ -190,7 +190,7 @@ describe('TmuxManager', () => {
       tmux.createWindow('agent-session', 'my-window', 'node agent.js');
 
       const lastCommand = executor.getLastCommand();
-      expect(lastCommand).toContain("tmux new-window -t 'agent-session' -n 'my-window'");
+      expect(lastCommand).toContain("tmux new-window -a -t 'agent-session:$' -n 'my-window'");
       expect(lastCommand).toContain("'node agent.js'");
     });
   });
