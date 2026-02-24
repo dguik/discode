@@ -3,6 +3,8 @@ import type { MessageCallback } from '../../src/messaging/interface.js';
 
 // Capture the message handler registered via app.message()
 let capturedMessageHandler: ((args: { message: any }) => Promise<void>) | undefined;
+// Capture the app_mention event handler registered via app.event('app_mention')
+let capturedAppMentionHandler: ((args: { event: any }) => Promise<void>) | undefined;
 
 vi.mock('@slack/bolt', () => {
   return {
@@ -25,6 +27,11 @@ vi.mock('@slack/bolt', () => {
       message(handler: any) {
         capturedMessageHandler = handler;
       }
+      event(eventName: string, handler: any) {
+        if (eventName === 'app_mention') {
+          capturedAppMentionHandler = handler;
+        }
+      }
       action(_pattern: any, _handler: any) {}
       start = vi.fn().mockResolvedValue(undefined);
       stop = vi.fn().mockResolvedValue(undefined);
@@ -40,6 +47,7 @@ describe('SlackClient message handling', () => {
 
   beforeEach(() => {
     capturedMessageHandler = undefined;
+    capturedAppMentionHandler = undefined;
     client = new SlackClient('xoxb-test-token', 'xapp-test-token');
     callback = vi.fn();
     client.onMessage(callback);
@@ -51,6 +59,11 @@ describe('SlackClient message handling', () => {
   function sendMessage(message: any) {
     expect(capturedMessageHandler).toBeDefined();
     return capturedMessageHandler!({ message });
+  }
+
+  function sendAppMention(event: any) {
+    expect(capturedAppMentionHandler).toBeDefined();
+    return capturedAppMentionHandler!({ event });
   }
 
   it('processes regular text messages', async () => {
@@ -109,6 +122,73 @@ describe('SlackClient message handling', () => {
     });
 
     expect(callback).not.toHaveBeenCalled();
+  });
+
+  describe('app_mention events', () => {
+    it('processes app_mention events', async () => {
+      await sendAppMention({
+        user: 'U_USER',
+        text: '<@U_BOT> build the feature',
+        channel: 'C_TEST',
+        ts: '1234.5678',
+      });
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      // Bot mention should NOT be stripped here because botUserId is not set
+      // (connect() was never called in this test). Text passes through as-is.
+      expect(callback.mock.calls[0][1]).toBe('<@U_BOT> build the feature');
+    });
+
+    it('strips bot mention from app_mention text when botUserId is known', async () => {
+      // Simulate connect() having resolved botUserId
+      await client.connect();
+
+      await sendAppMention({
+        user: 'U_USER',
+        text: '<@U_BOT> deploy to production',
+        channel: 'C_TEST',
+        ts: '1234.5678',
+      });
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback.mock.calls[0][1]).toBe('deploy to production');
+    });
+
+    it('ignores app_mention from unmapped channels', async () => {
+      await sendAppMention({
+        user: 'U_USER',
+        text: '<@U_BOT> hello',
+        channel: 'C_UNKNOWN',
+        ts: '1234.5678',
+      });
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('ignores app_mention without user field', async () => {
+      await sendAppMention({
+        text: '<@U_BOT> hello',
+        channel: 'C_TEST',
+        ts: '1234.5678',
+      });
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('bot self-message filtering', () => {
+    it('ignores own messages after connect', async () => {
+      await client.connect();
+
+      await sendMessage({
+        user: 'U_BOT',
+        text: 'my own message',
+        channel: 'C_TEST',
+        ts: '1234.5678',
+      });
+
+      expect(callback).not.toHaveBeenCalled();
+    });
   });
 
   describe('file_share messages', () => {

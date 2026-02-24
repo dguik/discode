@@ -30,47 +30,16 @@ export class SlackClient implements MessagingClient {
   }
 
   private setupEventHandlers(): void {
-    // Listen for messages in channels
+    // Listen for messages in channels (requires message.channels / message.groups event subscription)
     this.app.message(async ({ message }) => {
-      // Only handle regular user messages (not bot messages, not system events)
-      if (!('user' in message)) return;
-      const subtype = 'subtype' in message ? message.subtype : undefined;
-      if (subtype && subtype !== 'file_share') return;
-      // Skip bot messages
-      if ('bot_id' in message && message.bot_id) return;
+      this.handleIncomingMessage(message);
+    });
 
-      const channelId = message.channel;
-      const channelInfo = this.channelMapping.get(channelId);
-      if (channelInfo && this.messageCallback) {
-        try {
-          // Extract file attachments if present
-          let attachments: MessageAttachment[] | undefined;
-          if ('files' in message && Array.isArray(message.files) && message.files.length > 0) {
-            attachments = message.files.map((f: any) => ({
-              url: f.url_private_download || f.url_private || '',
-              filename: f.name || 'unknown',
-              contentType: f.mimetype || null,
-              size: f.size || 0,
-              authHeaders: { Authorization: `Bearer ${this.botToken}` },
-            }));
-          }
-
-          await this.messageCallback(
-            channelInfo.agentType,
-            message.text || '',
-            channelInfo.projectName,
-            channelId,
-            message.ts,
-            channelInfo.instanceId,
-            attachments && attachments.length > 0 ? attachments : undefined,
-          );
-        } catch (error) {
-          console.error(
-            `Slack message handler error [${channelInfo.projectName}/${channelInfo.agentType}] channel=${channelId}:`,
-            error,
-          );
-        }
-      }
+    // Listen for @mentions (requires app_mention event subscription).
+    // Many Slack apps only have app_mention enabled, not message.channels,
+    // so this handler ensures the bot receives messages when mentioned.
+    this.app.event('app_mention', async ({ event }) => {
+      this.handleIncomingMessage(event);
     });
 
     // Listen for button interactions (approval requests & question buttons)
@@ -84,6 +53,68 @@ export class SlackClient implements MessagingClient {
     this.app.action('deny_action', async ({ ack }) => {
       await ack();
     });
+  }
+
+  /**
+   * Unified handler for incoming messages from both `message` and `app_mention` events.
+   */
+  private async handleIncomingMessage(message: Record<string, any>): Promise<void> {
+    // Only handle messages with a user field (not system events)
+    if (!('user' in message)) return;
+    const subtype = 'subtype' in message ? message.subtype : undefined;
+    if (subtype && subtype !== 'file_share') return;
+    // Skip bot messages
+    if ('bot_id' in message && message.bot_id) return;
+    // Skip own messages
+    if (this.botUserId && message.user === this.botUserId) return;
+
+    const channelId = message.channel;
+    if (!channelId) return;
+
+    const channelInfo = this.channelMapping.get(channelId);
+    if (!channelInfo) {
+      console.log(`Slack message ignored: channel ${channelId} not in mapping (${this.channelMapping.size} mapped channels)`);
+      return;
+    }
+    if (!this.messageCallback) {
+      console.warn(`Slack message ignored: no message callback registered yet`);
+      return;
+    }
+
+    try {
+      // Extract file attachments if present
+      let attachments: MessageAttachment[] | undefined;
+      if ('files' in message && Array.isArray(message.files) && message.files.length > 0) {
+        attachments = message.files.map((f: any) => ({
+          url: f.url_private_download || f.url_private || '',
+          filename: f.name || 'unknown',
+          contentType: f.mimetype || null,
+          size: f.size || 0,
+          authHeaders: { Authorization: `Bearer ${this.botToken}` },
+        }));
+      }
+
+      // Strip bot mention from text (e.g. "<@U12345> hello" → "hello")
+      let text = message.text || '';
+      if (this.botUserId) {
+        text = text.replace(new RegExp(`<@${this.botUserId}>\\s*`, 'g'), '').trim();
+      }
+
+      await this.messageCallback(
+        channelInfo.agentType,
+        text,
+        channelInfo.projectName,
+        channelId,
+        message.ts,
+        channelInfo.instanceId,
+        attachments && attachments.length > 0 ? attachments : undefined,
+      );
+    } catch (error) {
+      console.error(
+        `Slack message handler error [${channelInfo.projectName}/${channelInfo.agentType}] channel=${channelId}:`,
+        error,
+      );
+    }
   }
 
   async connect(): Promise<void> {
