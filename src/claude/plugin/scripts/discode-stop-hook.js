@@ -150,11 +150,36 @@ function readTail(filePath, maxBytes) {
 }
 
 /**
+ * Detect system-injected user messages that should NOT be treated as turn boundaries.
+ * These appear mid-turn when Claude Code injects context (Skill definitions,
+ * request interruptions, auto-compact context, etc.).
+ */
+function isSystemInjectedMessage(text) {
+  if (!text) return false;
+  var t = text.trim();
+  // Skill context injection (e.g. "Base directory for this skill: /path/to/skill")
+  if (t.startsWith("Base directory for this skill:")) return true;
+  // Request interruption notice
+  if (t === "[Request interrupted by user]") return true;
+  // System reminder (standalone)
+  if (t.startsWith("<system-reminder>")) return true;
+  // Command output context
+  if (t.startsWith("<command-name>")) return true;
+  // Auto-compact / session continuation context
+  if (t.startsWith("This session is being continued from a previous conversation")) return true;
+  // Local command caveat
+  if (t.startsWith("<local-command-caveat>")) return true;
+  return false;
+}
+
+/**
  * Parse the transcript tail and return:
  * - displayText: text from the latest assistant messageId (for the response message)
  * - turnText: all assistant text from the current turn (for file path extraction)
  *
  * The turn boundary is the last real user message (with text content, not tool_result).
+ * System-injected user messages (Skill context, interruptions) are skipped — they appear
+ * mid-turn and should not break the scan.
  * This handles the race condition where the Stop hook fires before the final assistant
  * entry is flushed to disk — earlier entries in the turn may still contain file paths.
  */
@@ -186,7 +211,16 @@ function parseTurnTexts(tail) {
         const co = asObject(c);
         return co && co.type === "text";
       });
-      if (hasUserText) break;
+      if (hasUserText) {
+        // Skip system-injected messages (Skill context, interruptions, etc.)
+        // that appear mid-turn — only break at genuine user prompts
+        const userText = content
+          .filter((c) => { const co = asObject(c); return co && co.type === "text"; })
+          .map((c) => { const co = asObject(c); return co && typeof co.text === "string" ? co.text : ""; })
+          .join("\n");
+        if (isSystemInjectedMessage(userText)) continue;
+        break;
+      }
       // tool_result entries — skip and continue scanning
       continue;
     }
@@ -270,7 +304,7 @@ async function readTurnTexts(transcriptPath) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (attempt > 0) await sleep(150);
 
-    const tail = readTail(transcriptPath, 65536);
+    const tail = readTail(transcriptPath, 131072);
     const result = parseTurnTexts(tail);
 
     // If we found display text, check if the last real entry is an assistant text.
@@ -299,7 +333,7 @@ async function readTurnTexts(transcriptPath) {
   }
 
   // Final attempt without retry check
-  const tail = readTail(transcriptPath, 65536);
+  const tail = readTail(transcriptPath, 131072);
   return parseTurnTexts(tail);
 }
 

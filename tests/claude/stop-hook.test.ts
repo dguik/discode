@@ -486,6 +486,92 @@ describe('parseTurnTexts', () => {
     expect(result.turnText).toBe('Running...\nTests passed!');
   });
 
+  it('skips system-injected Skill context messages (not a turn boundary)', () => {
+    const tail = [
+      // Real user prompt
+      line({ type: 'user', message: { content: [{ type: 'text', text: 'Check the repo' }] } }),
+      // Intermediate text before tool calls
+      line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: '먼저 레포지토리 정보를 조사하겠습니다.' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } }),
+      line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_1' }] } }),
+      // Claude uses Skill tool
+      line({ type: 'assistant', message: { id: 'msg_2', content: [{ type: 'text', text: '스킬을 사용하겠습니다.' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_2', content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'blog-writer' } }] } }),
+      line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_2' }] } }),
+      // System-injected Skill context — should be SKIPPED, not a turn boundary
+      line({ type: 'user', message: { content: [{ type: 'text', text: 'Base directory for this skill: /Users/gui/.claude/skills/blog-writer\n\n# Blog Writer' }] } }),
+      // Claude continues after Skill context
+      line({ type: 'assistant', message: { id: 'msg_3', content: [{ type: 'text', text: '글을 작성하겠습니다.' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_3', content: [{ type: 'tool_use', name: 'Write', input: {} }] } }),
+      line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_3' }] } }),
+      // Final response
+      line({ type: 'assistant', message: { id: 'msg_4', content: [{ type: 'text', text: '작성 완료했습니다.' }] } }),
+    ].join('\n');
+
+    const result = parseTurnTexts(tail);
+    // displayText = final response (latestMessageId)
+    expect(result.displayText).toBe('작성 완료했습니다.');
+    // intermediateText should include ALL intermediate text, including text BEFORE the Skill injection
+    expect(result.intermediateText).toContain('먼저 레포지토리 정보를 조사하겠습니다.');
+    expect(result.intermediateText).toContain('스킬을 사용하겠습니다.');
+    expect(result.intermediateText).toContain('글을 작성하겠습니다.');
+  });
+
+  it('skips [Request interrupted by user] messages (not a turn boundary)', () => {
+    const tail = [
+      line({ type: 'user', message: { content: [{ type: 'text', text: 'Do something' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: 'Working on it...' }] } }),
+      line({ type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_2', content: [{ type: 'text', text: 'Resumed and done.' }] } }),
+    ].join('\n');
+
+    const result = parseTurnTexts(tail);
+    expect(result.displayText).toBe('Resumed and done.');
+    expect(result.intermediateText).toBe('Working on it...');
+  });
+
+  it('skips <system-reminder> messages (not a turn boundary)', () => {
+    const tail = [
+      line({ type: 'user', message: { content: [{ type: 'text', text: 'Help me' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: 'First I will check.' }] } }),
+      line({ type: 'user', message: { content: [{ type: 'text', text: '<system-reminder>Some context info</system-reminder>' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_2', content: [{ type: 'text', text: 'Here is the result.' }] } }),
+    ].join('\n');
+
+    const result = parseTurnTexts(tail);
+    expect(result.displayText).toBe('Here is the result.');
+    expect(result.intermediateText).toBe('First I will check.');
+  });
+
+  it('skips auto-compact continuation messages (not a turn boundary)', () => {
+    const tail = [
+      line({ type: 'user', message: { content: [{ type: 'text', text: 'Fix the bug' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: 'Investigating...' }] } }),
+      line({ type: 'user', message: { content: [{ type: 'text', text: 'This session is being continued from a previous conversation that ran out of context.' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_2', content: [{ type: 'text', text: 'Bug fixed.' }] } }),
+    ].join('\n');
+
+    const result = parseTurnTexts(tail);
+    expect(result.displayText).toBe('Bug fixed.');
+    expect(result.intermediateText).toBe('Investigating...');
+  });
+
+  it('still stops at genuine user prompt after Skill context', () => {
+    const tail = [
+      // Previous turn (should not be included)
+      line({ type: 'assistant', message: { id: 'msg_old', content: [{ type: 'text', text: 'Old response' }] } }),
+      // Real user prompt — this IS a turn boundary
+      line({ type: 'user', message: { content: [{ type: 'text', text: 'New question' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_new', content: [{ type: 'text', text: 'New answer' }] } }),
+    ].join('\n');
+
+    const result = parseTurnTexts(tail);
+    expect(result.displayText).toBe('New answer');
+    expect(result.turnText).toBe('New answer');
+    // Old response should NOT appear
+    expect(result.intermediateText).toBe('');
+  });
+
   it('skips progress and system entries', () => {
     const tail = [
       line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: 'Working...' }] } }),

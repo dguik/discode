@@ -117,8 +117,10 @@ export class HookEventPipeline {
     const resolvedInstanceId = instance?.instanceId;
     const instanceKey = resolvedInstanceId || resolvedAgentType;
 
+    const intermediateLen = eventType === 'session.idle' && typeof event.intermediateText === 'string' ? event.intermediateText.length : 0;
+    const intermediateSuffix = intermediateLen > 0 ? ` intermediate=(${intermediateLen} chars)` : '';
     console.log(
-      `\uD83D\uDD0D [${projectName}/${resolvedAgentType}${resolvedInstanceId ? `#${resolvedInstanceId}` : ''}] event=${eventType} text=${text ? `(${text.length} chars) ${text.substring(0, 100)}` : '(empty)'}`,
+      `\uD83D\uDD0D [${projectName}/${resolvedAgentType}${resolvedInstanceId ? `#${resolvedInstanceId}` : ''}] event=${eventType} text=${text ? `(${text.length} chars) ${text.substring(0, 100)}` : '(empty)'}${intermediateSuffix}`,
     );
 
     // Auto-create pending entry for tmux-initiated prompts
