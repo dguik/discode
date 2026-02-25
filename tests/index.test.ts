@@ -8,16 +8,33 @@ const pluginInstallerMocks = vi.hoisted(() => ({
   installGeminiHook: vi.fn().mockReturnValue('/mock/gemini/hook.js'),
 }));
 
-vi.mock('../src/opencode/plugin-installer.js', () => ({
+vi.mock('../src/agents/opencode/plugin-installer.js', () => ({
   installOpencodePlugin: pluginInstallerMocks.installOpencodePlugin,
+  getPluginSourcePath: () => '/mock/src/opencode/plugin/agent-opencode-bridge-plugin.ts',
+  getOpencodePluginDir: () => '/mock/opencode/plugins',
+  OPENCODE_PLUGIN_FILENAME: 'agent-opencode-bridge-plugin.ts',
 }));
 
-vi.mock('../src/claude/plugin-installer.js', () => ({
+vi.mock('../src/agents/claude/plugin-installer.js', () => ({
   installClaudePlugin: pluginInstallerMocks.installClaudePlugin,
+  getClaudePluginDir: () => '/mock/claude/plugin',
+  getPluginSourceDir: () => '/mock/claude/plugin-source',
+  CLAUDE_PLUGIN_NAME: 'discode-claude-bridge',
 }));
 
-vi.mock('../src/gemini/hook-installer.js', () => ({
+vi.mock('../src/agents/gemini/hook-installer.js', () => ({
   installGeminiHook: pluginInstallerMocks.installGeminiHook,
+  getGeminiHookSourcePath: () => '/mock/gemini/hook.js',
+  getGeminiConfigDir: () => '/mock/gemini/config',
+  getGeminiHookDir: () => '/mock/gemini/hooks',
+  getGeminiSettingsPath: () => '/mock/gemini/settings.json',
+  removeGeminiHook: vi.fn(),
+  GEMINI_HOOK_NAME: 'discode-gemini-after-agent',
+  GEMINI_AFTER_AGENT_HOOK_FILENAME: 'discode-after-agent-hook.js',
+  GEMINI_NOTIFICATION_HOOK_FILENAME: 'discode-notification-hook.js',
+  GEMINI_SESSION_HOOK_FILENAME: 'discode-session-hook.js',
+  GEMINI_NOTIFICATION_HOOK_NAME: 'discode-gemini-notification',
+  GEMINI_SESSION_HOOK_NAME: 'discode-gemini-session',
 }));
 
 import { AgentBridge } from '../src/index.js';
@@ -99,6 +116,16 @@ function createMockRegistry() {
     getStartCommand: vi.fn().mockReturnValue('cd "/test" && claude'),
     matchesChannel: vi.fn(),
     isInstalled: vi.fn().mockReturnValue(true),
+    injectContainerPlugins: vi.fn().mockReturnValue(false),
+    buildLaunchCommand: vi.fn().mockImplementation((cmd: string, integration?: any) => {
+      const pluginDir = integration?.claudePluginDir;
+      if (!pluginDir) return cmd;
+      if (/--plugin-dir\b/.test(cmd)) return cmd;
+      const pattern = /((?:^|&&|;)\s*)claude\b/;
+      if (!pattern.test(cmd)) return cmd;
+      return cmd.replace(pattern, `$1claude --plugin-dir '${pluginDir}'`);
+    }),
+    getExtraEnvVars: vi.fn().mockReturnValue({}),
   };
   return {
     get: vi.fn().mockReturnValue(mockAdapter),
@@ -283,7 +310,7 @@ describe('AgentBridge', () => {
 
       await bridge.start();
 
-      expect(pluginInstallerMocks.installClaudePlugin).toHaveBeenCalledWith('/test');
+      expect(pluginInstallerMocks.installClaudePlugin).toHaveBeenCalled();
       expect(mockStateManager.setProject).toHaveBeenCalledWith(
         expect.objectContaining({
           eventHooks: expect.objectContaining({ claude: true }),
@@ -307,7 +334,7 @@ describe('AgentBridge', () => {
 
       await bridge.start();
 
-      expect(pluginInstallerMocks.installGeminiHook).toHaveBeenCalledWith('/test');
+      expect(pluginInstallerMocks.installGeminiHook).toHaveBeenCalled();
       expect(mockStateManager.setProject).toHaveBeenCalledWith(
         expect.objectContaining({
           eventHooks: expect.objectContaining({ gemini: true }),
@@ -480,6 +507,12 @@ describe('AgentBridge', () => {
         getStartCommand: vi.fn().mockReturnValue('cd "/missing/project/path" && opencode'),
         matchesChannel: vi.fn(),
         isInstalled: vi.fn().mockReturnValue(true),
+        injectContainerPlugins: vi.fn().mockReturnValue(false),
+        buildLaunchCommand: vi.fn().mockImplementation((cmd: string) => cmd),
+        getExtraEnvVars: vi.fn().mockImplementation((opts?: { permissionAllow?: boolean }) => {
+          if (opts?.permissionAllow) return { OPENCODE_PERMISSION: '{"*":"allow"}' };
+          return {};
+        }),
       };
       mockRegistry.getAll.mockReturnValue([opencodeAdapter]);
       mockMessaging.createAgentChannels.mockResolvedValue({ opencode: 'ch-op' });

@@ -161,6 +161,16 @@ function createMockRegistry() {
     getStartCommand: vi.fn().mockReturnValue('cd "/test" && claude'),
     matchesChannel: vi.fn(),
     isInstalled: vi.fn().mockReturnValue(true),
+    injectContainerPlugins: vi.fn().mockReturnValue(false),
+    buildLaunchCommand: vi.fn().mockImplementation((cmd: string, integration?: any) => {
+      const pluginDir = integration?.claudePluginDir;
+      if (!pluginDir) return cmd;
+      if (/--plugin-dir\b/.test(cmd)) return cmd;
+      const pattern = /((?:^|&&|;)\s*)claude\b/;
+      if (!pattern.test(cmd)) return cmd;
+      return cmd.replace(pattern, `$1claude --plugin-dir '${pluginDir}'`);
+    }),
+    getExtraEnvVars: vi.fn().mockReturnValue({}),
   };
   return {
     get: vi.fn().mockReturnValue(mockAdapter),
@@ -380,6 +390,17 @@ describe('container mode integration', () => {
         channelSuffix: 'opencode',
       };
       registry._mockAdapter.getStartCommand.mockReturnValue('opencode');
+      registry._mockAdapter.injectContainerPlugins.mockImplementation(
+        (containerId: string, socketPath?: string) => {
+          containerMocks.injectFile(
+            containerId,
+            '/mock/src/opencode/plugin/agent-opencode-bridge-plugin.ts',
+            '/home/coder/.opencode/plugins',
+            socketPath,
+          );
+          return true;
+        },
+      );
 
       const bridge = new AgentBridge({
         messaging: createMockMessaging(),
@@ -409,6 +430,17 @@ describe('container mode integration', () => {
         channelSuffix: 'gemini',
       };
       registry._mockAdapter.getStartCommand.mockReturnValue('gemini');
+      registry._mockAdapter.injectContainerPlugins.mockImplementation(
+        (containerId: string, socketPath?: string) => {
+          containerMocks.injectFile(
+            containerId,
+            '/mock/src/gemini/hook/discode-after-agent-hook.js',
+            '/home/coder/.gemini/discode-hooks',
+            socketPath,
+          );
+          return true;
+        },
+      );
 
       const bridge = new AgentBridge({
         messaging: createMockMessaging(),
