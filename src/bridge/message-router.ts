@@ -8,11 +8,11 @@ import {
   getProjectInstance,
   normalizeProjectState,
 } from '../state/instances.js';
-import { cleanCapture } from '../capture/parser.js';
 import { PendingMessageTracker } from './pending-message-tracker.js';
 import type { StreamingMessageUpdater } from './streaming-message-updater.js';
 import type { ClaudeSdkRunner } from '../sdk/index.js';
 import { processAttachments } from './message-file-handler.js';
+import { scheduleBufferFallback } from './message-buffer-fallback.js';
 
 export interface BridgeMessageRouterDeps {
   messaging: MessagingClient;
@@ -106,7 +106,9 @@ export class BridgeMessageRouter {
       } else {
         try {
           await this.submitToAgent(normalizedProject.tmuxSession, windowName, sanitized, resolvedAgentType);
-          this.scheduleBufferFallback(
+          scheduleBufferFallback(
+            { messaging: this.deps.messaging, runtime: this.deps.runtime, pendingTracker: this.deps.pendingTracker },
+            this.fallbackTimers,
             normalizedProject.tmuxSession,
             windowName,
             projectName,
@@ -205,171 +207,6 @@ export class BridgeMessageRouter {
       }
     }
     if (current) await this.deps.messaging.sendToChannel(channelId, current);
-  }
-
-  private scheduleBufferFallback(
-    sessionName: string,
-    windowName: string,
-    projectName: string,
-    agentType: string,
-    instanceKey: string,
-    channelId: string,
-  ): void {
-    const key = `${projectName}:${instanceKey}`;
-
-    const existing = this.fallbackTimers.get(key);
-    if (existing) clearTimeout(existing);
-
-    const initialDelayMs = this.getEnvInt('DISCODE_BUFFER_FALLBACK_INITIAL_MS', 3000);
-    const stableCheckMs = this.getEnvInt('DISCODE_BUFFER_FALLBACK_STABLE_MS', 2000);
-    const maxChecks = 3;
-
-    let lastSnapshot = '';
-    let checkCount = 0;
-
-    const tag = `🖥️  [${key}]`;
-
-    const check = async () => {
-      this.fallbackTimers.delete(key);
-
-      if (!this.deps.pendingTracker.hasPending(projectName, agentType, instanceKey)) {
-        console.log(`${tag} fallback check #${checkCount}: pending already resolved, skipping`);
-        return;
-      }
-
-      if (this.deps.pendingTracker.isHookActive(projectName, agentType, instanceKey)) {
-        console.log(`${tag} fallback: hook events active, deferring to hook handler`);
-        return;
-      }
-
-      const snapshot = this.captureWindowText(sessionName, windowName);
-      if (!snapshot) {
-        console.log(`${tag} fallback check #${checkCount}: empty buffer, skipping`);
-        return;
-      }
-
-      if (snapshot === lastSnapshot) {
-        if (snapshot.trim().length > 0) {
-          const relevant = this.extractLastCommandBlock(snapshot);
-          if (relevant.trim().length === 0) {
-            console.log(`${tag} fallback: buffer stable but idle prompt detected, skipping`);
-            return;
-          }
-          console.log(`${tag} fallback: buffer stable (${snapshot.length} chars → ${relevant.length} chars), sending to channel`);
-          try {
-            await this.deps.messaging.sendToChannel(channelId, `\`\`\`\n${relevant}\n\`\`\``);
-            await this.deps.pendingTracker.markCompleted(projectName, agentType, instanceKey);
-          } catch (error) {
-            console.warn(`${tag} fallback send failed:`, error);
-          }
-        }
-        return;
-      }
-
-      console.log(`${tag} fallback check #${checkCount}: buffer changed (${snapshot.length} chars), retrying`);
-      lastSnapshot = snapshot;
-      checkCount++;
-
-      if (checkCount < maxChecks) {
-        const timer = setTimeout(() => { check().catch(() => {}); }, stableCheckMs);
-        this.fallbackTimers.set(key, timer);
-      } else {
-        console.log(`${tag} fallback: max checks reached, deferring to Stop hook`);
-      }
-    };
-
-    const timer = setTimeout(() => { check().catch(() => {}); }, initialDelayMs);
-    this.fallbackTimers.set(key, timer);
-  }
-
-  private captureWindowText(sessionName: string, windowName: string): string | null {
-    const runtime = this.deps.runtime;
-
-    if (runtime.getWindowFrame) {
-      try {
-        const frame = runtime.getWindowFrame(sessionName, windowName);
-        if (frame) {
-          const lines = frame.lines.map((line) =>
-            line.segments.map((s) => s.text).join(''),
-          );
-          while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
-            lines.pop();
-          }
-          return lines.join('\n');
-        }
-      } catch {
-        // fall through
-      }
-    }
-
-    if (runtime.getWindowBuffer) {
-      try {
-        const buffer = runtime.getWindowBuffer(sessionName, windowName);
-        if (!buffer) return null;
-        return cleanCapture(buffer);
-      } catch {
-        return null;
-      }
-    }
-
-    return null;
-  }
-
-  private extractLastCommandBlock(text: string): string {
-    const lines = text.split('\n');
-
-    let lastPromptIdx = -1;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (/^❯\s/.test(lines[i])) {
-        lastPromptIdx = i;
-        break;
-      }
-    }
-
-    if (lastPromptIdx < 0) return text;
-
-    const block = lines.slice(lastPromptIdx);
-    while (block.length > 0 && block[block.length - 1].trim() === '') {
-      block.pop();
-    }
-
-    if (this.isIdlePromptBlock(block)) {
-      return '';
-    }
-
-    return block.join('\n');
-  }
-
-  private isIdlePromptBlock(block: string[]): boolean {
-    if (block.length === 0) return true;
-
-    const isSeparator = (line: string) => {
-      const trimmed = line.trim();
-      if (trimmed.length === 0) return false;
-      const chromeChars = trimmed.replace(/[─━─—–\-=═╌╍┄┅┈┉]/gu, '');
-      return chromeChars.length === 0 || chromeChars.length / trimmed.length < 0.1;
-    };
-
-    let firstContentIdx = -1;
-    for (let i = 1; i < block.length; i++) {
-      if (block[i].trim().length > 0) {
-        firstContentIdx = i;
-        break;
-      }
-    }
-
-    if (firstContentIdx < 0) return true;
-    if (!isSeparator(block[firstContentIdx])) return false;
-
-    let substantiveLines = 0;
-    for (let i = firstContentIdx + 1; i < block.length; i++) {
-      const trimmed = block[i].trim();
-      if (trimmed.length === 0) continue;
-      if (isSeparator(block[i])) continue;
-      substantiveLines++;
-    }
-
-    return substantiveLines <= 2;
   }
 
   private buildDeliveryFailureGuidance(projectName: string, error: unknown): string {
