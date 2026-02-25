@@ -312,8 +312,8 @@ describe('parseTurnTexts', () => {
   }
 
   it('returns empty for null/empty input', () => {
-    expect(parseTurnTexts('')).toEqual({ displayText: '', intermediateText: '', turnText: '', thinking: '', promptText: '' });
-    expect(parseTurnTexts(null as any)).toEqual({ displayText: '', intermediateText: '', turnText: '', thinking: '', promptText: '' });
+    expect(parseTurnTexts('')).toEqual({ displayText: '', intermediateText: '', turnText: '', thinking: '', promptText: '', planFilePath: '' });
+    expect(parseTurnTexts(null as any)).toEqual({ displayText: '', intermediateText: '', turnText: '', thinking: '', promptText: '', planFilePath: '' });
   });
 
   it('extracts text from single assistant entry', () => {
