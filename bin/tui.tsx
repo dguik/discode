@@ -38,7 +38,7 @@ const TUI_VERSION_LABEL = TUI_VERSION.startsWith('v') ? TUI_VERSION : `v${TUI_VE
 const PREFIX_KEY_NAME = 'b';
 const PREFIX_LABEL = 'Ctrl+b';
 const DEBUG_SELECTION = process.env.DISCODE_TUI_DEBUG_SELECTION === '1';
-const ENABLE_RUNTIME_CURSOR_OVERLAY = process.env.DISCODE_TUI_RUNTIME_CURSOR === '1';
+const ENABLE_RUNTIME_CURSOR_OVERLAY = process.env.DISCODE_TUI_RUNTIME_CURSOR !== '0';
 
 type TuiInput = {
   currentSession?: string;
@@ -241,6 +241,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [windowOutput, setWindowOutput] = createSignal('');
   const [windowStyledLines, setWindowStyledLines] = createSignal<TerminalStyledLine[] | undefined>(undefined);
   const [windowCursor, setWindowCursor] = createSignal<TerminalCursor | undefined>(undefined);
+  const [windowCursorVisible, setWindowCursorVisible] = createSignal(true);
   const [cursorBlinkOn, setCursorBlinkOn] = createSignal(true);
   const [prefixPending, setPrefixPending] = createSignal(false);
   const [runtimeInputMode, setRuntimeInputMode] = createSignal(true);
@@ -305,7 +306,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     if (!ENABLE_RUNTIME_CURSOR_OVERLAY) return false;
     const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen();
     const runtimeActive = runtimeInputMode() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
-    return runtimeActive && !dialogOpen && cursorBlinkOn();
+    return runtimeActive && !dialogOpen && cursorBlinkOn() && windowCursorVisible();
   });
 
   const renderedStyledLines = createMemo(() => {
@@ -699,6 +700,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     const focused = await props.input.onAttachProject(project);
     if (!focused) return;
     setWindowCursor(undefined);
+    setWindowCursorVisible(true);
     if (focused.currentSession) setCurrentSession(focused.currentSession);
     if (focused.currentWindow) setCurrentWindow(focused.currentWindow);
   };
@@ -1145,6 +1147,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           if (!status.connected) {
             setWindowStyledLines(undefined);
             setWindowCursor(undefined);
+            setWindowCursorVisible(true);
           }
         }
       } catch (error) {
@@ -1162,6 +1165,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
         setWindowOutput('');
         setWindowStyledLines(undefined);
         setWindowCursor(undefined);
+        setWindowCursorVisible(true);
         return;
       }
 
@@ -1185,6 +1189,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
         if (frame.sessionName !== currentSession() || frame.windowName !== currentWindow()) return;
         setWindowOutput(frame.output || '');
         setWindowStyledLines(frame.styled);
+        setWindowCursorVisible(frame.cursorVisible !== false);
         const hasCursor = Number.isFinite(frame.cursorRow) && Number.isFinite(frame.cursorCol);
         setWindowCursor(hasCursor
           ? {
@@ -1214,11 +1219,13 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       void syncOutput();
     });
 
+    let nativeCursorHidden = false;
     createEffect(() => {
-      if (canHandleRuntimeInput()) {
-        // Keep the real terminal cursor hidden while drawing our own runtime cursor.
-        renderer.setCursorPosition(0, 0, false);
-      }
+      const shouldHideNativeCursor = canHandleRuntimeInput() && ENABLE_RUNTIME_CURSOR_OVERLAY;
+      if (shouldHideNativeCursor === nativeCursorHidden) return;
+      nativeCursorHidden = shouldHideNativeCursor;
+      // Keep the real terminal cursor hidden while drawing our own runtime cursor.
+      renderer.setCursorPosition(0, 0, !shouldHideNativeCursor);
     });
 
     void refreshProjects();
