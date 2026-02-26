@@ -161,6 +161,33 @@ async function main() {
   var instanceId = process.env.DISCODE_INSTANCE || process.env.AGENT_DISCORD_INSTANCE || "";
   var port = process.env.DISCODE_PORT || process.env.AGENT_DISCORD_PORT || "18470";
 
+  var hookEventName = typeof input.hook_event_name === "string" ? input.hook_event_name : "";
+
+  // PostToolUseFailure — report tool failure to bridge
+  if (hookEventName === "PostToolUseFailure") {
+    var failToolName = typeof input.tool_name === "string" ? input.tool_name : "";
+    var errorMsg = typeof input.error === "string" ? input.error : "";
+    if (!failToolName) return;
+    var errorPreview = errorMsg.length > 150 ? errorMsg.substring(0, 150) + "..." : errorMsg;
+
+    console.error("[discode-tool-hook] project=" + projectName + " event=tool.failure tool=" + failToolName);
+
+    try {
+      await postToBridge(port, {
+        projectName: projectName,
+        agentType: agentType,
+        ...(instanceId ? { instanceId: instanceId } : {}),
+        type: "tool.failure",
+        toolName: failToolName,
+        error: errorPreview,
+      });
+    } catch (_) {
+      // ignore bridge delivery failures
+    }
+    return;
+  }
+
+  // PostToolUse — existing tool activity reporting
   var toolName = typeof input.tool_name === "string" ? input.tool_name : "";
   var toolInput = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};
   var toolResponse = typeof input.tool_response === "string" ? input.tool_response : "";

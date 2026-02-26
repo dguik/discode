@@ -282,3 +282,27 @@ export async function handleTaskCompleted(deps: EventHandlerDeps, ctx: EventCont
   return true;
 }
 
+export async function handlePromptSubmit(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
+  const preview = ctx.text || '';
+  if (!preview) return true;
+  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCDD Prompt: ${preview}`);
+  return true;
+}
+
+export async function handleToolFailure(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
+  const toolName = typeof ctx.event.toolName === 'string' ? ctx.event.toolName : 'unknown';
+  const error = typeof ctx.event.error === 'string' ? ctx.event.error : '';
+  const errorSuffix = error ? `: ${error}` : '';
+  await deps.messaging.sendToChannel(ctx.channelId, `\u26A0\uFE0F ${toolName} failed${errorSuffix}`);
+  return true;
+}
+
+export async function handleTeammateIdle(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
+  const teammateName = typeof ctx.event.teammateName === 'string' ? ctx.event.teammateName : '';
+  const teamName = typeof ctx.event.teamName === 'string' ? ctx.event.teamName : '';
+  if (!teammateName) return true;
+  const teamSuffix = teamName ? ` (${teamName})` : '';
+  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCA4 [${teammateName}] idle${teamSuffix}`);
+  return true;
+}
+

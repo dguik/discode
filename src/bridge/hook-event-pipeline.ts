@@ -24,6 +24,9 @@ import {
   handleSessionIdle,
   handlePermissionRequest,
   handleTaskCompleted,
+  handlePromptSubmit,
+  handleToolFailure,
+  handleTeammateIdle,
   type EventHandlerDeps,
 } from './hook-event-handlers.js';
 
@@ -68,6 +71,9 @@ export class HookEventPipeline {
     'session.idle': handleSessionIdle,
     'permission.request': handlePermissionRequest,
     'task.completed': handleTaskCompleted,
+    'prompt.submit': handlePromptSubmit,
+    'tool.failure': handleToolFailure,
+    'teammate.idle': handleTeammateIdle,
   };
 
   constructor(private deps: EventPipelineDeps) {}
