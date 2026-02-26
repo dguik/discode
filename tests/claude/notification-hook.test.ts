@@ -13,7 +13,31 @@ import { fileURLToPath } from 'url';
 import { Script, createContext } from 'vm';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const hookPath = join(__dir, '../../src/claude/plugin/scripts/discode-notification-hook.js');
+const scriptsDir = join(__dir, '../../src/claude/plugin/scripts');
+const hookPath = join(scriptsDir, 'discode-notification-hook.js');
+
+function loadLib(overrides: { process?: any; fetch?: any } = {}) {
+  const realFs = require('fs');
+  const libSrc = readFileSync(join(scriptsDir, 'discode-hook-lib.js'), 'utf-8');
+  const libMod = { exports: {} as any };
+  new Script(libSrc, { filename: 'discode-hook-lib.js' }).runInContext(createContext({
+    require: (m: string) => m === 'fs' ? realFs : {},
+    module: libMod, exports: libMod.exports,
+    process: overrides.process || { env: {} },
+    fetch: overrides.fetch || (async () => ({})),
+    Buffer, Promise, setTimeout, JSON, Array, Object, Math, Number, String, parseInt, parseFloat,
+  }));
+  return libMod.exports;
+}
+
+function makeRequire(lib: any, realFs?: any) {
+  const fs = realFs || require('fs');
+  return (mod: string) => {
+    if (mod === 'fs') return fs;
+    if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+    return {};
+  };
+}
 
 function runHook(env: Record<string, string>, stdinJson: unknown): Promise<{ calls: Array<{ url: string; body: unknown }> }> {
   return new Promise((resolve) => {
@@ -24,23 +48,26 @@ function runHook(env: Record<string, string>, stdinJson: unknown): Promise<{ cal
     let onData: ((chunk: string) => void) | null = null;
     let onEnd: (() => void) | null = null;
 
-    const realFs = require('fs');
-    const ctx = createContext({
-      require: (mod: string) => {
-        if (mod === 'fs') return realFs;
-        return {};
-      },
-      process: {
-        env,
-        stdin: {
-          isTTY: false,
-          setEncoding: () => {},
-          on: (event: string, cb: any) => {
-            if (event === 'data') onData = cb;
-            if (event === 'end') onEnd = cb;
-          },
+    const mockProcess = {
+      env,
+      stdin: {
+        isTTY: false,
+        setEncoding: () => {},
+        on: (event: string, cb: any) => {
+          if (event === 'data') onData = cb;
+          if (event === 'end') onEnd = cb;
         },
       },
+    };
+    const mockFetch = async (url: string, opts: any) => {
+      fetchCalls.push({ url, body: JSON.parse(opts.body) });
+      return {};
+    };
+
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+    const ctx = createContext({
+      require: makeRequire(lib),
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
@@ -53,10 +80,7 @@ function runHook(env: Record<string, string>, stdinJson: unknown): Promise<{ cal
       Math,
       parseInt,
       parseFloat,
-      fetch: async (url: string, opts: any) => {
-        fetchCalls.push({ url, body: JSON.parse(opts.body) });
-        return {};
-      },
+      fetch: mockFetch,
     });
 
     new Script(raw, { filename: 'discode-notification-hook.js' }).runInContext(ctx);
@@ -79,12 +103,9 @@ function loadHookFunctions() {
   const raw = readFileSync(hookPath, 'utf-8');
   const src = raw.replace(/main\(\)\.catch[\s\S]*$/, '');
 
-  const realFs = require('fs');
+  const lib = loadLib();
   const ctx = createContext({
-    require: (mod: string) => {
-      if (mod === 'fs') return realFs;
-      return {};
-    },
+    require: makeRequire(lib),
     process: { env: {}, stdin: { isTTY: true } },
     console: { error: () => {} },
     Promise,
@@ -264,23 +285,22 @@ describe('discode-notification-hook', () => {
     let onEnd: (() => void) | null = null;
     let errorThrown = false;
 
-    const realFs = require('fs');
-    const ctx = createContext({
-      require: (mod: string) => {
-        if (mod === 'fs') return realFs;
-        return {};
-      },
-      process: {
-        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
-        stdin: {
-          isTTY: false,
-          setEncoding: () => {},
-          on: (event: string, cb: any) => {
-            if (event === 'data') onData = cb;
-            if (event === 'end') onEnd = cb;
-          },
+    const mockProcess = {
+      env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
+      stdin: {
+        isTTY: false,
+        setEncoding: () => {},
+        on: (event: string, cb: any) => {
+          if (event === 'data') onData = cb;
+          if (event === 'end') onEnd = cb;
         },
       },
+    };
+    const mockFetch = async () => { throw new Error('network error'); };
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+    const ctx = createContext({
+      require: makeRequire(lib),
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
@@ -293,7 +313,7 @@ describe('discode-notification-hook', () => {
       Math,
       parseInt,
       parseFloat,
-      fetch: async () => { throw new Error('network error'); },
+      fetch: mockFetch,
     });
 
     new Script(raw, { filename: 'discode-notification-hook.js' }).runInContext(ctx);
@@ -317,20 +337,22 @@ describe('discode-notification-hook', () => {
     const raw = readFileSync(hookPath, 'utf-8');
     const fetchCalls: Array<{ url: string; body: unknown }> = [];
 
-    const realFs = require('fs');
+    const mockProcess = {
+      env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
+      stdin: {
+        isTTY: true,
+        setEncoding: () => {},
+        on: () => {},
+      },
+    };
+    const mockFetch = async (url: string, opts: any) => {
+      fetchCalls.push({ url, body: JSON.parse(opts.body) });
+      return {};
+    };
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
     const ctx = createContext({
-      require: (mod: string) => {
-        if (mod === 'fs') return realFs;
-        return {};
-      },
-      process: {
-        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
-        stdin: {
-          isTTY: true,
-          setEncoding: () => {},
-          on: () => {},
-        },
-      },
+      require: makeRequire(lib),
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
@@ -343,10 +365,7 @@ describe('discode-notification-hook', () => {
       Math,
       parseInt,
       parseFloat,
-      fetch: async (url: string, opts: any) => {
-        fetchCalls.push({ url, body: JSON.parse(opts.body) });
-        return {};
-      },
+      fetch: mockFetch,
     });
 
     new Script(raw, { filename: 'discode-notification-hook.js' }).runInContext(ctx);
@@ -367,23 +386,25 @@ describe('discode-notification-hook', () => {
     let onData: ((chunk: string) => void) | null = null;
     let onEnd: (() => void) | null = null;
 
-    const realFs = require('fs');
-    const ctx = createContext({
-      require: (mod: string) => {
-        if (mod === 'fs') return realFs;
-        return {};
-      },
-      process: {
-        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
-        stdin: {
-          isTTY: false,
-          setEncoding: () => {},
-          on: (event: string, cb: any) => {
-            if (event === 'data') onData = cb;
-            if (event === 'end') onEnd = cb;
-          },
+    const mockProcess = {
+      env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
+      stdin: {
+        isTTY: false,
+        setEncoding: () => {},
+        on: (event: string, cb: any) => {
+          if (event === 'data') onData = cb;
+          if (event === 'end') onEnd = cb;
         },
       },
+    };
+    const mockFetch = async (url: string, opts: any) => {
+      fetchCalls.push({ url, body: JSON.parse(opts.body) });
+      return {};
+    };
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+    const ctx = createContext({
+      require: makeRequire(lib),
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
@@ -396,10 +417,7 @@ describe('discode-notification-hook', () => {
       Math,
       parseInt,
       parseFloat,
-      fetch: async (url: string, opts: any) => {
-        fetchCalls.push({ url, body: JSON.parse(opts.body) });
-        return {};
-      },
+      fetch: mockFetch,
     });
 
     new Script(raw, { filename: 'discode-notification-hook.js' }).runInContext(ctx);

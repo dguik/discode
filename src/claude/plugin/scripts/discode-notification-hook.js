@@ -1,89 +1,5 @@
 #!/usr/bin/env node
-const { openSync, readSync, closeSync, statSync } = require("fs");
-
-function asObject(node) {
-  if (!node || typeof node !== "object" || Array.isArray(node)) return null;
-  return node;
-}
-
-function extractToolUseBlocks(node, depth = 0) {
-  if (depth > 10 || node === undefined || node === null) return [];
-
-  if (Array.isArray(node)) {
-    return node.flatMap((item) => extractToolUseBlocks(item, depth + 1));
-  }
-
-  const obj = asObject(node);
-  if (!obj) return [];
-
-  if (obj.type === "tool_use" && typeof obj.name === "string") {
-    return [{ name: obj.name, input: obj.input && typeof obj.input === "object" ? obj.input : {} }];
-  }
-
-  if (Array.isArray(obj.content)) {
-    return extractToolUseBlocks(obj.content, depth + 1);
-  }
-
-  return [];
-}
-
-function formatPromptText(toolUseBlocks) {
-  const parts = [];
-  for (const block of toolUseBlocks) {
-    if (block.name === "AskUserQuestion") {
-      const input = block.input || {};
-      const questions = Array.isArray(input.questions) ? input.questions : [];
-      for (const q of questions) {
-        const qObj = asObject(q);
-        if (!qObj) continue;
-        const header = typeof qObj.header === "string" ? qObj.header : "";
-        const question = typeof qObj.question === "string" ? qObj.question : "";
-        if (!question) continue;
-
-        let text = header ? "\u2753 *" + header + "*\n" + question : "\u2753 " + question;
-        const options = Array.isArray(qObj.options) ? qObj.options : [];
-        for (const opt of options) {
-          const optObj = asObject(opt);
-          if (!optObj) continue;
-          const label = typeof optObj.label === "string" ? optObj.label : "";
-          const desc = typeof optObj.description === "string" ? optObj.description : "";
-          if (!label) continue;
-          text += desc ? "\n\u2022 *" + label + "* \u2014 " + desc : "\n\u2022 *" + label + "*";
-        }
-        parts.push(text);
-      }
-    } else if (block.name === "ExitPlanMode") {
-      parts.push("\uD83D\uDCCB Plan approval needed");
-    }
-  }
-  return parts.join("\n\n");
-}
-
-function parseLineJson(line) {
-  try {
-    return JSON.parse(line);
-  } catch {
-    return null;
-  }
-}
-
-function readTail(filePath, maxBytes) {
-  try {
-    const st = statSync(filePath);
-    if (st.size === 0) return "";
-    const readSize = Math.min(st.size, maxBytes);
-    const buf = Buffer.alloc(readSize);
-    const fd = openSync(filePath, "r");
-    try {
-      readSync(fd, buf, 0, readSize, st.size - readSize);
-    } finally {
-      closeSync(fd);
-    }
-    return buf.toString("utf8");
-  } catch {
-    return "";
-  }
-}
+var { asObject, extractToolUseBlocks, formatPromptText, parseLineJson, readTail, readStdin, postToBridge } = require("./discode-hook-lib.js");
 
 /**
  * Extract promptText from the transcript tail.
@@ -131,36 +47,6 @@ function extractPromptFromTranscript(transcriptPath) {
 
   allToolUseBlocks.reverse();
   return formatPromptText(allToolUseBlocks);
-}
-
-function readStdin() {
-  return new Promise((resolve) => {
-    if (process.stdin.isTTY) {
-      resolve("");
-      return;
-    }
-
-    let raw = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => {
-      raw += chunk;
-    });
-    process.stdin.on("end", () => {
-      resolve(raw);
-    });
-    process.stdin.on("error", () => {
-      resolve("");
-    });
-  });
-}
-
-async function postToBridge(port, payload) {
-  var hostname = process.env.DISCODE_HOSTNAME || process.env.AGENT_DISCORD_HOSTNAME || "127.0.0.1";
-  await fetch("http://" + hostname + ":" + port + "/opencode-event", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
 }
 
 async function main() {

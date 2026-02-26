@@ -4,6 +4,7 @@
  * SubagentStop hook — fires when a subagent (Task tool) completes.
  * Sends a summary to Slack/Discord so the user can track parallel work.
  */
+var { readStdin, postToBridge } = require("./discode-hook-lib.js");
 
 function truncate(str, maxLen) {
   if (!str) return "";
@@ -11,36 +12,6 @@ function truncate(str, maxLen) {
   var preview = lines.slice(0, 2).join(" ").trim();
   if (preview.length > maxLen) return preview.substring(0, maxLen) + "...";
   return preview;
-}
-
-function readStdin() {
-  return new Promise(function (resolve) {
-    if (process.stdin.isTTY) {
-      resolve("");
-      return;
-    }
-
-    var raw = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", function (chunk) {
-      raw += chunk;
-    });
-    process.stdin.on("end", function () {
-      resolve(raw);
-    });
-    process.stdin.on("error", function () {
-      resolve("");
-    });
-  });
-}
-
-async function postToBridge(port, payload) {
-  var hostname = process.env.DISCODE_HOSTNAME || process.env.AGENT_DISCORD_HOSTNAME || "127.0.0.1";
-  await fetch("http://" + hostname + ":" + port + "/opencode-event", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
 }
 
 async function main() {

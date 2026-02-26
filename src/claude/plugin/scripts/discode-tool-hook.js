@@ -5,6 +5,7 @@
  * Sends a per-tool thread reply to Slack/Discord so the user
  * can see progress in real time instead of a single batch summary.
  */
+var { readStdin, postToBridge } = require("./discode-hook-lib.js");
 
 function shortenPath(fp, maxSegments) {
   var parts = fp.split("/").filter(function (p) { return p.length > 0; });
@@ -142,36 +143,6 @@ function formatToolLine(toolName, toolInput, toolResponse) {
   }
 
   return "";
-}
-
-function readStdin() {
-  return new Promise(function (resolve) {
-    if (process.stdin.isTTY) {
-      resolve("");
-      return;
-    }
-
-    var raw = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", function (chunk) {
-      raw += chunk;
-    });
-    process.stdin.on("end", function () {
-      resolve(raw);
-    });
-    process.stdin.on("error", function () {
-      resolve("");
-    });
-  });
-}
-
-async function postToBridge(port, payload) {
-  var hostname = process.env.DISCODE_HOSTNAME || process.env.AGENT_DISCORD_HOSTNAME || "127.0.0.1";
-  await fetch("http://" + hostname + ":" + port + "/opencode-event", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
 }
 
 async function main() {

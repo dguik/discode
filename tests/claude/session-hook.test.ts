@@ -11,7 +11,22 @@ import { fileURLToPath } from 'url';
 import { Script, createContext } from 'vm';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const hookPath = join(__dir, '../../src/claude/plugin/scripts/discode-session-hook.js');
+const scriptsDir = join(__dir, '../../src/claude/plugin/scripts');
+const hookPath = join(scriptsDir, 'discode-session-hook.js');
+
+function loadLib(overrides: { process?: any; fetch?: any } = {}) {
+  const realFs = require('fs');
+  const libSrc = readFileSync(join(scriptsDir, 'discode-hook-lib.js'), 'utf-8');
+  const libMod = { exports: {} as any };
+  new Script(libSrc, { filename: 'discode-hook-lib.js' }).runInContext(createContext({
+    require: (m: string) => m === 'fs' ? realFs : {},
+    module: libMod, exports: libMod.exports,
+    process: overrides.process || { env: {} },
+    fetch: overrides.fetch || (async () => ({})),
+    Buffer, Promise, setTimeout, JSON, Array, Object, String, Number,
+  }));
+  return libMod.exports;
+}
 
 function runHook(env: Record<string, string>, stdinJson: unknown): Promise<{ calls: Array<{ url: string; body: unknown }> }> {
   return new Promise((resolve) => {
@@ -22,19 +37,29 @@ function runHook(env: Record<string, string>, stdinJson: unknown): Promise<{ cal
     let onData: ((chunk: string) => void) | null = null;
     let onEnd: (() => void) | null = null;
 
-    const ctx = createContext({
-      require: () => ({}),
-      process: {
-        env,
-        stdin: {
-          isTTY: false,
-          setEncoding: () => {},
-          on: (event: string, cb: any) => {
-            if (event === 'data') onData = cb;
-            if (event === 'end') onEnd = cb;
-          },
+    const mockProcess = {
+      env,
+      stdin: {
+        isTTY: false,
+        setEncoding: () => {},
+        on: (event: string, cb: any) => {
+          if (event === 'data') onData = cb;
+          if (event === 'end') onEnd = cb;
         },
       },
+    };
+    const mockFetch = async (url: string, opts: any) => {
+      fetchCalls.push({ url, body: JSON.parse(opts.body) });
+      return {};
+    };
+
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+    const ctx = createContext({
+      require: (mod: string) => {
+        if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+        return {};
+      },
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
@@ -43,10 +68,7 @@ function runHook(env: Record<string, string>, stdinJson: unknown): Promise<{ cal
       Object,
       String,
       Number,
-      fetch: async (url: string, opts: any) => {
-        fetchCalls.push({ url, body: JSON.parse(opts.body) });
-        return {};
-      },
+      fetch: mockFetch,
     });
 
     new Script(raw, { filename: 'discode-session-hook.js' }).runInContext(ctx);
@@ -279,19 +301,28 @@ describe('discode-session-hook', () => {
     let onData: ((chunk: string) => void) | null = null;
     let onEnd: (() => void) | null = null;
 
-    const ctx = createContext({
-      require: () => ({}),
-      process: {
-        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
-        stdin: {
-          isTTY: false,
-          setEncoding: () => {},
-          on: (event: string, cb: any) => {
-            if (event === 'data') onData = cb;
-            if (event === 'end') onEnd = cb;
-          },
+    const mockProcess = {
+      env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
+      stdin: {
+        isTTY: false,
+        setEncoding: () => {},
+        on: (event: string, cb: any) => {
+          if (event === 'data') onData = cb;
+          if (event === 'end') onEnd = cb;
         },
       },
+    };
+    const mockFetch = async (url: string, opts: any) => {
+      fetchCalls.push({ url, body: JSON.parse(opts.body) });
+      return {};
+    };
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+    const ctx = createContext({
+      require: (mod: string) => {
+        if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+        return {};
+      },
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
@@ -300,10 +331,7 @@ describe('discode-session-hook', () => {
       Object,
       String,
       Number,
-      fetch: async (url: string, opts: any) => {
-        fetchCalls.push({ url, body: JSON.parse(opts.body) });
-        return {};
-      },
+      fetch: mockFetch,
     });
 
     new Script(raw, { filename: 'discode-session-hook.js' }).runInContext(ctx);
@@ -335,19 +363,25 @@ describe('discode-session-hook', () => {
     let onData: ((chunk: string) => void) | null = null;
     let onEnd: (() => void) | null = null;
 
-    const ctx = createContext({
-      require: () => ({}),
-      process: {
-        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
-        stdin: {
-          isTTY: false,
-          setEncoding: () => {},
-          on: (event: string, cb: any) => {
-            if (event === 'data') onData = cb;
-            if (event === 'end') onEnd = cb;
-          },
+    const mockProcess = {
+      env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
+      stdin: {
+        isTTY: false,
+        setEncoding: () => {},
+        on: (event: string, cb: any) => {
+          if (event === 'data') onData = cb;
+          if (event === 'end') onEnd = cb;
         },
       },
+    };
+    const mockFetch = async () => { throw new Error('network error'); };
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+    const ctx = createContext({
+      require: (mod: string) => {
+        if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+        return {};
+      },
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
@@ -356,7 +390,7 @@ describe('discode-session-hook', () => {
       Object,
       String,
       Number,
-      fetch: async () => { throw new Error('network error'); },
+      fetch: mockFetch,
     });
 
     new Script(raw, { filename: 'discode-session-hook.js' }).runInContext(ctx);
@@ -378,19 +412,25 @@ describe('discode-session-hook', () => {
     let onData: ((chunk: string) => void) | null = null;
     let onEnd: (() => void) | null = null;
 
-    const ctx = createContext({
-      require: () => ({}),
-      process: {
-        env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
-        stdin: {
-          isTTY: false,
-          setEncoding: () => {},
-          on: (event: string, cb: any) => {
-            if (event === 'data') onData = cb;
-            if (event === 'end') onEnd = cb;
-          },
+    const mockProcess = {
+      env: { DISCODE_PROJECT: 'proj', DISCODE_PORT: '18470' },
+      stdin: {
+        isTTY: false,
+        setEncoding: () => {},
+        on: (event: string, cb: any) => {
+          if (event === 'data') onData = cb;
+          if (event === 'end') onEnd = cb;
         },
       },
+    };
+    const mockFetch = async () => { throw new Error('network error'); };
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+    const ctx = createContext({
+      require: (mod: string) => {
+        if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+        return {};
+      },
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
@@ -399,7 +439,7 @@ describe('discode-session-hook', () => {
       Object,
       String,
       Number,
-      fetch: async () => { throw new Error('network error'); },
+      fetch: mockFetch,
     });
 
     new Script(raw, { filename: 'discode-session-hook.js' }).runInContext(ctx);

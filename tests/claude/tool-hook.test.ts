@@ -13,19 +13,38 @@ import { fileURLToPath } from 'url';
 import { Script, createContext } from 'vm';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const hookPath = join(__dir, '../../src/claude/plugin/scripts/discode-tool-hook.js');
+const scriptsDir = join(__dir, '../../src/claude/plugin/scripts');
+const hookPath = join(scriptsDir, 'discode-tool-hook.js');
 
 type FormatToolLineFn = (toolName: string, toolInput: Record<string, unknown>, toolResponse?: string) => string;
 type ShortenPathFn = (fp: string, maxSegments: number) => string;
 type FirstLinePreviewFn = (str: string, maxLen: number) => string;
+
+function loadLib(overrides: { process?: any; fetch?: any } = {}) {
+  const realFs = require('fs');
+  const libSrc = readFileSync(join(scriptsDir, 'discode-hook-lib.js'), 'utf-8');
+  const libMod = { exports: {} as any };
+  new Script(libSrc, { filename: 'discode-hook-lib.js' }).runInContext(createContext({
+    require: (m: string) => m === 'fs' ? realFs : {},
+    module: libMod, exports: libMod.exports,
+    process: overrides.process || { env: {} },
+    fetch: overrides.fetch || (async () => ({})),
+    Buffer, Promise, setTimeout, JSON, Array, Object, Math, Number, String, RegExp, parseInt, parseFloat,
+  }));
+  return libMod.exports;
+}
 
 function loadHookFunctions() {
   const raw = readFileSync(hookPath, 'utf-8');
   // Strip the self-executing main() so it doesn't run
   const src = raw.replace(/main\(\)\.catch[\s\S]*$/, '');
 
+  const lib = loadLib();
   const ctx = createContext({
-    require: () => ({}),
+    require: (mod: string) => {
+      if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+      return {};
+    },
     process: { env: {}, stdin: { isTTY: true } },
     console: { error: () => {} },
     Promise,
@@ -351,19 +370,29 @@ describe('tool-hook integration', () => {
       let onData: ((chunk: string) => void) | null = null;
       let onEnd: (() => void) | null = null;
 
-      const ctx = createContext({
-        require: () => ({}),
-        process: {
-          env,
-          stdin: {
-            isTTY: false,
-            setEncoding: () => {},
-            on: (event: string, cb: any) => {
-              if (event === 'data') onData = cb;
-              if (event === 'end') onEnd = cb;
-            },
+      const mockProcess = {
+        env,
+        stdin: {
+          isTTY: false,
+          setEncoding: () => {},
+          on: (event: string, cb: any) => {
+            if (event === 'data') onData = cb;
+            if (event === 'end') onEnd = cb;
           },
         },
+      };
+      const mockFetch = async (url: string, opts: any) => {
+        fetchCalls.push({ url, body: JSON.parse(opts.body) });
+        return {};
+      };
+
+      const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+      const ctx = createContext({
+        require: (mod: string) => {
+          if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+          return {};
+        },
+        process: mockProcess,
         console: { error: () => {} },
         Promise,
         setTimeout,
@@ -377,10 +406,7 @@ describe('tool-hook integration', () => {
         RegExp,
         parseInt,
         parseFloat,
-        fetch: async (url: string, opts: any) => {
-          fetchCalls.push({ url, body: JSON.parse(opts.body) });
-          return {};
-        },
+        fetch: mockFetch,
       });
 
       new Script(raw, { filename: 'discode-tool-hook.js' }).runInContext(ctx);
@@ -520,25 +546,31 @@ describe('tool-hook integration', () => {
       let onData: ((chunk: string) => void) | null = null;
       let onEnd: (() => void) | null = null;
 
-      const ctx = createContext({
-        require: () => ({}),
-        process: {
-          env: { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
-          stdin: {
-            isTTY: false,
-            setEncoding: () => {},
-            on: (event: string, cb: any) => {
-              if (event === 'data') onData = cb;
-              if (event === 'end') onEnd = cb;
-            },
+      const mockProcess = {
+        env: { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
+        stdin: {
+          isTTY: false,
+          setEncoding: () => {},
+          on: (event: string, cb: any) => {
+            if (event === 'data') onData = cb;
+            if (event === 'end') onEnd = cb;
           },
         },
-        console: { error: () => {} },
-        Promise, setTimeout, Buffer, JSON, Array, Object, String, Number, Math, RegExp, parseInt, parseFloat,
-        fetch: async (url: string, opts: any) => {
-          fetchCalls.push({ url, body: JSON.parse(opts.body) });
+      };
+      const mockFetch = async (url: string, opts: any) => {
+        fetchCalls.push({ url, body: JSON.parse(opts.body) });
+        return {};
+      };
+      const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+      const ctx = createContext({
+        require: (mod: string) => {
+          if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
           return {};
         },
+        process: mockProcess,
+        console: { error: () => {} },
+        Promise, setTimeout, Buffer, JSON, Array, Object, String, Number, Math, RegExp, parseInt, parseFloat,
+        fetch: mockFetch,
       });
 
       new Script(raw, { filename: 'discode-tool-hook.js' }).runInContext(ctx);
@@ -610,25 +642,31 @@ describe('tool-hook integration', () => {
       let onData: ((chunk: string) => void) | null = null;
       let onEnd: (() => void) | null = null;
 
-      const ctx = createContext({
-        require: () => ({}),
-        process: {
-          env: { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
-          stdin: {
-            isTTY: false,
-            setEncoding: () => {},
-            on: (event: string, cb: any) => {
-              if (event === 'data') onData = cb;
-              if (event === 'end') onEnd = cb;
-            },
+      const mockProcess = {
+        env: { DISCODE_PROJECT: 'myproj', DISCODE_AGENT: 'claude', DISCODE_PORT: '18470' },
+        stdin: {
+          isTTY: false,
+          setEncoding: () => {},
+          on: (event: string, cb: any) => {
+            if (event === 'data') onData = cb;
+            if (event === 'end') onEnd = cb;
           },
         },
+      };
+      const mockFetch = async () => {
+        fetchCallCount++;
+        throw new Error('Connection refused');
+      };
+      const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+      const ctx = createContext({
+        require: (mod: string) => {
+          if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+          return {};
+        },
+        process: mockProcess,
         console: { error: () => {} },
         Promise, setTimeout, Buffer, JSON, Array, Object, String, Number, Math, RegExp, parseInt, parseFloat,
-        fetch: async () => {
-          fetchCallCount++;
-          throw new Error('Connection refused');
-        },
+        fetch: mockFetch,
       });
 
       new Script(raw, { filename: 'discode-tool-hook.js' }).runInContext(ctx);

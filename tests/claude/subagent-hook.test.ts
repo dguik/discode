@@ -11,17 +11,36 @@ import { fileURLToPath } from 'url';
 import { Script, createContext } from 'vm';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const hookPath = join(__dir, '../../src/claude/plugin/scripts/discode-subagent-hook.js');
+const scriptsDir = join(__dir, '../../src/claude/plugin/scripts');
+const hookPath = join(scriptsDir, 'discode-subagent-hook.js');
 
 type TruncateFn = (str: string, maxLen: number) => string;
+
+function loadLib(overrides: { process?: any; fetch?: any } = {}) {
+  const realFs = require('fs');
+  const libSrc = readFileSync(join(scriptsDir, 'discode-hook-lib.js'), 'utf-8');
+  const libMod = { exports: {} as any };
+  new Script(libSrc, { filename: 'discode-hook-lib.js' }).runInContext(createContext({
+    require: (m: string) => m === 'fs' ? realFs : {},
+    module: libMod, exports: libMod.exports,
+    process: overrides.process || { env: {} },
+    fetch: overrides.fetch || (async () => ({})),
+    Buffer, Promise, setTimeout, JSON, Array, Object, String, RegExp,
+  }));
+  return libMod.exports;
+}
 
 function loadHookFunctions() {
   const raw = readFileSync(hookPath, 'utf-8');
   // Strip the self-executing main() so it doesn't run
   const src = raw.replace(/main\(\)\.catch[\s\S]*$/, '');
 
+  const lib = loadLib();
   const ctx = createContext({
-    require: () => ({}),
+    require: (mod: string) => {
+      if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+      return {};
+    },
     process: { env: {}, stdin: { isTTY: true } },
     console: { error: () => {} },
     Promise,
@@ -108,27 +127,34 @@ describe('subagent-hook integration', () => {
     const src = raw.replace(/main\(\)\.catch[\s\S]*$/, '');
 
     const fetchCalls: Array<{ url: string; body: any }> = [];
-    const ctx = createContext({
-      require: () => ({}),
-      process: {
-        env: opts.env || {},
-        stdin: {
-          isTTY: false,
-          setEncoding: () => {},
-          on: (event: string, cb: (data?: string) => void) => {
-            if (event === 'data' && opts.stdinData) cb(opts.stdinData);
-            if (event === 'end') setTimeout(() => cb(), 0);
-          },
+    const mockProcess = {
+      env: opts.env || {},
+      stdin: {
+        isTTY: false,
+        setEncoding: () => {},
+        on: (event: string, cb: (data?: string) => void) => {
+          if (event === 'data' && opts.stdinData) cb(opts.stdinData);
+          if (event === 'end') setTimeout(() => cb(), 0);
         },
       },
+    };
+    const mockFetch = opts.fetchMock || (async (url: string, init: any) => {
+      fetchCalls.push({ url, body: JSON.parse(init.body) });
+      return { ok: true };
+    });
+
+    const lib = loadLib({ process: mockProcess, fetch: mockFetch });
+    const ctx = createContext({
+      require: (mod: string) => {
+        if (mod === './discode-hook-lib.js' || mod === './discode-hook-lib') return lib;
+        return {};
+      },
+      process: mockProcess,
       console: { error: () => {} },
       Promise,
       setTimeout,
       Buffer,
-      fetch: opts.fetchMock || (async (url: string, init: any) => {
-        fetchCalls.push({ url, body: JSON.parse(init.body) });
-        return { ok: true };
-      }),
+      fetch: mockFetch,
       JSON,
       Array,
       Object,
