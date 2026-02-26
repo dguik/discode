@@ -64,6 +64,28 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/discode-permission-task-hook.js",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/discode-permission-task-hook.js",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }

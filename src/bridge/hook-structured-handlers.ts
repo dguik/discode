@@ -84,6 +84,35 @@ export async function handleTaskProgress(deps: EventHandlerDeps, ctx: EventConte
   return true;
 }
 
+/** Mark a task as completed in the existing checklist (if any). */
+export function markTaskCompletedInChecklist(
+  deps: EventHandlerDeps,
+  key: string,
+  taskId: string,
+): void {
+  const checklist = taskChecklistMessages.get(key);
+  if (!checklist) return;
+
+  const task = checklist.tasks.find(t => t.id === taskId);
+  if (!task || task.status === 'completed') return;
+
+  task.status = 'completed';
+
+  const completedCount = checklist.tasks.filter(t => t.status === 'completed').length;
+  const header = `\uD83D\uDCCB 작업 목록 (${completedCount}/${checklist.tasks.length} 완료)`;
+  const lines = checklist.tasks.map(t => {
+    const icon = t.status === 'completed' ? '\u2611\uFE0F' : t.status === 'in_progress' ? '\uD83D\uDD04' : '\u2B1C';
+    return `${icon} #${t.id} ${t.subject}`;
+  });
+  const message = [header, ...lines].join('\n');
+
+  if (checklist.messageId) {
+    deps.messaging.updateMessage(checklist.channelId, checklist.messageId, message).catch((error) => {
+      console.warn('Failed to update task checklist from TaskCompleted:', error);
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Git activity (GIT_COMMIT / GIT_PUSH)
 // ---------------------------------------------------------------------------

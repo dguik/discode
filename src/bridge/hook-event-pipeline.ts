@@ -22,6 +22,8 @@ import {
   handleThinkingStop,
   handleToolActivity,
   handleSessionIdle,
+  handlePermissionRequest,
+  handleTaskCompleted,
   type EventHandlerDeps,
 } from './hook-event-handlers.js';
 
@@ -64,6 +66,8 @@ export class HookEventPipeline {
     'thinking.stop': handleThinkingStop,
     'tool.activity': handleToolActivity,
     'session.idle': handleSessionIdle,
+    'permission.request': handlePermissionRequest,
+    'task.completed': handleTaskCompleted,
   };
 
   constructor(private deps: EventPipelineDeps) {}

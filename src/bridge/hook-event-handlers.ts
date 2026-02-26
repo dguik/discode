@@ -15,6 +15,7 @@ import {
   handleGitActivity,
   handleSubagentDone,
   clearTaskChecklist,
+  markTaskCompletedInChecklist,
 } from './hook-structured-handlers.js';
 import {
   buildFinalizeHeader,
@@ -78,6 +79,10 @@ export async function handleSessionNotification(deps: EventHandlerDeps, ctx: Eve
   const emoji = emojiMap[notificationType] || '\uD83D\uDD14';
   const msg = ctx.text || notificationType;
   await deps.messaging.sendToChannel(ctx.channelId, `${emoji} ${msg}`);
+
+  // Skip promptText for elicitation_dialog — the Stop hook (session.idle) will
+  // deliver it with interactive buttons via sendQuestionWithButtons.
+  if (notificationType === 'elicitation_dialog') return true;
 
   const promptText = typeof ctx.event.promptText === 'string' ? ctx.event.promptText.trim() : '';
   if (promptText) {
@@ -249,6 +254,30 @@ export async function handleSessionIdle(deps: EventHandlerDeps, ctx: EventContex
 
   // Prompt choices (AskUserQuestion, ExitPlanMode)
   await postPromptChoices(deps.messaging, ctx);
+
+  return true;
+}
+
+export async function handlePermissionRequest(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
+  const toolName = typeof ctx.event.toolName === 'string' ? ctx.event.toolName : 'unknown';
+  const toolInput = typeof ctx.event.toolInput === 'string' ? ctx.event.toolInput : '';
+  const inputSuffix = toolInput ? ` — \`${toolInput}\`` : '';
+  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDD10 Permission needed: \`${toolName}\`${inputSuffix}`);
+  return true;
+}
+
+export async function handleTaskCompleted(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
+  const taskSubject = typeof ctx.event.taskSubject === 'string' ? ctx.event.taskSubject : '';
+  const teammateName = typeof ctx.event.teammateName === 'string' ? ctx.event.teammateName : '';
+  const taskId = typeof ctx.event.taskId === 'string' ? ctx.event.taskId : '';
+  const prefix = teammateName ? `\u2705 [${teammateName}] Task completed` : '\u2705 Task completed';
+  const subject = taskSubject ? `: ${taskSubject}` : '';
+  await deps.messaging.sendToChannel(ctx.channelId, `${prefix}${subject}`);
+
+  if (taskId) {
+    const k = `${ctx.projectName}:${ctx.instanceKey}`;
+    markTaskCompletedInChecklist(deps, k, taskId);
+  }
 
   return true;
 }

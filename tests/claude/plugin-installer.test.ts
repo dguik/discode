@@ -11,6 +11,7 @@ import {
 const CLAUDE_STOP_HOOK_FILENAME = 'discode-stop-hook.js';
 const CLAUDE_NOTIFICATION_HOOK_FILENAME = 'discode-notification-hook.js';
 const CLAUDE_SESSION_HOOK_FILENAME = 'discode-session-hook.js';
+const CLAUDE_PERMISSION_TASK_HOOK_FILENAME = 'discode-permission-task-hook.js';
 
 describe('claude plugin installer', () => {
   let tempDir: string;
@@ -30,6 +31,7 @@ describe('claude plugin installer', () => {
     expect(existsSync(join(sourceDir, 'scripts', CLAUDE_STOP_HOOK_FILENAME))).toBe(true);
     expect(existsSync(join(sourceDir, 'scripts', CLAUDE_NOTIFICATION_HOOK_FILENAME))).toBe(true);
     expect(existsSync(join(sourceDir, 'scripts', CLAUDE_SESSION_HOOK_FILENAME))).toBe(true);
+    expect(existsSync(join(sourceDir, 'scripts', CLAUDE_PERMISSION_TASK_HOOK_FILENAME))).toBe(true);
     expect(existsSync(join(sourceDir, 'scripts', 'discode-hook-lib.js'))).toBe(true);
   });
 
