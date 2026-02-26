@@ -55,8 +55,8 @@ export class HookEventPipeline {
   private channelQueues = new Map<string, Promise<void>>();
   /** Periodic timers that show elapsed thinking time. */
   private thinkingTimers = new Map<string, { timer: ReturnType<typeof setInterval>; startTime: number }>();
-  /** Thread activity messages (one per instance, replaced with latest activity). */
-  private threadActivityMessages = new Map<string, { channelId: string; parentMessageId: string; messageId: string; lines: string[] }>();
+  /** Activity history per instance (for error context). */
+  private activityHistory = new Map<string, string[]>();
   /** Session lifecycle timers. */
   private sessionLifecycleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -86,7 +86,7 @@ export class HookEventPipeline {
       clearTimeout(timer);
     }
     this.sessionLifecycleTimers.clear();
-    this.threadActivityMessages.clear();
+    this.activityHistory.clear();
   }
 
   async handleOpencodeEvent(payload: unknown): Promise<boolean> {
@@ -169,7 +169,7 @@ export class HookEventPipeline {
       pendingTracker: this.deps.pendingTracker,
       streamingUpdater: this.deps.streamingUpdater,
       thinkingTimers: this.thinkingTimers,
-      threadActivityMessages: this.threadActivityMessages,
+      activityHistory: this.activityHistory,
       sessionLifecycleTimers: this.sessionLifecycleTimers,
       ensureStartMessageAndStreaming: (ctx) => this.ensureStartMessageAndStreaming(ctx),
       clearThinkingTimer: (key) => this.clearThinkingTimer(key),

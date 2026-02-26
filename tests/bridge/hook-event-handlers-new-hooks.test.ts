@@ -48,7 +48,7 @@ function createMockDeps(): EventHandlerDeps {
       finalize: vi.fn().mockResolvedValue(undefined),
     } as any,
     thinkingTimers: new Map(),
-    threadActivityMessages: new Map(),
+    activityHistory: new Map(),
     sessionLifecycleTimers: new Map(),
     ensureStartMessageAndStreaming: vi.fn().mockResolvedValue(undefined),
     clearThinkingTimer: vi.fn(),
@@ -80,7 +80,7 @@ describe('handlePromptSubmit', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '📝 Prompt: Fix the login bug',
+      '📝 *Prompt:* Fix the login bug',
     );
   });
 
@@ -114,7 +114,7 @@ describe('handleToolFailure', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '⚠️ Bash failed: Command failed with exit code 1',
+      '⚠️ *Bash failed*: Command failed with exit code 1',
     );
   });
 
@@ -128,7 +128,7 @@ describe('handleToolFailure', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '⚠️ Edit failed',
+      '⚠️ *Edit failed*',
     );
   });
 
@@ -140,7 +140,7 @@ describe('handleToolFailure', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '⚠️ unknown failed',
+      '⚠️ *unknown failed*',
     );
   });
 
@@ -154,7 +154,7 @@ describe('handleToolFailure', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '⚠️ Bash failed',
+      '⚠️ *Bash failed*',
     );
   });
 });
@@ -170,7 +170,7 @@ describe('handleTeammateIdle', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '💤 [agent-2] idle',
+      '💤 *[agent-2]* idle',
     );
   });
 
@@ -184,7 +184,7 @@ describe('handleTeammateIdle', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '💤 [agent-3] idle (backend-team)',
+      '💤 *[agent-3]* idle (backend-team)',
     );
   });
 

@@ -8,7 +8,6 @@
 import { existsSync, realpathSync } from 'fs';
 import { splitForDiscord, splitForSlack, extractFilePaths, stripFilePaths } from '../capture/parser.js';
 import type { MessagingClient } from '../messaging/interface.js';
-import type { PendingEntry } from './pending-message-tracker.js';
 import type { EventContext } from './hook-event-pipeline.js';
 
 // ---------------------------------------------------------------------------
@@ -28,56 +27,56 @@ export function buildFinalizeHeader(usage: Record<string, unknown> | undefined):
 }
 
 // ---------------------------------------------------------------------------
-// Thread reply sub-methods
+// Channel message sub-methods (usage, intermediate text, thinking)
 // ---------------------------------------------------------------------------
 
-export async function postUsageAsThreadReply(
+export async function postUsageToChannel(
   messaging: MessagingClient,
-  pending: PendingEntry | undefined,
+  channelId: string,
   usage: Record<string, unknown> | undefined,
 ): Promise<void> {
-  if (!usage || typeof usage !== 'object' || !pending?.startMessageId) return;
+  if (!usage || typeof usage !== 'object') return;
   const inputTokens = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
   const outputTokens = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
   const totalCost = typeof usage.totalCostUsd === 'number' ? usage.totalCostUsd : 0;
   if (inputTokens > 0 || outputTokens > 0) {
-    const usageLine = `\uD83D\uDCCA Input: ${inputTokens.toLocaleString()} \u00B7 Output: ${outputTokens.toLocaleString()}${totalCost > 0 ? ` \u00B7 Cost: $${totalCost.toFixed(2)}` : ''}`;
+    const usageLine = `\uD83D\uDCCA *Usage:* Input: ${inputTokens.toLocaleString()} \u00B7 Output: ${outputTokens.toLocaleString()}${totalCost > 0 ? ` \u00B7 Cost: $${totalCost.toFixed(2)}` : ''}`;
     try {
-      await messaging.replyInThread(pending.channelId, pending.startMessageId, usageLine);
+      await messaging.sendToChannel(channelId, usageLine);
     } catch { /* ignore usage reply failures */ }
   }
 }
 
-export async function postIntermediateTextAsThreadReply(
+export async function postIntermediateTextToChannel(
   messaging: MessagingClient,
-  pending: PendingEntry | undefined,
+  channelId: string,
   event: Record<string, unknown>,
 ): Promise<void> {
   const intermediateText = typeof event.intermediateText === 'string' ? event.intermediateText.trim() : '';
-  if (!intermediateText || !pending?.startMessageId) return;
+  if (!intermediateText) return;
   try {
-    await splitAndSendAsThreadReply(messaging, pending.channelId, pending.startMessageId, intermediateText);
+    await splitAndSendToChannel(messaging, channelId, intermediateText);
   } catch (error) {
-    console.warn('Failed to post intermediate text as thread reply:', error);
+    console.warn('Failed to post intermediate text to channel:', error);
   }
 }
 
-export async function postThinkingAsThreadReply(
+export async function postThinkingToChannel(
   messaging: MessagingClient,
-  pending: PendingEntry | undefined,
+  channelId: string,
   event: Record<string, unknown>,
 ): Promise<void> {
   const thinking = typeof event.thinking === 'string' ? event.thinking.trim() : '';
-  if (!thinking || !pending?.startMessageId) return;
+  if (!thinking) return;
   try {
     const maxLen = 12000;
     let thinkingText = thinking.length > maxLen
       ? thinking.substring(0, maxLen) + '\n\n_(truncated)_'
       : thinking;
     thinkingText = `:brain: *Reasoning*\n\`\`\`\n${thinkingText}\n\`\`\``;
-    await splitAndSendAsThreadReply(messaging, pending.channelId, pending.startMessageId, thinkingText);
+    await splitAndSendToChannel(messaging, channelId, thinkingText);
   } catch (error) {
-    console.warn('Failed to post thinking as thread reply:', error);
+    console.warn('Failed to post thinking to channel:', error);
   }
 }
 
@@ -111,6 +110,27 @@ export async function postResponseFiles(messaging: MessagingClient, ctx: EventCo
 }
 
 export async function postPromptChoices(messaging: MessagingClient, ctx: EventContext): Promise<void> {
+  // Structured questions (AskUserQuestion) → interactive buttons, fire-and-forget.
+  // The button selection is routed back to Claude by SlackClient/DiscordClient.
+  const rawQuestions = ctx.event.promptQuestions;
+  if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
+    const questions = rawQuestions.filter(
+      (q): q is { question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean } =>
+        typeof q === 'object' && q !== null &&
+        typeof q.question === 'string' &&
+        Array.isArray(q.options) && q.options.length > 0,
+    );
+    if (questions.length > 0) {
+      // Don't await — this promise resolves when the user clicks a button (up to 5 min).
+      // The client routes the selection back to Claude via messageCallback.
+      messaging.sendQuestionWithButtons(ctx.channelId, questions).catch((err) => {
+        console.warn('sendQuestionWithButtons failed:', err);
+      });
+      return;
+    }
+  }
+
+  // Fallback: text-based prompt (ExitPlanMode or missing structured data)
   const promptText = typeof ctx.event.promptText === 'string' ? ctx.event.promptText.trim() : '';
   if (!promptText) return;
 
@@ -150,12 +170,3 @@ export async function splitAndSendToChannel(messaging: MessagingClient, channelI
   }
 }
 
-export async function splitAndSendAsThreadReply(messaging: MessagingClient, channelId: string, messageId: string, text: string): Promise<void> {
-  const split = messaging.platform === 'slack' ? splitForSlack : splitForDiscord;
-  const chunks = split(text);
-  for (const chunk of chunks) {
-    if (chunk.trim().length > 0) {
-      await messaging.replyInThread(channelId, messageId, chunk);
-    }
-  }
-}

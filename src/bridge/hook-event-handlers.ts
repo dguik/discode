@@ -7,7 +7,6 @@
 
 import type { MessagingClient } from '../messaging/interface.js';
 import type { PendingMessageTracker } from './pending-message-tracker.js';
-import type { PendingEntry } from './pending-message-tracker.js';
 import type { StreamingMessageUpdater } from './streaming-message-updater.js';
 import type { EventContext } from './hook-event-pipeline.js';
 import {
@@ -19,9 +18,9 @@ import {
 } from './hook-structured-handlers.js';
 import {
   buildFinalizeHeader,
-  postUsageAsThreadReply,
-  postIntermediateTextAsThreadReply,
-  postThinkingAsThreadReply,
+  postUsageToChannel,
+  postIntermediateTextToChannel,
+  postThinkingToChannel,
   postResponseText,
   postResponseFiles,
   postPromptChoices,
@@ -34,8 +33,8 @@ export interface EventHandlerDeps {
   streamingUpdater: StreamingMessageUpdater;
   /** Periodic timers that show elapsed thinking time. */
   thinkingTimers: Map<string, { timer: ReturnType<typeof setInterval>; startTime: number }>;
-  /** Thread activity messages (one per instance, replaced with latest activity). */
-  threadActivityMessages: Map<string, { channelId: string; parentMessageId: string; messageId: string; lines: string[] }>;
+  /** Activity history per instance (for error context). */
+  activityHistory: Map<string, string[]>;
   /** Session lifecycle timers. */
   sessionLifecycleTimers: Map<string, ReturnType<typeof setTimeout>>;
   /** Lazy start message creation + streaming updater start. */
@@ -52,15 +51,14 @@ export async function handleSessionError(deps: EventHandlerDeps, ctx: EventConte
   deps.clearThinkingTimer(k);
 
   // Collect recent tool activity lines before clearing (error context for Slack users)
-  const recentActivity = deps.threadActivityMessages.get(k);
-  const recentLines = recentActivity?.lines.slice(-5) || [];
+  const recentLines = deps.activityHistory.get(k)?.slice(-5) || [];
 
-  deps.threadActivityMessages.delete(k);
+  deps.activityHistory.delete(k);
   clearTaskChecklist(k);
   deps.streamingUpdater.discard(ctx.projectName, ctx.instanceKey);
   deps.pendingTracker.markError(ctx.projectName, ctx.agentType, ctx.instanceId).catch(() => {});
   const msg = ctx.text || 'unknown error';
-  let errorMessage = `\u26A0\uFE0F OpenCode session error: ${msg}`;
+  let errorMessage = `\u26A0\uFE0F *Error:* ${msg}`;
   if (recentLines.length > 0) {
     errorMessage += '\n\n최근 활동:\n' + recentLines.join('\n');
   }
@@ -98,7 +96,7 @@ export async function handleSessionStart(deps: EventHandlerDeps, ctx: EventConte
   }
   const model = typeof ctx.event.model === 'string' ? ctx.event.model : '';
   const modelSuffix = model ? `, ${model}` : '';
-  await deps.messaging.sendToChannel(ctx.channelId, `\u25B6\uFE0F Session started (${source}${modelSuffix})`);
+  await deps.messaging.sendToChannel(ctx.channelId, `\u25B6\uFE0F *Session started* (${source}${modelSuffix})`);
 
   deps.pendingTracker.setHookActive(ctx.projectName, ctx.agentType, ctx.instanceId);
 
@@ -120,7 +118,7 @@ export async function handleSessionStart(deps: EventHandlerDeps, ctx: EventConte
 
 export async function handleSessionEnd(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
   const reason = typeof ctx.event.reason === 'string' ? ctx.event.reason : 'unknown';
-  await deps.messaging.sendToChannel(ctx.channelId, `\u23F9\uFE0F Session ended (${reason})`);
+  await deps.messaging.sendToChannel(ctx.channelId, `\u23F9\uFE0F *Session ended* (${reason})`);
   deps.pendingTracker.setHookActive(ctx.projectName, ctx.agentType, ctx.instanceId);
   return true;
 }
@@ -182,37 +180,14 @@ export async function handleToolActivity(deps: EventHandlerDeps, ctx: EventConte
     return handleSubagentDone(deps, ctx);
   }
 
-  const pending = ctx.pendingSnapshot;
-
-  if (ctx.text && pending?.startMessageId) {
-    const k = `${ctx.projectName}:${ctx.instanceKey}`;
-    const existing = deps.threadActivityMessages.get(k);
-
-    if (existing && existing.parentMessageId === pending.startMessageId) {
-      existing.lines.push(ctx.text);
-      try {
-        await deps.messaging.updateMessage(existing.channelId, existing.messageId, existing.lines.join('\n'));
-      } catch (error) {
-        console.warn('Failed to update thread activity message:', error);
-      }
-    } else {
-      try {
-        const msgId = await deps.messaging.replyInThreadWithId(pending.channelId, pending.startMessageId, ctx.text);
-        if (msgId) {
-          deps.threadActivityMessages.set(k, {
-            channelId: pending.channelId,
-            parentMessageId: pending.startMessageId,
-            messageId: msgId,
-            lines: [ctx.text],
-          });
-        }
-      } catch (error) {
-        console.warn('Failed to post tool activity as thread reply:', error);
-      }
-    }
-  }
-
   if (ctx.text) {
+    const k = `${ctx.projectName}:${ctx.instanceKey}`;
+    let lines = deps.activityHistory.get(k);
+    if (!lines) {
+      lines = [];
+      deps.activityHistory.set(k, lines);
+    }
+    lines.push(ctx.text);
     deps.streamingUpdater.append(ctx.projectName, ctx.instanceKey, ctx.text);
   }
 
@@ -223,7 +198,7 @@ export async function handleSessionIdle(deps: EventHandlerDeps, ctx: EventContex
   const idleKey = `${ctx.projectName}:${ctx.instanceKey}`;
   deps.clearThinkingTimer(idleKey);
   deps.clearSessionLifecycleTimer(idleKey);
-  deps.threadActivityMessages.delete(idleKey);
+  deps.activityHistory.delete(idleKey);
   clearTaskChecklist(idleKey);
 
   const livePending = deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
@@ -241,12 +216,9 @@ export async function handleSessionIdle(deps: EventHandlerDeps, ctx: EventContex
 
   deps.pendingTracker.markCompleted(ctx.projectName, ctx.agentType, ctx.instanceId).catch(() => {});
 
-  const pending: PendingEntry | undefined = startMessageId
-    ? { channelId: ctx.channelId, messageId: ctx.pendingSnapshot?.messageId || '', startMessageId }
-    : undefined;
-  await postUsageAsThreadReply(deps.messaging, pending, usage);
-  await postIntermediateTextAsThreadReply(deps.messaging, pending, ctx.event);
-  await postThinkingAsThreadReply(deps.messaging, pending, ctx.event);
+  await postUsageToChannel(deps.messaging, ctx.channelId, usage);
+  await postIntermediateTextToChannel(deps.messaging, ctx.channelId, ctx.event);
+  await postThinkingToChannel(deps.messaging, ctx.channelId, ctx.event);
 
   // Main response: text + files (separated for change isolation)
   await postResponseText(deps.messaging, ctx);
@@ -262,7 +234,7 @@ export async function handlePermissionRequest(deps: EventHandlerDeps, ctx: Event
   const toolName = typeof ctx.event.toolName === 'string' ? ctx.event.toolName : 'unknown';
   const toolInput = typeof ctx.event.toolInput === 'string' ? ctx.event.toolInput : '';
   const inputSuffix = toolInput ? ` — \`${toolInput}\`` : '';
-  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDD10 Permission needed: \`${toolName}\`${inputSuffix}`);
+  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDD10 *Permission needed:* \`${toolName}\`${inputSuffix}`);
   return true;
 }
 
@@ -270,7 +242,7 @@ export async function handleTaskCompleted(deps: EventHandlerDeps, ctx: EventCont
   const taskSubject = typeof ctx.event.taskSubject === 'string' ? ctx.event.taskSubject : '';
   const teammateName = typeof ctx.event.teammateName === 'string' ? ctx.event.teammateName : '';
   const taskId = typeof ctx.event.taskId === 'string' ? ctx.event.taskId : '';
-  const prefix = teammateName ? `\u2705 [${teammateName}] Task completed` : '\u2705 Task completed';
+  const prefix = teammateName ? `\u2705 *[${teammateName}] Task completed*` : '\u2705 *Task completed*';
   const subject = taskSubject ? `: ${taskSubject}` : '';
   await deps.messaging.sendToChannel(ctx.channelId, `${prefix}${subject}`);
 
@@ -285,7 +257,7 @@ export async function handleTaskCompleted(deps: EventHandlerDeps, ctx: EventCont
 export async function handlePromptSubmit(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
   const preview = ctx.text || '';
   if (!preview) return true;
-  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCDD Prompt: ${preview}`);
+  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCDD *Prompt:* ${preview}`);
   return true;
 }
 
@@ -293,7 +265,7 @@ export async function handleToolFailure(deps: EventHandlerDeps, ctx: EventContex
   const toolName = typeof ctx.event.toolName === 'string' ? ctx.event.toolName : 'unknown';
   const error = typeof ctx.event.error === 'string' ? ctx.event.error : '';
   const errorSuffix = error ? `: ${error}` : '';
-  await deps.messaging.sendToChannel(ctx.channelId, `\u26A0\uFE0F ${toolName} failed${errorSuffix}`);
+  await deps.messaging.sendToChannel(ctx.channelId, `\u26A0\uFE0F *${toolName} failed*${errorSuffix}`);
   return true;
 }
 
@@ -302,7 +274,7 @@ export async function handleTeammateIdle(deps: EventHandlerDeps, ctx: EventConte
   const teamName = typeof ctx.event.teamName === 'string' ? ctx.event.teamName : '';
   if (!teammateName) return true;
   const teamSuffix = teamName ? ` (${teamName})` : '';
-  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCA4 [${teammateName}] idle${teamSuffix}`);
+  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCA4 *[${teammateName}]* idle${teamSuffix}`);
   return true;
 }
 

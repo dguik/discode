@@ -47,7 +47,7 @@ function createMockDeps(): EventHandlerDeps {
       finalize: vi.fn().mockResolvedValue(undefined),
     } as any,
     thinkingTimers: new Map(),
-    threadActivityMessages: new Map(),
+    activityHistory: new Map(),
     sessionLifecycleTimers: new Map(),
     ensureStartMessageAndStreaming: vi.fn().mockResolvedValue(undefined),
     clearThinkingTimer: vi.fn(),
@@ -81,7 +81,7 @@ describe('handlePermissionRequest', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '🔐 Permission needed: `Bash` — `npm test`',
+      '🔐 *Permission needed:* `Bash` — `npm test`',
     );
   });
 
@@ -95,7 +95,7 @@ describe('handlePermissionRequest', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '🔐 Permission needed: `Bash`',
+      '🔐 *Permission needed:* `Bash`',
     );
   });
 
@@ -109,7 +109,7 @@ describe('handlePermissionRequest', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '🔐 Permission needed: `Bash`',
+      '🔐 *Permission needed:* `Bash`',
     );
   });
 
@@ -121,7 +121,7 @@ describe('handlePermissionRequest', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '🔐 Permission needed: `unknown`',
+      '🔐 *Permission needed:* `unknown`',
     );
   });
 });
@@ -137,7 +137,7 @@ describe('handleTaskCompleted', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '✅ Task completed: Fix login bug',
+      '✅ *Task completed*: Fix login bug',
     );
   });
 
@@ -151,7 +151,7 @@ describe('handleTaskCompleted', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '✅ [agent-2] Task completed: Write tests',
+      '✅ *[agent-2] Task completed*: Write tests',
     );
   });
 
@@ -165,7 +165,7 @@ describe('handleTaskCompleted', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '✅ Task completed',
+      '✅ *Task completed*',
     );
   });
 
@@ -179,7 +179,7 @@ describe('handleTaskCompleted', () => {
 
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '✅ Task completed: Done',
+      '✅ *Task completed*: Done',
     );
   });
 });

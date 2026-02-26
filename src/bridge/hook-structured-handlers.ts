@@ -16,7 +16,6 @@ import type { EventContext } from './hook-event-pipeline.js';
 /** Per-instance task checklist message, updated on each TaskCreate/TaskUpdate. */
 const taskChecklistMessages = new Map<string, {
   channelId: string;
-  parentMessageId: string;
   messageId: string;
   tasks: Array<{ id: string; subject: string; status: string }>;
 }>();
@@ -26,16 +25,14 @@ export function clearTaskChecklist(key: string): void {
 }
 
 export async function handleTaskProgress(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
-  const pending = ctx.pendingSnapshot;
-  if (!pending?.startMessageId || !ctx.text) return true;
+  if (!ctx.text) return true;
 
   const k = `${ctx.projectName}:${ctx.instanceKey}`;
   let checklist = taskChecklistMessages.get(k);
 
-  if (!checklist || checklist.parentMessageId !== pending.startMessageId) {
+  if (!checklist) {
     checklist = {
-      channelId: pending.channelId,
-      parentMessageId: pending.startMessageId,
+      channelId: ctx.channelId,
       messageId: '',
       tasks: [],
     };
@@ -71,9 +68,7 @@ export async function handleTaskProgress(deps: EventHandlerDeps, ctx: EventConte
     if (checklist.messageId) {
       await deps.messaging.updateMessage(checklist.channelId, checklist.messageId, message);
     } else {
-      const msgId = await deps.messaging.replyInThreadWithId(
-        checklist.channelId, checklist.parentMessageId, message,
-      );
+      const msgId = await deps.messaging.sendToChannelWithId(checklist.channelId, message);
       if (msgId) checklist.messageId = msgId;
     }
   } catch (error) {
@@ -118,19 +113,18 @@ export function markTaskCompletedInChecklist(
 // ---------------------------------------------------------------------------
 
 export async function handleGitActivity(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
-  const pending = ctx.pendingSnapshot;
-  if (!pending?.startMessageId || !ctx.text) return true;
+  if (!ctx.text) return true;
 
   let message = '';
   try {
     if (ctx.text.startsWith('GIT_COMMIT:')) {
       const data = JSON.parse(ctx.text.slice('GIT_COMMIT:'.length));
-      message = `\uD83D\uDCE6 Committed: "${data.message || ''}"`;
+      message = `\uD83D\uDCE6 *Committed:* \`${data.message || ''}\``;
       if (data.stat) message += `\n   ${data.stat}`;
     } else if (ctx.text.startsWith('GIT_PUSH:')) {
       const data = JSON.parse(ctx.text.slice('GIT_PUSH:'.length));
       const hash = typeof data.toHash === 'string' ? data.toHash.slice(0, 7) : '';
-      message = `\uD83D\uDE80 Pushed to ${data.remoteRef || 'remote'} (${hash})`;
+      message = `\uD83D\uDE80 *Pushed to* \`${data.remoteRef || 'remote'}\` (\`${hash}\`)`;
     }
   } catch {
     return true;
@@ -139,7 +133,7 @@ export async function handleGitActivity(deps: EventHandlerDeps, ctx: EventContex
   if (!message) return true;
 
   try {
-    await deps.messaging.replyInThread(pending.channelId, pending.startMessageId, message);
+    await deps.messaging.sendToChannel(ctx.channelId, message);
   } catch (error) {
     console.warn('Failed to post git activity:', error);
   }
@@ -153,8 +147,7 @@ export async function handleGitActivity(deps: EventHandlerDeps, ctx: EventContex
 // ---------------------------------------------------------------------------
 
 export async function handleSubagentDone(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
-  const pending = ctx.pendingSnapshot;
-  if (!pending?.startMessageId || !ctx.text) return true;
+  if (!ctx.text) return true;
 
   let message = '';
   try {
@@ -162,13 +155,13 @@ export async function handleSubagentDone(deps: EventHandlerDeps, ctx: EventConte
     const agentType = data.subagentType || 'agent';
     const summary = data.summary || '';
     if (!summary) return true;
-    message = `\uD83D\uDD0D ${agentType} 완료: "${summary}"`;
+    message = `\uD83D\uDD0D *${agentType} 완료:* ${summary}`;
   } catch {
     return true;
   }
 
   try {
-    await deps.messaging.replyInThread(pending.channelId, pending.startMessageId, message);
+    await deps.messaging.sendToChannel(ctx.channelId, message);
   } catch (error) {
     console.warn('Failed to post subagent completion:', error);
   }

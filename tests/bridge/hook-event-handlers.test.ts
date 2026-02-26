@@ -53,7 +53,7 @@ function createMockDeps(): EventHandlerDeps {
       finalize: vi.fn().mockResolvedValue(undefined),
     } as any,
     thinkingTimers: new Map(),
-    threadActivityMessages: new Map(),
+    activityHistory: new Map(),
     sessionLifecycleTimers: new Map(),
     ensureStartMessageAndStreaming: vi.fn().mockResolvedValue(undefined),
     clearThinkingTimer: vi.fn(),
@@ -107,14 +107,12 @@ describe('handleSessionError', () => {
     expect(deps.pendingTracker.markError).toHaveBeenCalledWith('myProject', 'opencode', undefined);
   });
 
-  it('clears thread activity messages', async () => {
+  it('clears activity history', async () => {
     const deps = createMockDeps();
-    deps.threadActivityMessages.set('myProject:opencode', {
-      channelId: 'ch-1', parentMessageId: 'p1', messageId: 'm1', lines: ['test'],
-    });
+    deps.activityHistory.set('myProject:opencode', ['test']);
     const ctx = createCtx();
     await handleSessionError(deps, ctx);
-    expect(deps.threadActivityMessages.has('myProject:opencode')).toBe(false);
+    expect(deps.activityHistory.has('myProject:opencode')).toBe(false);
   });
 });
 
@@ -174,7 +172,7 @@ describe('handleSessionStart', () => {
     const ctx = createCtx({ event: { source: 'user', model: 'claude-4' } });
     await handleSessionStart(deps, ctx);
     const msg = (deps.messaging.sendToChannel as any).mock.calls[0][1];
-    expect(msg).toContain('Session started');
+    expect(msg).toContain('*Session started*');
     expect(msg).toContain('user');
     expect(msg).toContain('claude-4');
   });
@@ -200,7 +198,7 @@ describe('handleSessionEnd', () => {
     const ctx = createCtx({ event: { reason: 'user_stop' } });
     await handleSessionEnd(deps, ctx);
     const msg = (deps.messaging.sendToChannel as any).mock.calls[0][1];
-    expect(msg).toContain('Session ended');
+    expect(msg).toContain('*Session ended*');
     expect(msg).toContain('user_stop');
   });
 
@@ -329,50 +327,19 @@ describe('handleToolActivity', () => {
     expect(deps.streamingUpdater.append).toHaveBeenCalledWith('myProject', 'opencode', 'Writing file...');
   });
 
-  it('creates thread reply when no existing activity message', async () => {
+  it('tracks activity lines in activityHistory', async () => {
     const deps = createMockDeps();
-    const ctx = createCtx({
-      text: 'Activity text',
-      pendingSnapshot: { channelId: 'ch-1', messageId: 'msg-1', startMessageId: 'start-1' },
-    });
-    await handleToolActivity(deps, ctx);
-    expect(deps.messaging.replyInThreadWithId).toHaveBeenCalledWith('ch-1', 'start-1', 'Activity text');
+    await handleToolActivity(deps, createCtx({ text: 'line1' }));
+    await handleToolActivity(deps, createCtx({ text: 'line2' }));
+    expect(deps.activityHistory.get('myProject:opencode')).toEqual(['line1', 'line2']);
   });
 
-  it('updates existing thread activity message for same parent', async () => {
+  it('does not track when no text', async () => {
     const deps = createMockDeps();
-    deps.threadActivityMessages.set('myProject:opencode', {
-      channelId: 'ch-1', parentMessageId: 'start-1', messageId: 'activity-1', lines: ['line1'],
-    });
-    const ctx = createCtx({
-      text: 'line2',
-      pendingSnapshot: { channelId: 'ch-1', messageId: 'msg-1', startMessageId: 'start-1' },
-    });
+    const ctx = createCtx({ text: undefined });
     await handleToolActivity(deps, ctx);
-    expect(deps.messaging.updateMessage).toHaveBeenCalledWith('ch-1', 'activity-1', 'line1\nline2');
-  });
-
-  it('creates new thread activity message when parent differs', async () => {
-    const deps = createMockDeps();
-    deps.threadActivityMessages.set('myProject:opencode', {
-      channelId: 'ch-1', parentMessageId: 'old-start', messageId: 'activity-1', lines: ['old'],
-    });
-    const ctx = createCtx({
-      text: 'new activity',
-      pendingSnapshot: { channelId: 'ch-1', messageId: 'msg-1', startMessageId: 'new-start' },
-    });
-    await handleToolActivity(deps, ctx);
-    expect(deps.messaging.replyInThreadWithId).toHaveBeenCalledWith('ch-1', 'new-start', 'new activity');
-  });
-
-  it('does not post thread reply when no text', async () => {
-    const deps = createMockDeps();
-    const ctx = createCtx({
-      text: undefined,
-      pendingSnapshot: { channelId: 'ch-1', messageId: 'msg-1', startMessageId: 'start-1' },
-    });
-    await handleToolActivity(deps, ctx);
-    expect(deps.messaging.replyInThreadWithId).not.toHaveBeenCalled();
+    expect(deps.activityHistory.has('myProject:opencode')).toBe(false);
+    expect(deps.streamingUpdater.append).not.toHaveBeenCalled();
   });
 });
 
@@ -385,14 +352,12 @@ describe('handleSessionIdle', () => {
     expect(deps.clearSessionLifecycleTimer).toHaveBeenCalledWith('myProject:opencode');
   });
 
-  it('clears thread activity messages', async () => {
+  it('clears activity history', async () => {
     const deps = createMockDeps();
-    deps.threadActivityMessages.set('myProject:opencode', {
-      channelId: 'ch-1', parentMessageId: 'p1', messageId: 'm1', lines: ['test'],
-    });
+    deps.activityHistory.set('myProject:opencode', ['test']);
     const ctx = createCtx();
     await handleSessionIdle(deps, ctx);
-    expect(deps.threadActivityMessages.has('myProject:opencode')).toBe(false);
+    expect(deps.activityHistory.has('myProject:opencode')).toBe(false);
   });
 
   it('finalizes streaming when startMessageId exists', async () => {
