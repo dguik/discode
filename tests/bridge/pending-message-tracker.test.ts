@@ -186,7 +186,7 @@ describe('PendingMessageTracker', () => {
     // ensureStartMessage sends it
     const startId = await tracker.ensureStartMessage('proj', 'claude');
     expect(startId).toBe('start-msg-123');
-    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing...');
+    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing... (claude)');
   });
 
   it('ensurePending does not duplicate when already pending', async () => {
@@ -442,7 +442,7 @@ describe('PendingMessageTracker', () => {
     const startId = await tracker.ensureStartMessage('proj', 'claude');
 
     expect(startId).toBe('start-msg-123');
-    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing...');
+    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing... (claude)');
     expect(tracker.getPending('proj', 'claude')!.startMessageId).toBe('start-msg-123');
   });
 

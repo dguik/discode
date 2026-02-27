@@ -123,7 +123,7 @@ describe('StreamingMessageUpdater', () => {
       expect(messaging.updateMessage).toHaveBeenCalledWith(
         'ch-1',
         'msg-1',
-        '\u23F3 Processing...',
+        '\u23F3 Working...',
       );
     });
   });

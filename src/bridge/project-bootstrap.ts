@@ -3,6 +3,7 @@ import { installFileInstruction } from '../infra/file-instruction.js';
 import { installDiscodeSendScript } from '../infra/send-script.js';
 import { installAgentIntegration } from '../policy/agent-integration.js';
 import type { IStateManager } from '../types/interfaces.js';
+import { sanitizePath } from '../infra/log-sanitizer.js';
 import {
   listProjectAgentTypes,
   listProjectInstances,
@@ -53,10 +54,10 @@ export class BridgeProjectBootstrap {
         const integration = installAgentIntegration(agentType, project.projectPath, 'install');
         integrationByAgent.set(agentType, integration);
         for (const message of integration.infoMessages) {
-          console.log(message);
+          console.log(sanitizePath(message));
         }
         for (const message of integration.warningMessages) {
-          console.warn(message);
+          console.warn(sanitizePath(message));
         }
       }
 

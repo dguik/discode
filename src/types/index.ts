@@ -157,6 +157,8 @@ export const SUPPORTED_FILE_TYPES = [
   'image/jpeg',
   'image/gif',
   'image/webp',
+  'image/svg+xml',
+  'image/bmp',
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',

@@ -5,6 +5,7 @@
 import { resolve } from 'path';
 import type { MessagingClient } from '../messaging/interface.js';
 import type { IStateManager } from '../types/interfaces.js';
+import { truncateContent } from '../infra/log-sanitizer.js';
 import {
   getPrimaryInstanceForAgent,
   getProjectInstance,
@@ -130,7 +131,7 @@ export class HookEventPipeline {
     const intermediateLen = eventType === 'session.idle' && typeof event.intermediateText === 'string' ? event.intermediateText.length : 0;
     const intermediateSuffix = intermediateLen > 0 ? ` intermediate=(${intermediateLen} chars)` : '';
     console.log(
-      `\uD83D\uDD0D [${projectName}/${resolvedAgentType}${resolvedInstanceId ? `#${resolvedInstanceId}` : ''}] event=${eventType} text=${text ? `(${text.length} chars) ${text.substring(0, 100)}` : '(empty)'}${intermediateSuffix}`,
+      `\uD83D\uDD0D [${projectName}/${resolvedAgentType}${resolvedInstanceId ? `#${resolvedInstanceId}` : ''}] event=${eventType} text=${text ? `(${text.length} chars) ${truncateContent(text)}` : '(empty)'}${intermediateSuffix}`,
     );
 
     // Auto-create pending entry for tmux-initiated prompts

@@ -36,6 +36,9 @@ export async function postUsageToChannel(
   usage: Record<string, unknown> | undefined,
 ): Promise<void> {
   if (!usage || typeof usage !== 'object') return;
+  // Usage messages are opt-in via DISCODE_SHOW_USAGE (default: off)
+  const showUsage = process.env.DISCODE_SHOW_USAGE;
+  if (!showUsage || showUsage === '0' || showUsage.toLowerCase() === 'false') return;
   const inputTokens = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
   const outputTokens = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
   const totalCost = typeof usage.totalCostUsd === 'number' ? usage.totalCostUsd : 0;
@@ -68,6 +71,9 @@ export async function postThinkingToChannel(
 ): Promise<void> {
   const thinking = typeof event.thinking === 'string' ? event.thinking.trim() : '';
   if (!thinking) return;
+  // Thinking blocks are opt-in via DISCODE_SHOW_THINKING (default: off)
+  const showThinking = process.env.DISCODE_SHOW_THINKING;
+  if (!showThinking || showThinking === '0' || showThinking.toLowerCase() === 'false') return;
   try {
     const maxLen = 12000;
     let thinkingText = thinking.length > maxLen

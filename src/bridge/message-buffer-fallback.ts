@@ -169,6 +169,9 @@ export function scheduleBufferFallback(
           await deps.pendingTracker.markCompleted(projectName, agentType, instanceKey);
         } catch (error) {
           console.warn(`${tag} fallback send failed:`, error);
+          try {
+            await deps.messaging.sendToChannel(channelId, 'Could not deliver agent output. Check logs for details.');
+          } catch { /* ignore notification failure */ }
         }
       }
       return;

@@ -107,7 +107,7 @@ export class StreamingMessageUpdater {
     const entry = this.entries.get(k);
     if (!entry) return;
 
-    const content = entry.currentText || '\u23F3 Processing...';
+    const content = entry.currentText || '\u23F3 Working...';
     if (this.messaging.updateMessage) {
       const promise = this.messaging.updateMessage(entry.channelId, entry.messageId, content).catch(() => {});
       entry.flushPromise = promise;

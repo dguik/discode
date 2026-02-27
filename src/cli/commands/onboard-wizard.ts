@@ -71,9 +71,35 @@ export async function onboardWizardCommand(options: OnboardWizardCliOptions): Pr
   const isBunRuntime = Boolean((process as { versions?: { bun?: string } }).versions?.bun);
   if (!isBunRuntime) {
     if (process.env.DISCODE_ONBOARD_BUN_HANDOFF === '1') {
-      throw new Error('Onboarding TUI requires Bun runtime. Run with: bun dist/bin/discode.js onboard');
+      // Bun handoff attempted but still not in Bun — fall back to CLI onboarding
+      console.log(chalk.yellow('⚠️ TUI wizard requires Bun. Falling back to CLI onboarding...'));
+      const { onboardCommand } = await import('./onboard.js');
+      await onboardCommand({
+        platform: options.platform,
+        runtimeMode: options.runtimeMode,
+        token: options.token,
+        slackBotToken: options.slackBotToken,
+        slackAppToken: options.slackAppToken,
+        exitOnError: false,
+      });
+      return undefined;
     }
-    handoffToBunRuntime();
+    try {
+      handoffToBunRuntime();
+    } catch {
+      // Bun not available — fall back to CLI onboarding
+      console.log(chalk.yellow('⚠️ TUI wizard requires Bun. Falling back to CLI onboarding...'));
+      const { onboardCommand } = await import('./onboard.js');
+      await onboardCommand({
+        platform: options.platform,
+        runtimeMode: options.runtimeMode,
+        token: options.token,
+        slackBotToken: options.slackBotToken,
+        slackAppToken: options.slackAppToken,
+        exitOnError: false,
+      });
+      return undefined;
+    }
   }
 
   await import('@opentui/solid/preload');

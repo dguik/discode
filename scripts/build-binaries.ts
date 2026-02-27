@@ -127,6 +127,11 @@ for (const target of targets) {
   cpSync(join(root, 'src', 'gemini', 'hook'), join(resourcesDir, 'gemini-hook'), { recursive: true });
   cpSync(join(root, 'src', 'codex', 'hook'), join(resourcesDir, 'codex-hook'), { recursive: true });
   cpSync(join(root, 'src', 'container', 'chrome-mcp-bridge.cjs'), join(resourcesDir, 'chrome-mcp-bridge.cjs'));
+  // Generate SHA-256 checksum sidecar for bridge script integrity verification
+  const { createHash } = await import('crypto');
+  const bridgeContent = readFileSync(join(resourcesDir, 'chrome-mcp-bridge.cjs'));
+  const sha256 = createHash('sha256').update(bridgeContent).digest('hex');
+  writeFileSync(join(resourcesDir, 'chrome-mcp-bridge.cjs.sha256'), sha256);
 
   binaries[packageName] = pkgJson.version;
 }
