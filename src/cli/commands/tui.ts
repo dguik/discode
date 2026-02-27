@@ -573,7 +573,21 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       }
     },
   });
-  runtimeStreamConnected = await streamClient.connect();
+  // Retry initial connection for up to ~3 s to handle the race where the
+  // daemon was just started and the stream socket isn't ready yet.  The
+  // socket not existing causes createConnection to fail immediately (no
+  // timeout), so each failed attempt costs only the retry delay.
+  {
+    const maxAttempts = 10;
+    const retryDelayMs = 300;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      runtimeStreamConnected = await streamClient.connect();
+      if (runtimeStreamConnected) break;
+      if (attempt < maxAttempts - 1) {
+        await new Promise<void>((r) => setTimeout(r, retryDelayMs));
+      }
+    }
+  }
   if (runtimeStreamConnected) {
     setTransportStatus({
       mode: 'stream',
