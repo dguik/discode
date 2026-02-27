@@ -189,7 +189,7 @@ export async function handleToolActivity(deps: EventHandlerDeps, ctx: EventConte
       deps.activityHistory.set(k, lines);
     }
     lines.push(ctx.text);
-    deps.streamingUpdater.append(ctx.projectName, ctx.instanceKey, ctx.text);
+    deps.streamingUpdater.appendCumulative(ctx.projectName, ctx.instanceKey, ctx.text);
   }
 
   return true;
@@ -299,4 +299,3 @@ export async function handleTeammateIdle(deps: EventHandlerDeps, ctx: EventConte
   await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCA4 *[${teammateName}]* idle${teamSuffix}`);
   return true;
 }
-

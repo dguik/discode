@@ -49,6 +49,7 @@ function createMockDeps(): EventHandlerDeps {
       has: vi.fn().mockReturnValue(false),
       start: vi.fn(),
       append: vi.fn(),
+      appendCumulative: vi.fn(),
       discard: vi.fn(),
       finalize: vi.fn().mockResolvedValue(undefined),
     } as any,
@@ -324,7 +325,7 @@ describe('handleToolActivity', () => {
     const deps = createMockDeps();
     const ctx = createCtx({ text: 'Writing file...' });
     await handleToolActivity(deps, ctx);
-    expect(deps.streamingUpdater.append).toHaveBeenCalledWith('myProject', 'opencode', 'Writing file...');
+    expect(deps.streamingUpdater.appendCumulative).toHaveBeenCalledWith('myProject', 'opencode', 'Writing file...');
   });
 
   it('tracks activity lines in activityHistory', async () => {
@@ -339,7 +340,7 @@ describe('handleToolActivity', () => {
     const ctx = createCtx({ text: undefined });
     await handleToolActivity(deps, ctx);
     expect(deps.activityHistory.has('myProject:opencode')).toBe(false);
-    expect(deps.streamingUpdater.append).not.toHaveBeenCalled();
+    expect(deps.streamingUpdater.appendCumulative).not.toHaveBeenCalled();
   });
 });
 

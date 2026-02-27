@@ -128,8 +128,50 @@ describe('StreamingMessageUpdater', () => {
     });
   });
 
+  describe('appendCumulative', () => {
+    it('accumulates lines in order and flushes once after debounce', () => {
+      const messaging = createMockMessaging();
+      const updater = new StreamingMessageUpdater(messaging as any);
+      updater.start('proj', 'inst', 'ch-1', 'msg-1');
+
+      expect(updater.appendCumulative('proj', 'inst', 'Step A')).toBe(true);
+      expect(updater.appendCumulative('proj', 'inst', 'Step B')).toBe(true);
+      expect(updater.appendCumulative('proj', 'inst', 'Step C')).toBe(true);
+
+      vi.advanceTimersByTime(800);
+
+      expect(messaging.updateMessage).toHaveBeenCalledTimes(1);
+      expect(messaging.updateMessage).toHaveBeenCalledWith(
+        'ch-1',
+        'msg-1',
+        'Step A\nStep B\nStep C',
+      );
+    });
+
+    it('truncates overly long cumulative text for discord-safe update length', () => {
+      const messaging = {
+        ...createMockMessaging(),
+        platform: 'discord' as const,
+      };
+      const updater = new StreamingMessageUpdater(messaging as any);
+      updater.start('proj', 'inst', 'ch-1', 'msg-1');
+
+      const longLine = 'x'.repeat(1200);
+      updater.appendCumulative('proj', 'inst', longLine);
+      updater.appendCumulative('proj', 'inst', longLine);
+      updater.appendCumulative('proj', 'inst', longLine);
+
+      vi.advanceTimersByTime(800);
+
+      const call = messaging.updateMessage.mock.calls.at(-1);
+      const content = call?.[2] as string;
+      expect(content.length).toBeLessThanOrEqual(1900);
+      expect(content.startsWith('...(truncated)\n')).toBe(true);
+    });
+  });
+
   describe('finalize', () => {
-    it('flushes immediately with Done header and removes entry', async () => {
+    it('posts Done header as a new message and removes entry', async () => {
       const messaging = createMockMessaging();
       const updater = new StreamingMessageUpdater(messaging as any);
       updater.start('proj', 'inst', 'ch-1', 'msg-1');
@@ -138,12 +180,7 @@ describe('StreamingMessageUpdater', () => {
 
       await updater.finalize('proj', 'inst');
 
-      expect(messaging.updateMessage).toHaveBeenCalledTimes(1);
-      expect(messaging.updateMessage).toHaveBeenCalledWith(
-        'ch-1',
-        'msg-1',
-        '\u2705 Done',
-      );
+      expect(messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '\u2705 Done');
       expect(updater.has('proj', 'inst')).toBe(false);
     });
 
@@ -159,8 +196,9 @@ describe('StreamingMessageUpdater', () => {
       // Advance past debounce — should not trigger extra update
       vi.advanceTimersByTime(1000);
 
-      // Only the finalize call
-      expect(messaging.updateMessage).toHaveBeenCalledTimes(1);
+      // Finalize posts one completion message, and timer does not trigger extra edit.
+      expect(messaging.sendToChannel).toHaveBeenCalledTimes(1);
+      expect(messaging.updateMessage).not.toHaveBeenCalled();
     });
 
     it('uses custom header when provided', async () => {
@@ -170,9 +208,8 @@ describe('StreamingMessageUpdater', () => {
 
       await updater.finalize('proj', 'inst', '\u2705 Done \u00B7 1,000 tokens \u00B7 $0.05');
 
-      expect(messaging.updateMessage).toHaveBeenCalledWith(
+      expect(messaging.sendToChannel).toHaveBeenCalledWith(
         'ch-1',
-        'msg-1',
         '\u2705 Done \u00B7 1,000 tokens \u00B7 $0.05',
       );
     });
@@ -184,11 +221,7 @@ describe('StreamingMessageUpdater', () => {
 
       await updater.finalize('proj', 'inst');
 
-      expect(messaging.updateMessage).toHaveBeenCalledWith(
-        'ch-1',
-        'msg-1',
-        '\u2705 Done',
-      );
+      expect(messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '\u2705 Done');
     });
 
     it('is a no-op when no entry exists', async () => {
@@ -196,6 +229,7 @@ describe('StreamingMessageUpdater', () => {
       const updater = new StreamingMessageUpdater(messaging as any);
 
       await updater.finalize('proj', 'inst');
+      expect(messaging.sendToChannel).not.toHaveBeenCalled();
       expect(messaging.updateMessage).not.toHaveBeenCalled();
     });
 
@@ -206,6 +240,7 @@ describe('StreamingMessageUpdater', () => {
 
       await updater.finalize('proj', 'inst', undefined, 'msg-other');
 
+      expect(messaging.sendToChannel).not.toHaveBeenCalled();
       expect(messaging.updateMessage).not.toHaveBeenCalled();
       expect(updater.has('proj', 'inst')).toBe(true);
     });
@@ -271,13 +306,12 @@ describe('StreamingMessageUpdater', () => {
   });
 
   describe('flushPromise race condition', () => {
-    it('finalize waits for in-progress flush before sending Done', async () => {
+    it('finalize waits for in-progress flush before posting Done', async () => {
       let resolveFlush!: () => void;
       const messaging = createMockMessaging();
-      // First call (flush) returns a pending promise; second call (finalize) resolves immediately
+      // Flush update is pending until resolveFlush() is called.
       messaging.updateMessage!
-        .mockImplementationOnce(() => new Promise<void>((r) => { resolveFlush = r; }))
-        .mockResolvedValueOnce(undefined);
+        .mockImplementationOnce(() => new Promise<void>((r) => { resolveFlush = r; }));
 
       const updater = new StreamingMessageUpdater(messaging as any);
       updater.start('proj', 'inst', 'ch-1', 'msg-1');
@@ -297,17 +331,16 @@ describe('StreamingMessageUpdater', () => {
       resolveFlush();
       await finalizePromise;
 
-      // Now finalize's updateMessage should have been called AFTER flush completed
-      expect(messaging.updateMessage).toHaveBeenCalledTimes(2);
-      expect(messaging.updateMessage).toHaveBeenLastCalledWith('ch-1', 'msg-1', '\u2705 Done');
+      // Finalize posts completion only after flush settles.
+      expect(messaging.updateMessage).toHaveBeenCalledTimes(1);
+      expect(messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '\u2705 Done');
     });
 
     it('finalize proceeds when flush had rejected', async () => {
       const messaging = createMockMessaging();
-      // flush rejects, finalize resolves
+      // Flush rejects, finalize still resolves
       messaging.updateMessage!
-        .mockRejectedValueOnce(new Error('network error'))
-        .mockResolvedValueOnce(undefined);
+        .mockRejectedValueOnce(new Error('network error'));
 
       const updater = new StreamingMessageUpdater(messaging as any);
       updater.start('proj', 'inst', 'ch-1', 'msg-1');
@@ -320,8 +353,8 @@ describe('StreamingMessageUpdater', () => {
       // Finalize should still work
       await updater.finalize('proj', 'inst');
 
-      expect(messaging.updateMessage).toHaveBeenCalledTimes(2);
-      expect(messaging.updateMessage).toHaveBeenLastCalledWith('ch-1', 'msg-1', '\u2705 Done');
+      expect(messaging.updateMessage).toHaveBeenCalledTimes(1);
+      expect(messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '\u2705 Done');
       expect(updater.has('proj', 'inst')).toBe(false);
     });
 
@@ -342,8 +375,8 @@ describe('StreamingMessageUpdater', () => {
       // Now finalize should NOT be blocked by a stale flushPromise
       await updater.finalize('proj', 'inst');
 
-      expect(messaging.updateMessage).toHaveBeenCalledTimes(2);
-      expect(messaging.updateMessage).toHaveBeenLastCalledWith('ch-1', 'msg-1', '\u2705 Done');
+      expect(messaging.updateMessage).toHaveBeenCalledTimes(1);
+      expect(messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '\u2705 Done');
     });
   });
 

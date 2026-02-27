@@ -200,7 +200,7 @@ describe('BridgeHookServer — auto-pending + streaming', () => {
     expect(res.status).toBe(200);
     expect(mockPendingTracker.ensureStartMessage).toHaveBeenCalled();
     expect(mockStreaming.start).toHaveBeenCalledWith('test', 'claude', 'ch-123', 'start-msg-ts');
-    expect(mockStreaming.append).toHaveBeenCalledWith('test', 'claude', '📖 Read(`src/index.ts`)');
+    expect(mockStreaming.appendCumulative).toHaveBeenCalledWith('test', 'claude', '📖 Read(`src/index.ts`)');
   });
 
   it('tool.activity skips thread reply when no pending startMessageId', async () => {
@@ -226,7 +226,7 @@ describe('BridgeHookServer — auto-pending + streaming', () => {
     });
     expect(res.status).toBe(200);
     expect(mockMessaging.replyInThreadWithId).not.toHaveBeenCalled();
-    expect(mockStreaming.append).toHaveBeenCalledWith('test', 'claude', '📖 Read(`src/index.ts`)');
+    expect(mockStreaming.appendCumulative).toHaveBeenCalledWith('test', 'claude', '📖 Read(`src/index.ts`)');
   });
 
   it('session.idle calls streamingUpdater.finalize', async () => {
@@ -331,7 +331,7 @@ describe('BridgeHookServer — auto-pending + streaming', () => {
     expect(mockPendingTracker.ensurePending).toHaveBeenCalled();
     expect(mockPendingTracker.ensureStartMessage).toHaveBeenCalled();
     expect(mockStreaming.start).toHaveBeenCalledWith('test', 'claude', 'ch-123', 'auto-start-msg');
-    expect(mockStreaming.append).toHaveBeenCalledWith('test', 'claude', '📖 Read(`src/index.ts`)');
+    expect(mockStreaming.appendCumulative).toHaveBeenCalledWith('test', 'claude', '📖 Read(`src/index.ts`)');
   });
 
   it('full lifecycle: tool activities replaced in thread → finalize', async () => {
@@ -386,9 +386,9 @@ describe('BridgeHookServer — auto-pending + streaming', () => {
     });
 
     expect(mockStreaming.start).toHaveBeenCalledWith('test', 'claude', 'ch-123', 'auto-start-msg');
-    expect(mockStreaming.append).toHaveBeenCalledTimes(2);
-    expect(mockStreaming.append).toHaveBeenCalledWith('test', 'claude', '📖 Read(`src/index.ts`)');
-    expect(mockStreaming.append).toHaveBeenCalledWith('test', 'claude', '✏️ Edit(`src/config.ts`)');
+    expect(mockStreaming.appendCumulative).toHaveBeenCalledTimes(2);
+    expect(mockStreaming.appendCumulative).toHaveBeenCalledWith('test', 'claude', '📖 Read(`src/index.ts`)');
+    expect(mockStreaming.appendCumulative).toHaveBeenCalledWith('test', 'claude', '✏️ Edit(`src/config.ts`)');
     expect(mockStreaming.finalize).toHaveBeenCalledWith('test', 'claude', undefined, 'auto-start-msg');
     expect(mockMessaging.sendToChannel).toHaveBeenCalledWith('ch-123', 'Done!');
   });

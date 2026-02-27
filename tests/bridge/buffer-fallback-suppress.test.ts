@@ -111,7 +111,8 @@ describe('buffer fallback — idle suppression & hookActive', () => {
       runtime,
       stateManager,
       pendingTracker,
-      streamingUpdater: { canStream: vi.fn(), start: vi.fn(), append: vi.fn(), finalize: vi.fn(), discard: vi.fn(), has: vi.fn() } as any,
+      streamingUpdater: { canStream: vi.fn(), start: vi.fn(), append: vi.fn(),
+      appendCumulative: vi.fn(), finalize: vi.fn(), discard: vi.fn(), has: vi.fn() } as any,
       sanitizeInput: (content: string) => content.trim() || null,
     });
 

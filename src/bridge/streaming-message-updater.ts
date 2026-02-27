@@ -5,6 +5,8 @@ interface StreamingEntry {
   messageId: string;
   /** The latest status text to display (replaces previous on each update). */
   currentText: string;
+  /** Accumulated activity lines for cumulative mode. */
+  historyLines: string[];
   debounceTimer: ReturnType<typeof setTimeout> | null;
   /** Promise for any in-progress flush (prevents finalize from racing). */
   flushPromise?: Promise<void>;
@@ -37,6 +39,7 @@ export class StreamingMessageUpdater {
       channelId,
       messageId,
       currentText: '',
+      historyLines: [],
       debounceTimer: null,
     });
   }
@@ -51,18 +54,29 @@ export class StreamingMessageUpdater {
     if (!entry) return false;
 
     entry.currentText = text;
-
-    // Reset debounce timer
-    if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
-    entry.debounceTimer = setTimeout(() => {
-      this.flush(k).catch(() => {});
-    }, DEBOUNCE_MS);
-
+    this.scheduleFlush(k, entry);
     return true;
   }
 
   /**
-   * Finalize the streaming message: change to "Done" (or custom header) and flush immediately.
+   * Append a line to cumulative status text.
+   * Used for tool activity streams where preserving history is useful.
+   */
+  appendCumulative(projectName: string, instanceKey: string, text: string): boolean {
+    const k = this.key(projectName, instanceKey);
+    const entry = this.entries.get(k);
+    if (!entry) return false;
+
+    if (text.length > 0) {
+      entry.historyLines.push(text);
+    }
+    entry.currentText = entry.historyLines.join('\n');
+    this.scheduleFlush(k, entry);
+    return true;
+  }
+
+  /**
+   * Finalize streaming: flush latest stream update, then post a finalize header as a new message.
    * If expectedMessageId is provided, only finalize if the entry still belongs to the same request
    * (prevents a stale handler from finalizing a newer request's entry after markPending overwrites).
    */
@@ -76,18 +90,16 @@ export class StreamingMessageUpdater {
 
     if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
 
-    // Wait for any in-progress flush to complete so our update is always last
+    // Wait for any in-progress flush to complete before posting the finalize line.
     if (entry.flushPromise) await entry.flushPromise;
 
     const content = customHeader || '\u2705 Done';
     this.entries.delete(k);
 
-    if (this.messaging.updateMessage) {
-      try {
-        await this.messaging.updateMessage(entry.channelId, entry.messageId, content);
-      } catch {
-        // Non-fatal
-      }
+    try {
+      await this.messaging.sendToChannel(entry.channelId, content);
+    } catch {
+      // Non-fatal
     }
   }
 
@@ -107,7 +119,7 @@ export class StreamingMessageUpdater {
     const entry = this.entries.get(k);
     if (!entry) return;
 
-    const content = entry.currentText || '\u23F3 Working...';
+    const content = this.clampForPlatform(entry.currentText || '\u23F3 Working...');
     if (this.messaging.updateMessage) {
       const promise = this.messaging.updateMessage(entry.channelId, entry.messageId, content).catch(() => {});
       entry.flushPromise = promise;
@@ -115,5 +127,21 @@ export class StreamingMessageUpdater {
       // Clear only if this is still the active flush
       if (entry.flushPromise === promise) entry.flushPromise = undefined;
     }
+  }
+
+  private scheduleFlush(key: string, entry: StreamingEntry): void {
+    if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
+    entry.debounceTimer = setTimeout(() => {
+      this.flush(key).catch(() => {});
+    }, DEBOUNCE_MS);
+  }
+
+  private clampForPlatform(content: string): string {
+    const limit = this.messaging.platform === 'slack' ? 3900 : 1900;
+    if (content.length <= limit) return content;
+
+    const prefix = '...(truncated)\n';
+    const keep = Math.max(0, limit - prefix.length);
+    return prefix + content.slice(-keep);
   }
 }

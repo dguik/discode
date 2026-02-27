@@ -33,6 +33,7 @@ function createMockDeps(): EventHandlerDeps {
       has: vi.fn().mockReturnValue(false),
       start: vi.fn(),
       append: vi.fn(),
+      appendCumulative: vi.fn(),
       discard: vi.fn(),
       finalize: vi.fn().mockResolvedValue(undefined),
     } as any,

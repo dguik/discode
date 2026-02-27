@@ -36,6 +36,7 @@ export function createMockStreamingUpdater() {
     canStream: vi.fn().mockReturnValue(false),
     start: vi.fn(),
     append: vi.fn().mockReturnValue(false),
+        appendCumulative: vi.fn().mockReturnValue(false),
     finalize: vi.fn().mockResolvedValue(undefined),
     discard: vi.fn(),
     has: vi.fn().mockReturnValue(false),

@@ -767,10 +767,12 @@ describe('Multi-Platform Parity', () => {
 
           // Only one updateMessage call should have fired (debounce collapses rapid events)
           expect(afterDebounce - beforeDebounce).toBe(1);
-          // The final text should be the last appended value
+          // The final text should include the full cumulative history.
           const lastCall = (ctx.messaging.updateMessage as ReturnType<typeof vi.fn>).mock
             .calls.at(-1);
-          expect(lastCall?.[2]).toBe('Step C');
+          expect(lastCall?.[2]).toContain('Step A');
+          expect(lastCall?.[2]).toContain('Step B');
+          expect(lastCall?.[2]).toContain('Step C');
         } finally {
           ctx.server.stop();
         }
@@ -784,7 +786,7 @@ describe('Multi-Platform Parity', () => {
 
   describe('session.idle finalizes streaming', () => {
     it.each(['discord', 'slack'] as const)(
-      '%s: session.idle after tool.activity calls updateMessage with Done',
+      '%s: session.idle after tool.activity posts a Done message',
       async (platform) => {
         const ctx = await startFullHookServer({
           platform,
@@ -814,11 +816,10 @@ describe('Multi-Platform Parity', () => {
             text: 'Final output',
           });
 
-          // finalize calls updateMessage with "✅ Done" (or a usage summary)
-          await waitForCalls(ctx.messaging.updateMessage as ReturnType<typeof vi.fn>, 1, 5000);
-          const updateCalls = (ctx.messaging.updateMessage as ReturnType<typeof vi.fn>).mock.calls;
-          const finalCall = updateCalls.at(-1);
-          expect(finalCall?.[2]).toMatch(/✅/);
+          // finalize posts a channel message with "✅ Done" (or a usage summary)
+          await waitForCalls(ctx.messaging.sendToChannel as ReturnType<typeof vi.fn>, 1, 5000);
+          const messages = getChannelMessages(ctx.messaging, 'ch-1');
+          expect(messages.some((m) => /✅/.test(m))).toBe(true);
         } finally {
           ctx.server.stop();
         }

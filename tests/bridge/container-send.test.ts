@@ -514,6 +514,7 @@ describe('container agent → platform send', () => {
         canStream: vi.fn().mockReturnValue(true),
         start: vi.fn(),
         append: vi.fn(),
+      appendCumulative: vi.fn(),
         finalize: vi.fn(),
         discard: vi.fn(),
         has: vi.fn().mockReturnValue(false),

@@ -85,16 +85,15 @@ describe('Event Lifecycle E2E', () => {
         usage: { inputTokens: 1000, outputTokens: 500, totalCostUsd: 0.05 },
       });
 
-      // streamingUpdater.finalize calls updateMessage with the finalize header
-      await waitForCalls(ctx.messaging.updateMessage as any, 1);
-      const updateCalls = (ctx.messaging.updateMessage as any).mock.calls;
-      // Find the finalize call — it contains the usage summary (not intermediate debounced text)
-      const finalizeCall = updateCalls.find(
-        (c: any[]) => typeof c[2] === 'string' && (c[2].includes('tokens') || c[2].includes('Done')),
+      // finalize posts usage summary as a new channel message
+      await waitForCalls(ctx.messaging.sendToChannel as any, 2);
+      const messages = getChannelMessages(ctx.messaging, 'ch-1');
+      const finalizeMessage = messages.find(
+        (m) => typeof m === 'string' && (m.includes('tokens') || m.includes('Done')),
       );
-      expect(finalizeCall).toBeDefined();
-      expect(finalizeCall[2]).toContain('1,500 tokens');
-      expect(finalizeCall[2]).toContain('$0.05');
+      expect(finalizeMessage).toBeDefined();
+      expect(finalizeMessage).toContain('1,500 tokens');
+      expect(finalizeMessage).toContain('$0.05');
     });
 
     it('session.idle with promptQuestions triggers sendQuestionWithButtons', async () => {
