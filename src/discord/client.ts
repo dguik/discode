@@ -238,7 +238,7 @@ export class DiscordClient implements MessagingClient {
     return this.interactions.sendApprovalRequest(channelId, toolName, toolInput, timeoutMs);
   }
 
-  sendQuestionWithButtons(
+  async sendQuestionWithButtons(
     channelId: string,
     questions: Array<{
       question: string;
@@ -248,6 +248,17 @@ export class DiscordClient implements MessagingClient {
     }>,
     timeoutMs?: number,
   ): Promise<string | null> {
-    return this.interactions.sendQuestionWithButtons(channelId, questions, timeoutMs);
+    const selected = await this.interactions.sendQuestionWithButtons(channelId, questions, timeoutMs);
+    if (selected && this.messageCallback) {
+      const info = this.channels.channelMapping.get(channelId);
+      if (info) {
+        try {
+          await this.messageCallback(info.agentType, selected, info.projectName, channelId, undefined, info.instanceId);
+        } catch (err) {
+          console.warn('Failed to route question button selection to agent:', err);
+        }
+      }
+    }
+    return selected;
   }
 }

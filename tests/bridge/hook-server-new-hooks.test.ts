@@ -18,7 +18,6 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
     const rawDir = join(tmpdir(), `discode-hookserver-test-${Date.now()}`);
     mkdirSync(rawDir, { recursive: true });
     tempDir = realpathSync(rawDir);
-    port = 19000 + Math.floor(Math.random() * 1000);
   });
 
   afterEach(() => {
@@ -26,9 +25,11 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function startServer(deps: Partial<BridgeHookServerDeps> = {}): BridgeHookServer {
-    server = new BridgeHookServer(createServerDeps(port, deps));
+  async function startServer(deps: Partial<BridgeHookServerDeps> = {}): Promise<BridgeHookServer> {
+    server = new BridgeHookServer(createServerDeps(0, deps));
     server.start();
+    await server.ready();
+    port = server.address()!.port;
     return server;
   }
 
@@ -53,12 +54,11 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
 
   it('handles prompt.submit event', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: createMockPendingTracker() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -77,12 +77,11 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
 
   it('prompt.submit with empty text does not send', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: createMockPendingTracker() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -97,12 +96,11 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
 
   it('handles tool.failure event', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: createMockPendingTracker() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -123,12 +121,11 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
 
   it('tool.failure without error sends minimal message', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: createMockPendingTracker() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -139,7 +136,7 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
     expect(res.status).toBe(200);
     expect(mockMessaging.sendToChannel).toHaveBeenCalledWith(
       'ch-123',
-      '⚠️ Edit failed',
+      '⚠️ *Edit failed*',
     );
   });
 
@@ -147,12 +144,11 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
 
   it('handles teammate.idle event', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: createMockPendingTracker() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -163,18 +159,17 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
     expect(res.status).toBe(200);
     expect(mockMessaging.sendToChannel).toHaveBeenCalledWith(
       'ch-123',
-      '💤 [agent-2] idle',
+      '💤 *[agent-2]* idle',
     );
   });
 
   it('teammate.idle includes team name when provided', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: createMockPendingTracker() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -186,18 +181,17 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
     expect(res.status).toBe(200);
     expect(mockMessaging.sendToChannel).toHaveBeenCalledWith(
       'ch-123',
-      '💤 [agent-3] idle (backend-team)',
+      '💤 *[agent-3]* idle (backend-team)',
     );
   });
 
   it('teammate.idle with missing teammateName does not send', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: createMockPendingTracker() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',

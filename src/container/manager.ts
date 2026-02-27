@@ -10,7 +10,7 @@
  * - uid/gid mapped to 1000:1000 (the coder user)
  */
 
-import { execSync, execFileSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import type { AgentType } from '../agents/base.js';
 import { imageTagFor, ensureImage } from './image.js';
 import { findDockerSocket } from './docker-socket.js';
@@ -18,6 +18,14 @@ import { findDockerSocket } from './docker-socket.js';
 const WORKSPACE_DIR = '/workspace';
 const CONTAINER_UID = '1000';
 const CONTAINER_GID = '1000';
+
+/** Validates that a container ID is a valid Docker hex string (12-64 chars). */
+const CONTAINER_ID_PATTERN = /^[a-f0-9]{12,64}$/;
+export function assertValidContainerId(id: string): void {
+  if (!CONTAINER_ID_PATTERN.test(id)) {
+    throw new Error(`Invalid container ID format: "${id.substring(0, 20)}"`);
+  }
+}
 
 // Re-export extracted modules for backward compatibility
 export { findDockerSocket, isDockerAvailable } from './docker-socket.js';
@@ -105,6 +113,7 @@ export function createContainer(options: ContainerCreateOptions): string {
  * that the runtime will execute to attach to the container.
  */
 export function buildDockerStartCommand(containerId: string, socketPath?: string): string {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (sock) {
     return `docker -H unix://${sock} start -ai ${containerId}`;
@@ -116,14 +125,15 @@ export function buildDockerStartCommand(containerId: string, socketPath?: string
  * Check if a container is running.
  */
 export function isContainerRunning(containerId: string, socketPath?: string): boolean {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return false;
 
   try {
-    const result = execSync(
-      `docker -H unix://${sock} inspect -f '{{.State.Running}}' ${containerId}`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const result = execFileSync('docker', ['-H', `unix://${sock}`, 'inspect', '-f', '{{.State.Running}}', containerId], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
     return result.trim() === 'true';
   } catch {
     return false;
@@ -134,14 +144,15 @@ export function isContainerRunning(containerId: string, socketPath?: string): bo
  * Check if a container exists (running or stopped).
  */
 export function containerExists(containerId: string, socketPath?: string): boolean {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return false;
 
   try {
-    execSync(
-      `docker -H unix://${sock} inspect ${containerId}`,
-      { stdio: ['ignore', 'ignore', 'ignore'], timeout: 5000 },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'inspect', containerId], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+      timeout: 5000,
+    });
     return true;
   } catch {
     return false;
@@ -152,14 +163,15 @@ export function containerExists(containerId: string, socketPath?: string): boole
  * Stop a container gracefully (10s timeout before SIGKILL).
  */
 export function stopContainer(containerId: string, socketPath?: string): boolean {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return false;
 
   try {
-    execSync(
-      `docker -H unix://${sock} stop -t 10 ${containerId}`,
-      { timeout: 15_000, stdio: ['ignore', 'ignore', 'ignore'] },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'stop', '-t', '10', containerId], {
+      timeout: 15_000,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
     return true;
   } catch {
     return false;
@@ -170,14 +182,15 @@ export function stopContainer(containerId: string, socketPath?: string): boolean
  * Remove a container (force remove if still running).
  */
 export function removeContainer(containerId: string, socketPath?: string): boolean {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return false;
 
   try {
-    execSync(
-      `docker -H unix://${sock} rm -f ${containerId}`,
-      { timeout: 15_000, stdio: ['ignore', 'ignore', 'ignore'] },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'rm', '-f', containerId], {
+      timeout: 15_000,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
     return true;
   } catch {
     return false;
@@ -188,14 +201,14 @@ export function removeContainer(containerId: string, socketPath?: string): boole
  * Start a stopped container (non-interactive, background).
  */
 export function startContainerBackground(containerId: string, socketPath?: string): boolean {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return false;
 
   try {
-    execSync(
-      `docker -H unix://${sock} start ${containerId}`,
-      { timeout: 10_000 },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'start', containerId], {
+      timeout: 10_000,
+    });
     return true;
   } catch {
     return false;
@@ -206,17 +219,14 @@ export function startContainerBackground(containerId: string, socketPath?: strin
  * Execute a command inside a running container and return stdout.
  */
 export function execInContainer(containerId: string, command: string, socketPath?: string): string {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) throw new Error('Docker socket not found');
 
-  return execSync(
-    `docker -H unix://${sock} exec ${containerId} sh -c ${escapeForSh(command)}`,
-    { encoding: 'utf-8', timeout: 30_000 },
-  ).trim();
-}
-
-function escapeForSh(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
+  return execFileSync('docker', ['-H', `unix://${sock}`, 'exec', containerId, 'sh', '-c', command], {
+    encoding: 'utf-8',
+    timeout: 30_000,
+  }).trim();
 }
 
 export { WORKSPACE_DIR };

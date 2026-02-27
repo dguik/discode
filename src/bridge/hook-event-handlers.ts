@@ -43,7 +43,7 @@ export interface EventHandlerDeps {
   clearSessionLifecycleTimer: (key: string) => void;
 }
 
-const THINKING_INTERVAL_MS = 10_000;
+const THINKING_INTERVAL_MS = 5_000;
 const SESSION_LIFECYCLE_DELAY_MS = 5_000;
 
 export async function handleSessionError(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
@@ -60,8 +60,9 @@ export async function handleSessionError(deps: EventHandlerDeps, ctx: EventConte
   const msg = ctx.text || 'unknown error';
   let errorMessage = `\u26A0\uFE0F *Error:* ${msg}`;
   if (recentLines.length > 0) {
-    errorMessage += '\n\n최근 활동:\n' + recentLines.join('\n');
+    errorMessage += '\n\nRecent activity:\n' + recentLines.join('\n');
   }
+  errorMessage += '\n\n_You can retry by sending your message again._';
   await deps.messaging.sendToChannel(ctx.channelId, errorMessage);
   return true;
 }
@@ -205,8 +206,10 @@ export async function handleSessionIdle(deps: EventHandlerDeps, ctx: EventContex
   const startMessageId = livePending?.startMessageId;
 
   const usage = ctx.event.usage as Record<string, unknown> | undefined;
+  const hasPrompt = Array.isArray(ctx.event.promptQuestions) && ctx.event.promptQuestions.length > 0
+    || (typeof ctx.event.promptText === 'string' && ctx.event.promptText.trim().length > 0);
   if (startMessageId) {
-    const finalizeHeader = buildFinalizeHeader(usage);
+    const finalizeHeader = hasPrompt ? '\u2753 Waiting for input...' : buildFinalizeHeader(usage);
     await deps.streamingUpdater.finalize(
       ctx.projectName, ctx.instanceKey,
       finalizeHeader || undefined,
@@ -214,6 +217,15 @@ export async function handleSessionIdle(deps: EventHandlerDeps, ctx: EventContex
     );
   }
 
+  if (hasPrompt) {
+    // Replace hourglass with question mark instead of checkmark when waiting for user input
+    const livePendingForReaction = deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
+    if (livePendingForReaction?.messageId) {
+      deps.messaging.replaceOwnReactionOnMessage(
+        livePendingForReaction.channelId, livePendingForReaction.messageId, '\u23F3', '\u2753',
+      ).catch(() => {});
+    }
+  }
   deps.pendingTracker.markCompleted(ctx.projectName, ctx.agentType, ctx.instanceId).catch(() => {});
 
   await postUsageToChannel(deps.messaging, ctx.channelId, usage);
@@ -265,7 +277,17 @@ export async function handleToolFailure(deps: EventHandlerDeps, ctx: EventContex
   const toolName = typeof ctx.event.toolName === 'string' ? ctx.event.toolName : 'unknown';
   const error = typeof ctx.event.error === 'string' ? ctx.event.error : '';
   const errorSuffix = error ? `: ${error}` : '';
-  await deps.messaging.sendToChannel(ctx.channelId, `\u26A0\uFE0F *${toolName} failed*${errorSuffix}`);
+  let inputContext = '';
+  const rawInput = ctx.event.toolInput;
+  if (rawInput) {
+    const inputStr = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput);
+    inputContext = inputStr.length > 200 ? inputStr.substring(0, 200) + '...' : inputStr;
+  }
+  let msg = `\u26A0\uFE0F *${toolName} failed*${errorSuffix}`;
+  if (inputContext) {
+    msg += `\n\`\`\`${inputContext}\`\`\``;
+  }
+  await deps.messaging.sendToChannel(ctx.channelId, msg);
   return true;
 }
 

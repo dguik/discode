@@ -5,11 +5,13 @@
  * Non-root `coder` user (uid/gid 1000:1000) inside containers.
  */
 
-import { execSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync, mkdirSync } from 'fs';
+import { randomBytes } from 'crypto';
+import { execFileSync } from 'child_process';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync, mkdirSync, mkdtempSync, rmdirSync } from 'fs';
 import { join, basename } from 'path';
 import { homedir, tmpdir } from 'os';
 import { findDockerSocket } from './docker-socket.js';
+import { assertValidContainerId } from './manager.js';
 
 const MAX_INJECT_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 const CONTAINER_UID = '1000';
@@ -23,19 +25,21 @@ const CONTAINER_GID = '1000';
  * container filesystem.
  */
 export function injectCredentials(containerId: string, socketPath?: string): void {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return;
 
   const copyToContainer = (content: string, containerPath: string): void => {
-    const tmp = join(tmpdir(), `discode-inject-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const tmpDir = mkdtempSync(join(tmpdir(), 'discode-inject-'), { mode: 0o700 } as any);
+    const tmp = join(tmpDir, randomBytes(16).toString('hex'));
     try {
-      writeFileSync(tmp, content);
-      execSync(
-        `docker -H unix://${sock} cp ${tmp} ${containerId}:${containerPath}`,
-        { timeout: 10_000 },
-      );
+      writeFileSync(tmp, content, { mode: 0o600 });
+      execFileSync('docker', ['-H', `unix://${sock}`, 'cp', tmp, `${containerId}:${containerPath}`], {
+        timeout: 10_000,
+      });
     } finally {
       try { unlinkSync(tmp); } catch { /* ignore */ }
+      try { rmdirSync(tmpDir); } catch { /* ignore */ }
     }
   };
 
@@ -66,10 +70,10 @@ export function injectCredentials(containerId: string, socketPath?: string): voi
     // Claude Code stores OAuth tokens in macOS Keychain, not on disk.
     // Extract them so the container (Linux) can read them as a file.
     try {
-      const raw = execSync(
-        'security find-generic-password -s "Claude Code-credentials" -w',
-        { timeout: 5_000, encoding: 'utf-8' },
-      ).trim();
+      const raw = execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], {
+        timeout: 5_000,
+        encoding: 'utf-8',
+      }).trim();
       if (raw) {
         copyToContainer(raw, '/home/coder/.claude/.credentials.json');
       }
@@ -99,6 +103,7 @@ export function injectFile(
   containerDir: string,
   socketPath?: string,
 ): boolean {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return false;
 
@@ -114,23 +119,20 @@ export function injectFile(
 
   try {
     // Ensure target directory exists (run as root so we can create dirs owned by anyone)
-    execSync(
-      `docker -H unix://${sock} exec -u root ${containerId} mkdir -p ${containerDir}`,
-      { timeout: 5000 },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'exec', '-u', 'root', containerId, 'mkdir', '-p', containerDir], {
+      timeout: 5000,
+    });
 
     // Use docker cp for file transfer
-    execSync(
-      `docker -H unix://${sock} cp ${hostPath} ${containerId}:${containerDir}/`,
-      { timeout: 30_000 },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'cp', hostPath, `${containerId}:${containerDir}/`], {
+      timeout: 30_000,
+    });
 
     // Fix ownership (run as root)
     const filename = basename(hostPath);
-    execSync(
-      `docker -H unix://${sock} exec -u root ${containerId} chown ${CONTAINER_UID}:${CONTAINER_GID} ${containerDir}/${filename}`,
-      { timeout: 5000 },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'exec', '-u', 'root', containerId, 'chown', `${CONTAINER_UID}:${CONTAINER_GID}`, `${containerDir}/${filename}`], {
+      timeout: 5000,
+    });
 
     return true;
   } catch (error) {
@@ -148,15 +150,15 @@ export function extractFile(
   hostDir: string,
   socketPath?: string,
 ): boolean {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return false;
 
   try {
     mkdirSync(hostDir, { recursive: true });
-    execSync(
-      `docker -H unix://${sock} cp ${containerId}:${containerPath} ${hostDir}/`,
-      { timeout: 30_000 },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'cp', `${containerId}:${containerPath}`, `${hostDir}/`], {
+      timeout: 30_000,
+    });
     return true;
   } catch {
     return false;

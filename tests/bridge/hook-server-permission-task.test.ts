@@ -18,7 +18,6 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
     const rawDir = join(tmpdir(), `discode-hookserver-test-${Date.now()}`);
     mkdirSync(rawDir, { recursive: true });
     tempDir = realpathSync(rawDir);
-    port = 19000 + Math.floor(Math.random() * 1000);
   });
 
   afterEach(() => {
@@ -26,9 +25,11 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function startServer(deps: Partial<BridgeHookServerDeps> = {}): BridgeHookServer {
-    server = new BridgeHookServer(createServerDeps(port, deps));
+  async function startServer(deps: Partial<BridgeHookServerDeps> = {}): Promise<BridgeHookServer> {
+    server = new BridgeHookServer(createServerDeps(0, deps));
     server.start();
+    await server.ready();
+    port = server.address()!.port;
     return server;
   }
 
@@ -52,12 +53,11 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
   describe('permission.request', () => {
     it('sends permission message with toolName and toolInput', async () => {
       const mockMessaging = createMockMessaging();
-      startServer({
+      await startServer({
         messaging: mockMessaging as any,
         stateManager: makeState() as any,
         pendingTracker: createMockPendingTracker() as any,
       });
-      await new Promise((r) => setTimeout(r, 50));
 
       const res = await postJSON(port, '/opencode-event', {
         projectName: 'test',
@@ -79,12 +79,11 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
 
     it('sends permission message without toolInput when empty', async () => {
       const mockMessaging = createMockMessaging();
-      startServer({
+      await startServer({
         messaging: mockMessaging as any,
         stateManager: makeState() as any,
         pendingTracker: createMockPendingTracker() as any,
       });
-      await new Promise((r) => setTimeout(r, 50));
 
       const res = await postJSON(port, '/opencode-event', {
         projectName: 'test',
@@ -95,17 +94,16 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
       });
       expect(res.status).toBe(200);
       const sentMsg = mockMessaging.sendToChannel.mock.calls[0][1];
-      expect(sentMsg).toBe('🔐 Permission needed: `Bash`');
+      expect(sentMsg).toBe('🔐 *Permission needed:* `Bash`');
     });
 
     it('uses "unknown" when toolName is missing', async () => {
       const mockMessaging = createMockMessaging();
-      startServer({
+      await startServer({
         messaging: mockMessaging as any,
         stateManager: makeState() as any,
         pendingTracker: createMockPendingTracker() as any,
       });
-      await new Promise((r) => setTimeout(r, 50));
 
       const res = await postJSON(port, '/opencode-event', {
         projectName: 'test',
@@ -121,12 +119,11 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
   describe('task.completed', () => {
     it('sends task completed message with subject', async () => {
       const mockMessaging = createMockMessaging();
-      startServer({
+      await startServer({
         messaging: mockMessaging as any,
         stateManager: makeState() as any,
         pendingTracker: createMockPendingTracker() as any,
       });
-      await new Promise((r) => setTimeout(r, 50));
 
       const res = await postJSON(port, '/opencode-event', {
         projectName: 'test',
@@ -147,12 +144,11 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
 
     it('includes teammate prefix when provided', async () => {
       const mockMessaging = createMockMessaging();
-      startServer({
+      await startServer({
         messaging: mockMessaging as any,
         stateManager: makeState() as any,
         pendingTracker: createMockPendingTracker() as any,
       });
-      await new Promise((r) => setTimeout(r, 50));
 
       const res = await postJSON(port, '/opencode-event', {
         projectName: 'test',
@@ -170,12 +166,11 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
 
     it('sends message without subject when missing', async () => {
       const mockMessaging = createMockMessaging();
-      startServer({
+      await startServer({
         messaging: mockMessaging as any,
         stateManager: makeState() as any,
         pendingTracker: createMockPendingTracker() as any,
       });
-      await new Promise((r) => setTimeout(r, 50));
 
       const res = await postJSON(port, '/opencode-event', {
         projectName: 'test',
@@ -185,7 +180,7 @@ describe('BridgeHookServer — permission.request & task.completed', () => {
       });
       expect(res.status).toBe(200);
       const sentMsg = mockMessaging.sendToChannel.mock.calls[0][1];
-      expect(sentMsg).toBe('✅ Task completed');
+      expect(sentMsg).toBe('✅ *Task completed*');
     });
   });
 });

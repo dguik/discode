@@ -79,14 +79,16 @@ export function splitMessages(text: string, maxLen: number = 1900): string[] {
   const stripped = stripOuterCodeblock(text);
   if (stripped.length <= maxLen) return [stripped];
 
+  // Reserve space for chunk number suffix e.g. "\n(1/10)" — max 10 chars
+  const chunkBudget = maxLen - 10;
   const lines = stripped.split('\n');
   const rawChunks: string[] = [];
   let current = '';
 
   for (const line of lines) {
-    if (current.length + line.length + 1 > maxLen) {
+    if (current.length + line.length + 1 > chunkBudget) {
       if (current) rawChunks.push(current);
-      current = line.length > maxLen ? line.substring(0, maxLen) : line;
+      current = line.length > chunkBudget ? line.substring(0, chunkBudget - 15) + '... (truncated)' : line;
     } else {
       current += (current ? '\n' : '') + line;
     }
@@ -132,6 +134,13 @@ export function splitMessages(text: string, maxLen: number = 1900): string[] {
     result.push(chunk);
   }
 
+  // Add chunk numbers when split into 2+ parts
+  if (result.length >= 2) {
+    for (let i = 0; i < result.length; i++) {
+      result[i] = `${result[i]}\n(${i + 1}/${result.length})`;
+    }
+  }
+
   return result;
 }
 
@@ -140,9 +149,27 @@ export function splitForDiscord(text: string, maxLen: number = 1900): string[] {
   return splitMessages(text, maxLen);
 }
 
+/**
+ * Convert standard markdown bold/italic/links to Slack mrkdwn format.
+ * Skips content inside code blocks (``` ... ```) and inline code (` ... `).
+ */
+export function markdownToMrkdwn(text: string): string {
+  // Split by code blocks to avoid converting inside them
+  const parts = text.split(/(```[\s\S]*?```|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    // Odd indices are code blocks/inline code — leave them as-is
+    if (i % 2 === 1) return part;
+    // Convert **bold** to *bold* (Slack mrkdwn)
+    let converted = part.replace(/\*\*(.+?)\*\*/g, '*$1*');
+    // Convert markdown links [text](url) to Slack <url|text>
+    converted = converted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>');
+    return converted;
+  }).join('');
+}
+
 /** Split text into chunks for Slack (40,000 char limit, use 3900 for safety). */
 export function splitForSlack(text: string, maxLen: number = 3900): string[] {
-  return splitMessages(text, maxLen);
+  return splitMessages(markdownToMrkdwn(text), maxLen);
 }
 
 /**

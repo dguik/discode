@@ -30,7 +30,7 @@ export class ChromeMcpProxy {
 
   constructor(options?: ChromeMcpProxyOptions) {
     this.port = options?.port ?? 18471;
-    this.host = options?.host ?? '0.0.0.0';
+    this.host = options?.host ?? '127.0.0.1';
   }
 
   /**

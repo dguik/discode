@@ -2,6 +2,10 @@
  * Main entry point for discode
  */
 
+import { randomBytes } from 'crypto';
+import { writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import { DiscordClient } from './discord/client.js';
 import { SlackClient } from './slack/client.js';
 import type { MessagingClient } from './messaging/interface.js';
@@ -57,6 +61,8 @@ export class AgentBridge {
   private chromeMcpProxy: ChromeMcpProxy | null = null;
   /** SDK runner instances keyed by `projectName:instanceId`. */
   private sdkRunners = new Map<string, ClaudeSdkRunner>();
+  /** Bearer token for hook server authentication. */
+  private hookAuthToken: string | undefined;
 
   constructor(deps?: AgentBridgeDeps) {
     this.bridgeConfig = deps?.config || defaultConfig;
@@ -111,7 +117,16 @@ export class AgentBridge {
   public sanitizeInput(content: string): string | null {
     if (!content || content.trim().length === 0) return null;
     if (content.length > 10000) return null;
-    return content.replace(/\0/g, '');
+
+    let sanitized = content;
+    // Remove null bytes
+    sanitized = sanitized.replace(/\0/g, '');
+    // Strip ANSI escape sequences
+    sanitized = sanitized.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    // Strip other C0/C1 control characters (keep newline \x0a, tab \x09, carriage return \x0d)
+    sanitized = sanitized.replace(/[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+
+    return sanitized.trim().length === 0 ? null : sanitized;
   }
 
   /**
@@ -123,6 +138,13 @@ export class AgentBridge {
 
   async start(): Promise<void> {
     console.log('🚀 Starting Discode...');
+
+    // Generate and persist hook auth token
+    this.hookAuthToken = randomBytes(32).toString('hex');
+    const stateDir = join(homedir(), '.discode');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, '.hook-token'), this.hookAuthToken, { mode: 0o600 });
+    this.hookServer.setAuthToken(this.hookAuthToken);
 
     await this.messaging.connect();
     console.log('✅ Messaging client connected');

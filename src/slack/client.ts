@@ -13,6 +13,16 @@ import { SlackMessaging } from './messaging.js';
 import { SlackChannels } from './channels.js';
 import { SlackInteractions } from './interactions.js';
 
+const SLACK_FILE_DOMAINS = ['files.slack.com', 'files-pri.slack.com'];
+function isSlackFileUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return SLACK_FILE_DOMAINS.includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export class SlackClient implements MessagingClient {
   readonly platform = 'slack' as const;
   private app: App;
@@ -54,13 +64,13 @@ export class SlackClient implements MessagingClient {
       this.handleIncomingMessage(event);
     });
 
-    this.app.action(/^opt_\d+$/, async ({ ack }) => {
+    this.app.action(/^opt_[a-f0-9]+_\d+$/, async ({ ack }) => {
       await ack();
     });
-    this.app.action('approve_action', async ({ ack }) => {
+    this.app.action(/^approve_[a-f0-9]+$/, async ({ ack }) => {
       await ack();
     });
-    this.app.action('deny_action', async ({ ack }) => {
+    this.app.action(/^deny_[a-f0-9]+$/, async ({ ack }) => {
       await ack();
     });
   }
@@ -103,13 +113,16 @@ export class SlackClient implements MessagingClient {
     try {
       let attachments: MessageAttachment[] | undefined;
       if ('files' in message && Array.isArray(message.files) && message.files.length > 0) {
-        attachments = message.files.map((f: any) => ({
-          url: f.url_private_download || f.url_private || '',
-          filename: f.name || 'unknown',
-          contentType: f.mimetype || null,
-          size: f.size || 0,
-          authHeaders: { Authorization: `Bearer ${this.botToken}` },
-        }));
+        attachments = message.files.map((f: any) => {
+          const fileUrl = f.url_private_download || f.url_private || '';
+          return {
+            url: fileUrl,
+            filename: f.name || 'unknown',
+            contentType: f.mimetype || null,
+            size: f.size || 0,
+            authHeaders: isSlackFileUrl(fileUrl) ? { Authorization: `Bearer ${this.botToken}` } : undefined,
+          };
+        });
       }
 
       let text = message.text || '';
@@ -228,7 +241,7 @@ export class SlackClient implements MessagingClient {
   ): Promise<boolean> {
     return this.interactions.sendApprovalRequest(channelId, toolName, toolInput, timeoutMs);
   }
-  sendQuestionWithButtons(
+  async sendQuestionWithButtons(
     channelId: string,
     questions: Array<{
       question: string;
@@ -238,6 +251,17 @@ export class SlackClient implements MessagingClient {
     }>,
     timeoutMs?: number,
   ): Promise<string | null> {
-    return this.interactions.sendQuestionWithButtons(channelId, questions, timeoutMs);
+    const selected = await this.interactions.sendQuestionWithButtons(channelId, questions, timeoutMs);
+    if (selected && this.messageCallback) {
+      const info = this.ch.getChannelInfo(channelId);
+      if (info) {
+        try {
+          await this.messageCallback(info.agentType, selected, info.projectName, channelId, undefined, info.instanceId);
+        } catch (err) {
+          console.warn('Failed to route question button selection to agent:', err);
+        }
+      }
+    }
+    return selected;
   }
 }

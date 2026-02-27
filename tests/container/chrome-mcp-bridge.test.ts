@@ -30,6 +30,8 @@ vi.mock('fs', () => ({
   unlinkSync: (...args: any[]) => mockUnlinkSync(...args),
   statSync: vi.fn(),
   mkdirSync: vi.fn(),
+  mkdtempSync: vi.fn((_prefix: string) => '/tmp/discode-inject-XXXXXX'),
+  rmdirSync: vi.fn(),
   readdirSync: vi.fn().mockReturnValue([]),
 }));
 
@@ -53,8 +55,8 @@ function findWriteCall(substring: string): [string, string] | undefined {
 
 /** Find docker cp calls targeting a specific container path. */
 function findDockerCpCalls(containerPath: string): any[][] {
-  return mockExecSync.mock.calls.filter(
-    (c: any[]) => typeof c[0] === 'string' && c[0].includes(containerPath),
+  return mockExecFileSync.mock.calls.filter(
+    (c: any[]) => c[0] === 'docker' && Array.isArray(c[1]) && c[1].some((a: string) => typeof a === 'string' && a.includes(containerPath)),
   );
 }
 
@@ -68,6 +70,7 @@ describe('injectChromeMcpBridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockExecSync.mockReset();
+    mockExecFileSync.mockReset();
     mockReadFileSync.mockReset();
     mockWriteFileSync.mockReset();
     mockUnlinkSync.mockReset();
@@ -78,33 +81,33 @@ describe('injectChromeMcpBridge', () => {
   // ── Common behavior ────────────────────────────────────────────
 
   it('returns false when no Docker socket is found', () => {
-    expect(injectChromeMcpBridge('abc123', 18471, 'claude')).toBe(false);
-    expect(mockExecSync).not.toHaveBeenCalled();
+    expect(injectChromeMcpBridge('abcdef123456', 18471, 'claude')).toBe(false);
+    expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 
   it('returns false when bridge script is not found on host', () => {
     existingPaths.add(sock);
-    expect(injectChromeMcpBridge('abc123', 18471, 'claude', sock)).toBe(false);
+    expect(injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock)).toBe(false);
   });
 
   it('copies bridge script to /tmp/ in container via docker cp', () => {
     existingPaths.add(sock);
     existingPaths.add(bridgePath);
 
-    const result = injectChromeMcpBridge('abc123', 18471, 'claude', sock);
+    const result = injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock);
     expect(result).toBe(true);
 
-    const cpCalls = findDockerCpCalls('abc123:/tmp/chrome-mcp-bridge.cjs');
+    const cpCalls = findDockerCpCalls('abcdef123456:/tmp/chrome-mcp-bridge.cjs');
     expect(cpCalls).toHaveLength(1);
   });
 
   it('returns false and warns when docker cp fails', () => {
     existingPaths.add(sock);
     existingPaths.add(bridgePath);
-    mockExecSync.mockImplementation(() => { throw new Error('docker cp failed'); });
+    mockExecFileSync.mockImplementation(() => { throw new Error('docker cp failed'); });
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = injectChromeMcpBridge('abc123', 18471, 'claude', sock);
+    const result = injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock);
     expect(result).toBe(false);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('docker cp failed'));
     warnSpy.mockRestore();
@@ -114,7 +117,7 @@ describe('injectChromeMcpBridge', () => {
     existingPaths.add(sock);
     existingPaths.add(bridgePath);
 
-    injectChromeMcpBridge('abc123', 18471, 'claude', sock);
+    injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock);
     expect(mockUnlinkSync).toHaveBeenCalled();
   });
 
@@ -131,7 +134,7 @@ describe('injectChromeMcpBridge', () => {
         mcpServers: { 'existing-server': { type: 'stdio', command: 'test' } },
       }));
 
-      injectChromeMcpBridge('abc123', 18471, 'claude', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       expect(writeCall).toBeDefined();
@@ -153,7 +156,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(join(home, '.claude.json'));
       mockReadFileSync.mockReturnValue('{"numStartups":5}');
 
-      injectChromeMcpBridge('abc123', 18471, 'claude', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       const parsed = JSON.parse(writeCall![1]);
@@ -165,7 +168,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      const result = injectChromeMcpBridge('abc123', 18471, 'claude', sock);
+      const result = injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock);
       expect(result).toBe(true);
 
       const writeCall = findWriteCall('claude-in-chrome');
@@ -177,7 +180,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'claude', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock);
 
       const cpCalls = findDockerCpCalls('/home/coder/.claude.json');
       expect(cpCalls).toHaveLength(1);
@@ -187,7 +190,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 19999, 'claude', sock);
+      injectChromeMcpBridge('abcdef123456', 19999, 'claude', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       const parsed = JSON.parse(writeCall![1]);
@@ -200,7 +203,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(join(home, '.claude.json'));
       mockReadFileSync.mockReturnValue('not-valid-json{{{');
 
-      const result = injectChromeMcpBridge('abc123', 18471, 'claude', sock);
+      const result = injectChromeMcpBridge('abcdef123456', 18471, 'claude', sock);
       expect(result).toBe(true);
 
       const writeCall = findWriteCall('claude-in-chrome');
@@ -216,7 +219,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'gemini', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'gemini', sock);
 
       const cpCalls = findDockerCpCalls('/home/coder/.gemini/settings.json');
       expect(cpCalls).toHaveLength(1);
@@ -226,7 +229,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'gemini', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'gemini', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       expect(writeCall).toBeDefined();
@@ -249,7 +252,7 @@ describe('injectChromeMcpBridge', () => {
         mcpServers: { 'existing-mcp': { command: 'test' } },
       }));
 
-      injectChromeMcpBridge('abc123', 18471, 'gemini', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'gemini', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       const parsed = JSON.parse(writeCall![1]);
@@ -263,7 +266,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'gemini', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'gemini', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       const parsed = JSON.parse(writeCall![1]);
@@ -274,7 +277,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'gemini', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'gemini', sock);
 
       const cpCalls = findDockerCpCalls('/home/coder/.claude.json');
       expect(cpCalls).toHaveLength(0);
@@ -288,7 +291,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'opencode', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'opencode', sock);
 
       const cpCalls = findDockerCpCalls('/home/coder/.config/opencode/opencode.json');
       expect(cpCalls).toHaveLength(1);
@@ -298,7 +301,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'opencode', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'opencode', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       expect(writeCall).toBeDefined();
@@ -321,7 +324,7 @@ describe('injectChromeMcpBridge', () => {
         mcp: { 'existing-server': { type: 'local', command: ['test'] } },
       }));
 
-      injectChromeMcpBridge('abc123', 18471, 'opencode', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'opencode', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       const parsed = JSON.parse(writeCall![1]);
@@ -335,7 +338,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'opencode', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'opencode', sock);
 
       const writeCall = findWriteCall('claude-in-chrome');
       const parsed = JSON.parse(writeCall![1]);
@@ -346,7 +349,7 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      injectChromeMcpBridge('abc123', 18471, 'opencode', sock);
+      injectChromeMcpBridge('abcdef123456', 18471, 'opencode', sock);
 
       expect(findDockerCpCalls('/home/coder/.claude.json')).toHaveLength(0);
       expect(findDockerCpCalls('/home/coder/.gemini/settings.json')).toHaveLength(0);
@@ -360,11 +363,11 @@ describe('injectChromeMcpBridge', () => {
       existingPaths.add(sock);
       existingPaths.add(bridgePath);
 
-      const result = injectChromeMcpBridge('abc123', 18471, 'codex', sock);
+      const result = injectChromeMcpBridge('abcdef123456', 18471, 'codex', sock);
       expect(result).toBe(true);
 
       // Bridge script copied
-      const cpCalls = findDockerCpCalls('abc123:/tmp/chrome-mcp-bridge.cjs');
+      const cpCalls = findDockerCpCalls('abcdef123456:/tmp/chrome-mcp-bridge.cjs');
       expect(cpCalls).toHaveLength(1);
 
       // No config file written
