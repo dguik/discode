@@ -1261,6 +1261,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     await mod.runTui({
       currentSession: currentSession || undefined,
       currentWindow: currentWindow || undefined,
+      runtimeMode: effectiveConfig.runtimeMode || 'tmux',
       initialCommand: options.initialTuiCommand,
       onCommand: handler,
       onAttachProject: async (project: string) => {

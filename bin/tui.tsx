@@ -43,6 +43,7 @@ const ENABLE_RUNTIME_CURSOR_OVERLAY = process.env.DISCODE_TUI_RUNTIME_CURSOR !==
 type TuiInput = {
   currentSession?: string;
   currentWindow?: string;
+  runtimeMode?: 'tmux' | 'pty-ts' | 'pty-rust';
   initialCommand?: string;
   onCommand: (command: string, append: (line: string) => void) => Promise<boolean | void>;
   onStopProject: (project: string) => Promise<void>;
@@ -260,6 +261,8 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   let textarea: TextareaRenderable;
   let paletteInput: InputRenderable;
   let clipboardToastTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const runtimeModeLabel = createMemo(() => props.input.runtimeMode || 'tmux');
 
   const openProjects = createMemo(() => projects().filter((item) => item.open));
   const sidebarWidth = createMemo(() => Math.max(34, Math.min(52, Math.floor(dims().width * 0.33))));
@@ -1341,7 +1344,8 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           <text fg={palette.muted}>{runtimeStatusLine()}</text>
           <text fg={palette.muted}>{commandStatusLine()}</text>
           <text fg={prefixPending() ? palette.primary : palette.muted}>{`prefix: ${PREFIX_LABEL}${prefixPending() ? ' (waiting key)' : ''}`}</text>
-          <text fg={palette.muted}>runtime: slash/ctrl pass to AI</text>
+          <text fg={palette.muted}>{`runtime: ${runtimeModeLabel()}`}</text>
+          <text fg={palette.muted}>input: slash/ctrl pass to AI</text>
           <text fg={palette.muted}>window: prefix + 1..9</text>
           <text fg={palette.muted}>palette: Ctrl+P (Ctrl+Shift+P)</text>
           <text fg={palette.muted}>commands: / + Enter</text>
