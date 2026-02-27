@@ -3,7 +3,7 @@
  */
 
 import { randomBytes } from 'crypto';
-import { writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { DiscordClient } from './discord/client.js';
@@ -139,11 +139,22 @@ export class AgentBridge {
   async start(): Promise<void> {
     console.log('🚀 Starting Discode...');
 
-    // Generate and persist hook auth token
-    this.hookAuthToken = randomBytes(32).toString('hex');
+    // Read existing hook auth token or generate a new one.
+    // Reusing the persisted token prevents auth mismatches when a daemon
+    // restarts — the Codex process may still hold the previous token.
     const stateDir = join(homedir(), '.discode');
     mkdirSync(stateDir, { recursive: true });
-    writeFileSync(join(stateDir, '.hook-token'), this.hookAuthToken, { mode: 0o600 });
+    const tokenPath = join(stateDir, '.hook-token');
+    let token: string | undefined;
+    try {
+      const existing = readFileSync(tokenPath, 'utf-8').trim();
+      if (existing.length > 0) token = existing;
+    } catch { /* file doesn't exist yet */ }
+    if (!token) {
+      token = randomBytes(32).toString('hex');
+      writeFileSync(tokenPath, token, { mode: 0o600 });
+    }
+    this.hookAuthToken = token;
     this.hookServer.setAuthToken(this.hookAuthToken);
 
     await this.messaging.connect();
