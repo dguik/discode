@@ -88,7 +88,8 @@ export class PendingMessageTracker {
 
     if (this.messaging.sendToChannelWithId) {
       try {
-        pending.startMessageId = await this.messaging.sendToChannelWithId(pending.channelId, '⏳ Processing...');
+        const agentSuffix = agentType ? ` (${agentType})` : '';
+        pending.startMessageId = await this.messaging.sendToChannelWithId(pending.channelId, `⏳ Processing...${agentSuffix}`);
       } catch {
         // Non-fatal
       }

@@ -60,6 +60,7 @@ const mockBuildExportPrefix = vi.fn(() => '');
 vi.mock('../../src/policy/agent-launch.js', () => ({
   buildAgentLaunchEnv: (...args: any[]) => mockBuildAgentLaunchEnv(...args),
   buildExportPrefix: (...args: any[]) => mockBuildExportPrefix(...args),
+  readHookToken: () => 'mock-hook-token',
 }));
 
 const mockResolveProjectWindowName = vi.fn(() => 'test-window');

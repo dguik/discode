@@ -65,6 +65,7 @@ export class DiscordChannels {
       );
 
       let channel: TextChannel;
+      let isNew = false;
       if (existing) {
         channel = existing as TextChannel;
         console.log(`  - ${config.displayName}: reusing existing channel ${channel.name} (${channel.id})`);
@@ -74,6 +75,7 @@ export class DiscordChannels {
           type: ChannelType.GuildText,
           topic: `${config.displayName} agent for ${projectName}`,
         });
+        isNew = true;
         console.log(`  - ${config.displayName}: created channel ${channel.name} (${channel.id})`);
       }
 
@@ -82,6 +84,13 @@ export class DiscordChannels {
         agentType: config.name,
         instanceId: instanceIdByAgent?.[config.name],
       });
+
+      if (isNew) {
+        channel.send(
+          `\uD83D\uDC4B **Welcome!** This channel is connected to the **${config.displayName}** agent for project **${projectName}**.\n` +
+          `Send a message here to interact with the agent.`
+        ).catch(() => {});
+      }
 
       result[config.name] = channel.id;
     }

@@ -56,14 +56,15 @@ describe('SlackInteractions', () => {
       expect(call.blocks[0].type).toBe('section');
       expect(call.blocks[1].type).toBe('actions');
 
-      // Verify action handlers were registered
-      expect(app.action).toHaveBeenCalledWith('approve_action', expect.any(Function));
-      expect(app.action).toHaveBeenCalledWith('deny_action', expect.any(Function));
+      // Verify action handlers were registered with unique IDs
+      expect(app.action).toHaveBeenCalledTimes(2);
+      const approveCall = app.action.mock.calls.find((c: any[]) => typeof c[0] === 'string' && c[0].startsWith('approve_'));
+      const denyCall = app.action.mock.calls.find((c: any[]) => typeof c[0] === 'string' && c[0].startsWith('deny_'));
+      expect(approveCall).toBeDefined();
+      expect(denyCall).toBeDefined();
 
       // Clean up: simulate an action to resolve the pending promise
-      const approveHandler = app.action.mock.calls.find(
-        (c: any[]) => c[0] === 'approve_action',
-      )![1];
+      const approveHandler = approveCall![1];
       await approveHandler({
         action: { value: 'approve' },
         ack: vi.fn(),
@@ -95,7 +96,7 @@ describe('SlackInteractions', () => {
 
       // Clean up
       const handler = app.action.mock.calls.find(
-        (c: any[]) => c[0] === 'deny_action',
+        (c: any[]) => typeof c[0] === 'string' && c[0].startsWith('deny_'),
       )![1];
       await handler({
         action: { value: 'deny' },
@@ -139,14 +140,12 @@ describe('SlackInteractions', () => {
       // Should have section block, description fields block, and actions block
       expect(call.blocks.length).toBeGreaterThanOrEqual(2);
 
-      // Verify action handlers registered for each option
-      expect(app.action).toHaveBeenCalledWith('opt_0', expect.any(Function));
-      expect(app.action).toHaveBeenCalledWith('opt_1', expect.any(Function));
+      // Verify action handlers registered for each option with unique IDs
+      const optCalls = app.action.mock.calls.filter((c: any[]) => typeof c[0] === 'string' && c[0].match(/^opt_[a-f0-9]+_\d+$/));
+      expect(optCalls).toHaveLength(2);
 
       // Clean up: simulate selecting the first option
-      const handler = app.action.mock.calls.find(
-        (c: any[]) => c[0] === 'opt_0',
-      )![1];
+      const handler = optCalls.find((c: any[]) => c[0].endsWith('_0'))![1];
       await handler({
         action: { value: 'Red' },
         ack: vi.fn(),

@@ -10,6 +10,9 @@ function createMockApp() {
         join: vi.fn().mockResolvedValue(undefined),
         setTopic: vi.fn().mockResolvedValue(undefined),
       },
+      chat: {
+        postMessage: vi.fn().mockResolvedValue(undefined),
+      },
       auth: {
         test: vi.fn().mockResolvedValue({ team_id: 'T001', team: 'TestTeam' }),
       },

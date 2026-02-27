@@ -31,9 +31,10 @@ describe('processAttachments', () => {
   });
 
   it('downloads files and returns markers', async () => {
-    (downloadFileAttachments as any).mockResolvedValue([
-      { localPath: '/tmp/file.txt', filename: 'file.txt' },
-    ]);
+    (downloadFileAttachments as any).mockResolvedValue({
+      downloaded: [{ localPath: '/tmp/file.txt', filename: 'file.txt' }],
+      skipped: [],
+    });
     (buildFileMarkers as any).mockReturnValue('\n[file: /tmp/file.txt]');
 
     const attachments = [
@@ -46,9 +47,10 @@ describe('processAttachments', () => {
   });
 
   it('injects files into container when containerMode is true', async () => {
-    (downloadFileAttachments as any).mockResolvedValue([
-      { localPath: '/tmp/file.txt', filename: 'file.txt' },
-    ]);
+    (downloadFileAttachments as any).mockResolvedValue({
+      downloaded: [{ localPath: '/tmp/file.txt', filename: 'file.txt' }],
+      skipped: [],
+    });
     (buildFileMarkers as any).mockReturnValue('\n[file: /tmp/file.txt]');
 
     const attachments = [
@@ -60,9 +62,10 @@ describe('processAttachments', () => {
   });
 
   it('does not inject files when not in container mode', async () => {
-    (downloadFileAttachments as any).mockResolvedValue([
-      { localPath: '/tmp/file.txt', filename: 'file.txt' },
-    ]);
+    (downloadFileAttachments as any).mockResolvedValue({
+      downloaded: [{ localPath: '/tmp/file.txt', filename: 'file.txt' }],
+      skipped: [],
+    });
     (buildFileMarkers as any).mockReturnValue('\n[file: /tmp/file.txt]');
 
     const attachments = [
@@ -85,7 +88,7 @@ describe('processAttachments', () => {
   });
 
   it('returns empty string when no files downloaded', async () => {
-    (downloadFileAttachments as any).mockResolvedValue([]);
+    (downloadFileAttachments as any).mockResolvedValue({ downloaded: [], skipped: [] });
 
     const attachments = [
       { url: 'https://example.com/file.txt', filename: 'file.txt', contentType: 'text/plain', size: 100 },

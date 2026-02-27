@@ -18,6 +18,7 @@ function createMockChannel(id: string, name: string, textBased = true) {
     type: 0, // ChannelType.GuildText
     isTextBased: () => textBased,
     delete: vi.fn().mockResolvedValue(undefined),
+    send: vi.fn().mockResolvedValue(undefined),
   };
 }
 

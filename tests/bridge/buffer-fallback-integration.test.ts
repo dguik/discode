@@ -10,7 +10,7 @@ import { execSync } from 'child_process';
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
-const mockDownloadFileAttachments = vi.fn().mockResolvedValue([]);
+const mockDownloadFileAttachments = vi.fn().mockResolvedValue({ downloaded: [], skipped: [] });
 const mockBuildFileMarkers = vi.fn().mockReturnValue('');
 
 vi.mock('../../src/infra/file-downloader.js', () => ({

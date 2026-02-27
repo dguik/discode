@@ -13,12 +13,15 @@ vi.mock('child_process', () => ({
 
 const existingPaths = new Set<string>();
 const mockMkdirSync = vi.fn();
+const mockMkdtempSync = vi.fn((_prefix: string) => '/tmp/discode-image-build-XXXXXX');
 const mockWriteFileSync = vi.fn();
 const mockRmSync = vi.fn();
 
 vi.mock('fs', () => ({
   existsSync: (p: string) => existingPaths.has(p),
   mkdirSync: (...args: any[]) => mockMkdirSync(...args),
+  mkdtempSync: (...args: any[]) => mockMkdtempSync(...args),
+  rmdirSync: vi.fn(),
   writeFileSync: (...args: any[]) => mockWriteFileSync(...args),
   rmSync: (...args: any[]) => mockRmSync(...args),
   readFileSync: vi.fn(),
@@ -72,9 +75,9 @@ describe('container/image', () => {
     it('creates temp dir, writes Dockerfile, and runs docker build', () => {
       buildImage('claude', '/var/run/docker.sock');
 
-      expect(mockMkdirSync).toHaveBeenCalledWith(
+      expect(mockMkdtempSync).toHaveBeenCalledWith(
         expect.stringContaining('discode-image-build-'),
-        { recursive: true },
+        expect.anything(),
       );
       expect(mockWriteFileSync).toHaveBeenCalledWith(
         expect.stringContaining('Dockerfile'),

@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock file downloader
-const mockDownloadFileAttachments = vi.fn().mockResolvedValue([]);
+const mockDownloadFileAttachments = vi.fn().mockResolvedValue({ downloaded: [], skipped: [] });
 const mockBuildFileMarkers = vi.fn().mockReturnValue('');
 
 vi.mock('../../src/infra/file-downloader.js', () => ({
@@ -104,7 +104,7 @@ describe('BridgeMessageRouter container file injection', () => {
     const downloadedFiles = [
       { localPath: '/test/path/.discode/files/img.png', originalName: 'img.png', contentType: 'image/png' },
     ];
-    mockDownloadFileAttachments.mockResolvedValue(downloadedFiles);
+    mockDownloadFileAttachments.mockResolvedValue({ downloaded: downloadedFiles, skipped: [] });
     mockBuildFileMarkers.mockReturnValue('\n[file:/test/path/.discode/files/img.png]');
 
     const attachments = [
@@ -144,7 +144,7 @@ describe('BridgeMessageRouter container file injection', () => {
     const downloadedFiles = [
       { localPath: '/test/path/.discode/files/img.png', originalName: 'img.png', contentType: 'image/png' },
     ];
-    mockDownloadFileAttachments.mockResolvedValue(downloadedFiles);
+    mockDownloadFileAttachments.mockResolvedValue({ downloaded: downloadedFiles, skipped: [] });
     mockBuildFileMarkers.mockReturnValue('\n[file:/test/path/.discode/files/img.png]');
 
     const attachments = [

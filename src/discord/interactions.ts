@@ -12,6 +12,14 @@ import {
 } from 'discord.js';
 import type { Client } from 'discord.js';
 
+function getEnvInt(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return defaultValue;
+  return Math.trunc(n);
+}
+
 export class DiscordInteractions {
   constructor(private client: Client) {}
 
@@ -19,7 +27,7 @@ export class DiscordInteractions {
     channelId: string,
     toolName: string,
     toolInput: any,
-    timeoutMs: number = 120000
+    timeoutMs: number = getEnvInt('DISCODE_APPROVAL_TIMEOUT_MS', 120000),
   ): Promise<boolean> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel?.isTextBased()) {
@@ -35,36 +43,47 @@ export class DiscordInteractions {
       inputPreview = inputStr.length > 500 ? inputStr.substring(0, 500) + '...' : inputStr;
     }
 
-    const message = await textChannel.send(
-      `🔒 **Permission Request**\n` +
-      `Tool: \`${toolName}\`\n` +
-      `\`\`\`\n${inputPreview}\n\`\`\`\n` +
-      `React ✅ to allow, ❌ to deny (${Math.round(timeoutMs / 1000)}s timeout, auto-deny on timeout)`
+    const embed = new EmbedBuilder()
+      .setTitle('\uD83D\uDD12 Permission Request')
+      .setDescription(`Tool: \`${toolName}\`\n\`\`\`\n${inputPreview}\n\`\`\`\n_${Math.round(timeoutMs / 1000)}s timeout, auto-deny on timeout_`)
+      .setColor(0xf0b232);
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('approve')
+        .setLabel('Allow')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('deny')
+        .setLabel('Deny')
+        .setStyle(ButtonStyle.Danger),
     );
 
-    await message.react('✅');
-    await message.react('❌');
+    const message = await textChannel.send({
+      embeds: [embed],
+      components: [row],
+    });
 
     try {
-      const collected = await message.awaitReactions({
-        filter: (reaction, user) =>
-          ['✅', '❌'].includes(reaction.emoji.name || '') && !user.bot,
-        max: 1,
+      const interaction = await message.awaitMessageComponent({
+        componentType: ComponentType.Button,
+        filter: (i) => !i.user.bot,
         time: timeoutMs,
       });
 
-      if (collected.size === 0) {
-        await message.edit(message.content + '\n\n⏰ **Timed out — auto-denied**');
-        return false;
-      }
-
-      const approved = collected.first()?.emoji.name === '✅';
-      await message.edit(
-        message.content + `\n\n${approved ? '✅ **Allowed**' : '❌ **Denied**'}`
-      );
+      const approved = interaction.customId === 'approve';
+      await interaction.update({
+        embeds: [embed
+          .setColor(approved ? 0x57f287 : 0xed4245)
+          .setFooter({ text: approved ? '\u2705 Allowed' : '\u274C Denied' })],
+        components: [],
+      });
       return approved;
     } catch {
-      await message.edit(message.content + '\n\n⚠️ **Error — auto-denied**').catch(() => {});
+      await message.edit({
+        embeds: [embed.setColor(0x95a5a6).setFooter({ text: '\u23F0 Timed out \u2014 auto-denied' })],
+        components: [],
+      }).catch(() => {});
       return false;
     }
   }
@@ -77,7 +96,7 @@ export class DiscordInteractions {
       options: Array<{ label: string; description?: string }>;
       multiSelect?: boolean;
     }>,
-    timeoutMs: number = 300000
+    timeoutMs: number = getEnvInt('DISCODE_QUESTION_TIMEOUT_MS', 300000),
   ): Promise<string | null> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel?.isTextBased()) return null;

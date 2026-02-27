@@ -18,7 +18,6 @@ describe('BridgeHookServer — tool.activity edge cases', () => {
     const rawDir = join(tmpdir(), `discode-hookserver-test-${Date.now()}`);
     mkdirSync(rawDir, { recursive: true });
     tempDir = realpathSync(rawDir);
-    port = 19000 + Math.floor(Math.random() * 1000);
   });
 
   afterEach(() => {
@@ -26,9 +25,11 @@ describe('BridgeHookServer — tool.activity edge cases', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function startServer(deps: Partial<BridgeHookServerDeps> = {}): BridgeHookServer {
-    server = new BridgeHookServer(createServerDeps(port, deps));
+  async function startServer(deps: Partial<BridgeHookServerDeps> = {}): Promise<BridgeHookServer> {
+    server = new BridgeHookServer(createServerDeps(0, deps));
     server.start();
+    await server.ready();
+    port = server.address()!.port;
     return server;
   }
 
@@ -52,12 +53,11 @@ describe('BridgeHookServer — tool.activity edge cases', () => {
   it('tool.activity does not send any messages when no pending entry', async () => {
     const mockMessaging = createMockMessaging();
     const mockPendingTracker = createMockPendingTracker();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: mockPendingTracker as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -78,12 +78,11 @@ describe('BridgeHookServer — tool.activity edge cases', () => {
       messageId: 'msg-user-1',
       startMessageId: 'start-msg-ts',
     });
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: mockPendingTracker as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -104,12 +103,11 @@ describe('BridgeHookServer — tool.activity edge cases', () => {
       messageId: 'msg-user-1',
       startMessageId: 'start-msg-ts',
     });
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: mockPendingTracker as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -140,12 +138,11 @@ describe('BridgeHookServer — tool.activity edge cases', () => {
       messageId: 'msg-user-1',
       startMessageId: 'start-msg-ts',
     });
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: mockPendingTracker as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     await postJSON(port, '/opencode-event', {
       projectName: 'test',

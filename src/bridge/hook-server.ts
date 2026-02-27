@@ -3,7 +3,7 @@
  * Delegates to HookRuntimeRoutes and HookEventPipeline for actual handling.
  */
 
-import { createServer } from 'http';
+import { createServer, type IncomingMessage } from 'http';
 import { parse } from 'url';
 import type { MessagingClient } from '../messaging/interface.js';
 import type { IStateManager } from '../types/interfaces.js';
@@ -21,6 +21,8 @@ export interface BridgeHookServerDeps {
   streamingUpdater: StreamingMessageUpdater;
   reloadChannelMappings: () => void;
   runtime?: AgentRuntime;
+  /** Bearer token for authenticating hook requests. If set, all requests (except /health) must include it. */
+  authToken?: string;
 }
 
 type StatusResult = { status: number; message: string };
@@ -33,9 +35,19 @@ export class BridgeHookServer {
 
   private static readonly MAX_BODY_BYTES = 256 * 1024;
 
+  // Token bucket rate limiter: 60 tokens, refill 60/sec (1 req/sec sustained, burst up to 60)
+  private rateLimitTokens = 60;
+  private rateLimitMax = 60;
+  private rateLimitRefillRate = 60; // tokens per second
+  private rateLimitLastRefill = Date.now();
+
+  private readyResolve?: () => void;
+  private readyPromise: Promise<void>;
+
   private statusRoutes: Record<string, (payload: unknown) => StatusResult | Promise<StatusResult>>;
 
   constructor(private deps: BridgeHookServerDeps) {
+    this.readyPromise = new Promise<void>((resolve) => { this.readyResolve = resolve; });
     this.runtimeRoutes = new HookRuntimeRoutes({
       port: deps.port,
       messaging: deps.messaging,
@@ -62,6 +74,16 @@ export class BridgeHookServer {
     this.httpServer = createServer(async (req, res) => {
       const parsed = parse(req.url || '', true);
       const pathname = parsed.pathname;
+
+      // /health is exempt from authentication
+      if (req.method === 'GET' && pathname === '/health') {
+        res.writeHead(200);
+        res.end('OK');
+        return;
+      }
+
+      if (!this.checkAuth(req, res)) return;
+      if (!this.checkRateLimit(res)) return;
 
       if (req.method === 'GET' && pathname === '/runtime/windows') {
         this.runtimeRoutes.handleRuntimeWindows(res);
@@ -112,7 +134,26 @@ export class BridgeHookServer {
       console.error('HTTP server error:', err);
     });
 
-    this.httpServer.listen(this.deps.port, '127.0.0.1');
+    this.httpServer.listen(this.deps.port, '127.0.0.1', () => {
+      this.readyResolve?.();
+    });
+  }
+
+  /** Resolves when the HTTP server is listening. */
+  ready(): Promise<void> {
+    return this.readyPromise;
+  }
+
+  /** Returns the bound address (useful when started with port 0). */
+  address(): { port: number } | null {
+    const addr = this.httpServer?.address();
+    if (addr && typeof addr === 'object') return { port: addr.port };
+    return null;
+  }
+
+  /** Update the auth token (e.g. after generation at startup). */
+  setAuthToken(token: string): void {
+    this.deps.authToken = token;
   }
 
   stop(): void {
@@ -124,6 +165,42 @@ export class BridgeHookServer {
   // Public so AgentBridge can call it for SDK runner events
   async handleOpencodeEvent(payload: unknown): Promise<boolean> {
     return this.eventPipeline.handleOpencodeEvent(payload);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rate limiting
+  // ---------------------------------------------------------------------------
+
+  private checkRateLimit(res: HttpRes): boolean {
+    const now = Date.now();
+    const elapsed = (now - this.rateLimitLastRefill) / 1000;
+    this.rateLimitTokens = Math.min(this.rateLimitMax, this.rateLimitTokens + elapsed * this.rateLimitRefillRate);
+    this.rateLimitLastRefill = now;
+
+    if (this.rateLimitTokens < 1) {
+      res.writeHead(429);
+      res.end('Too many requests');
+      return false;
+    }
+
+    this.rateLimitTokens -= 1;
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auth helpers
+  // ---------------------------------------------------------------------------
+
+  private checkAuth(req: IncomingMessage, res: HttpRes): boolean {
+    const token = this.deps.authToken;
+    if (!token) return true;
+
+    const authHeader = req.headers['authorization'];
+    if (authHeader === `Bearer ${token}`) return true;
+
+    res.writeHead(401);
+    res.end('Unauthorized');
+    return false;
   }
 
   // ---------------------------------------------------------------------------

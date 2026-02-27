@@ -1,4 +1,19 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import { escapeShellArg } from '../infra/shell-escape.js';
+
+/**
+ * Read the hook auth token from the well-known state directory.
+ * Returns undefined if the token file does not exist.
+ */
+export function readHookToken(): string | undefined {
+  try {
+    return readFileSync(join(homedir(), '.discode', '.hook-token'), 'utf-8').trim();
+  } catch {
+    return undefined;
+  }
+}
 
 export function buildExportPrefix(env: Record<string, string | undefined>): string {
   const parts: string[] = [];
@@ -17,6 +32,8 @@ export function buildAgentLaunchEnv(params: {
   instanceId: string;
   /** Override hostname for container→host communication. */
   hostname?: string;
+  /** Bearer token for hook server authentication. */
+  hookToken?: string;
 }): Record<string, string> {
   return {
     DISCODE_PROJECT: params.projectName,
@@ -24,6 +41,7 @@ export function buildAgentLaunchEnv(params: {
     DISCODE_AGENT: params.agentType,
     DISCODE_INSTANCE: params.instanceId,
     ...(params.hostname ? { DISCODE_HOSTNAME: params.hostname } : {}),
+    ...(params.hookToken ? { DISCODE_HOOK_TOKEN: params.hookToken } : {}),
   };
 }
 
@@ -38,6 +56,8 @@ export function buildContainerEnv(params: {
   port: number;
   agentType: string;
   instanceId: string;
+  /** Bearer token for hook server authentication. */
+  hookToken?: string;
 }): Record<string, string> {
   return {
     DISCODE_PROJECT: params.projectName,
@@ -46,5 +66,6 @@ export function buildContainerEnv(params: {
     DISCODE_INSTANCE: params.instanceId,
     // Container→host communication via Docker's built-in DNS
     DISCODE_HOSTNAME: 'host.docker.internal',
+    ...(params.hookToken ? { DISCODE_HOOK_TOKEN: params.hookToken } : {}),
   };
 }

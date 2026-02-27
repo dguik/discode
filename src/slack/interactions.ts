@@ -2,9 +2,18 @@
  * Slack user interactions — approval requests, question buttons, polling.
  */
 
+import { randomUUID } from 'crypto';
 import type { App } from '@slack/bolt';
 import type { MessageCallback } from '../messaging/interface.js';
 import type { SlackChannels } from './channels.js';
+
+function getEnvInt(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return defaultValue;
+  return Math.trunc(n);
+}
 
 export class SlackInteractions {
   constructor(
@@ -17,8 +26,12 @@ export class SlackInteractions {
     channelId: string,
     toolName: string,
     toolInput: any,
-    timeoutMs: number = 120000,
+    timeoutMs: number = getEnvInt('DISCODE_APPROVAL_TIMEOUT_MS', 120000),
   ): Promise<boolean> {
+    const requestId = randomUUID().slice(0, 8);
+    const approveId = `approve_${requestId}`;
+    const denyId = `deny_${requestId}`;
+
     let inputPreview = '';
     if (toolInput) {
       const inputStr = typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput, null, 2);
@@ -44,14 +57,14 @@ export class SlackInteractions {
               type: 'button',
               text: { type: 'plain_text', text: 'Allow' },
               style: 'primary',
-              action_id: 'approve_action',
+              action_id: approveId,
               value: 'approve',
             },
             {
               type: 'button',
               text: { type: 'plain_text', text: 'Deny' },
               style: 'danger',
-              action_id: 'deny_action',
+              action_id: denyId,
               value: 'deny',
             },
           ],
@@ -63,8 +76,11 @@ export class SlackInteractions {
     if (!messageTs) return false;
 
     return new Promise<boolean>((resolve) => {
+      let settled = false;
+
       const timer = setTimeout(() => {
-        cleanup();
+        if (settled) return;
+        settled = true;
         this.app.client.chat.update({
           token: this.botToken,
           channel: channelId,
@@ -77,21 +93,19 @@ export class SlackInteractions {
 
       const handler = async ({ action, ack, respond }: any) => {
         await ack();
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         const approved = action.value === 'approve';
-        cleanup();
         await respond({
           text: approved ? ':white_check_mark: *Allowed*' : ':x: *Denied*',
-          replace_original: false,
+          replace_original: true,
         }).catch(() => undefined);
         resolve(approved);
       };
 
-      const cleanup = () => {
-        clearTimeout(timer);
-      };
-
-      this.app.action('approve_action', handler);
-      this.app.action('deny_action', handler);
+      this.app.action(approveId, handler);
+      this.app.action(denyId, handler);
     });
   }
 
@@ -103,15 +117,17 @@ export class SlackInteractions {
       options: Array<{ label: string; description?: string }>;
       multiSelect?: boolean;
     }>,
-    timeoutMs: number = 300000,
+    timeoutMs: number = getEnvInt('DISCODE_QUESTION_TIMEOUT_MS', 300000),
   ): Promise<string | null> {
     const q = questions[0];
     if (!q) return null;
 
+    const requestId = randomUUID().slice(0, 8);
+
     const buttons = q.options.map((opt, i) => ({
       type: 'button' as const,
       text: { type: 'plain_text' as const, text: opt.label.slice(0, 75) },
-      action_id: `opt_${i}`,
+      action_id: `opt_${requestId}_${i}`,
       value: opt.label,
       ...(i === 0 ? { style: 'primary' as const } : {}),
     }));
@@ -152,8 +168,11 @@ export class SlackInteractions {
     if (!messageTs) return null;
 
     return new Promise<string | null>((resolve) => {
+      let settled = false;
+
       const timer = setTimeout(() => {
-        cleanup();
+        if (settled) return;
+        settled = true;
         this.app.client.chat.update({
           token: this.botToken,
           channel: channelId,
@@ -164,14 +183,13 @@ export class SlackInteractions {
         resolve(null);
       }, timeoutMs);
 
-      const cleanup = () => {
-        clearTimeout(timer);
-      };
-
       for (let i = 0; i < q.options.length; i++) {
-        this.app.action(`opt_${i}`, async ({ action, ack }: any) => {
+        const actionId = `opt_${requestId}_${i}`;
+        this.app.action(actionId, async ({ action, ack }: any) => {
           await ack();
-          cleanup();
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
           const selected = action.value || q.options[i].label;
           this.app.client.chat.update({
             token: this.botToken,

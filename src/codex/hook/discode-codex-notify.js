@@ -186,9 +186,14 @@ function extractCurrentTurnTools(messages) {
 }
 
 async function postToBridge(hostname, port, payload) {
+  var headers = { "content-type": "application/json" };
+  var token = process.env.DISCODE_HOOK_TOKEN;
+  if (token) {
+    headers["authorization"] = "Bearer " + token;
+  }
   await fetch("http://" + hostname + ":" + port + "/opencode-event", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: headers,
     body: JSON.stringify(payload),
   });
 }

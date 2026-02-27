@@ -4,6 +4,7 @@
  */
 
 import type { App } from '@slack/bolt';
+import { truncateContent } from '../infra/log-sanitizer.js';
 
 export class SlackMessaging {
   constructor(private app: App, private botToken: string) {}
@@ -42,7 +43,7 @@ export class SlackMessaging {
         thread_ts: parentMessageId,
         text: content,
       });
-      console.log(`🧵 replyInThread OK: channel=${channelId} thread_ts=${parentMessageId} result_ts=${result.ts} content=${content.substring(0, 80)}`);
+      console.log(`🧵 replyInThread OK: channel=${channelId} thread_ts=${parentMessageId} result_ts=${result.ts} content=${truncateContent(content)}`);
     } catch (error) {
       console.error(`🧵 replyInThread FAILED: channel=${channelId} thread_ts=${parentMessageId}:`, error);
     }

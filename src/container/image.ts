@@ -10,9 +10,9 @@
  * - /workspace as the hardcoded working directory
  */
 
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { execSync } from 'child_process';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { AgentType } from '../agents/base.js';
@@ -117,8 +117,7 @@ export function buildImage(agentType: AgentType, socketPath?: string): void {
   }
 
   const tag = imageTagFor(agentType);
-  const buildDir = join(tmpdir(), `discode-image-build-${Date.now()}`);
-  mkdirSync(buildDir, { recursive: true });
+  const buildDir = mkdtempSync(join(tmpdir(), 'discode-image-build-'), { mode: 0o700 } as any);
 
   try {
     writeFileSync(join(buildDir, 'Dockerfile'), generateDockerfile(agentType));

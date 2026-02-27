@@ -14,8 +14,9 @@ import {
 } from '../state/instances.js';
 import { installFileInstruction } from '../infra/file-instruction.js';
 import { installDiscodeSendScript } from '../infra/send-script.js';
-import { buildAgentLaunchEnv, buildContainerEnv, buildExportPrefix } from '../policy/agent-launch.js';
+import { buildAgentLaunchEnv, buildContainerEnv, buildExportPrefix, readHookToken } from '../policy/agent-launch.js';
 import { installAgentIntegration } from '../policy/agent-integration.js';
+import { sanitizePath } from '../infra/log-sanitizer.js';
 import { toProjectScopedName } from '../policy/window-naming.js';
 import {
   isDockerAvailable,
@@ -99,8 +100,8 @@ export async function setupProject(
 
   const permissionAllow = deps.bridgeConfig.opencode?.permissionMode === 'allow';
   const integration = installAgentIntegration(adapter.config.name, projectPath, 'install');
-  for (const message of integration.infoMessages) console.log(message);
-  for (const message of integration.warningMessages) console.warn(message);
+  for (const message of integration.infoMessages) console.log(sanitizePath(message));
+  for (const message of integration.warningMessages) console.warn(sanitizePath(message));
 
   try {
     installFileInstruction(projectPath, adapter.config.name);
@@ -180,7 +181,7 @@ function setupContainerInstance(
       port: p.port,
       agentType: p.agentName,
       instanceId: p.instanceId,
-
+      hookToken: readHookToken(),
     }),
     ...extraEnv,
   };
@@ -242,7 +243,7 @@ function setupStandardInstance(deps: ProjectSetupDeps, p: SetupParams): void {
       port: p.port,
       agentType: p.agentName,
       instanceId: p.instanceId,
-
+      hookToken: readHookToken(),
     }),
     ...extraEnv,
   });

@@ -15,20 +15,25 @@ describe('BridgeHookServer — thinking channel messages', () => {
   let port: number;
 
   beforeEach(() => {
+    process.env.DISCODE_SHOW_THINKING = '1';
+    process.env.DISCODE_SHOW_USAGE = '1';
     const rawDir = join(tmpdir(), `discode-hookserver-test-${Date.now()}`);
     mkdirSync(rawDir, { recursive: true });
     tempDir = realpathSync(rawDir);
-    port = 19000 + Math.floor(Math.random() * 1000);
   });
 
   afterEach(() => {
+    delete process.env.DISCODE_SHOW_THINKING;
+    delete process.env.DISCODE_SHOW_USAGE;
     server?.stop();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function startServer(deps: Partial<BridgeHookServerDeps> = {}): BridgeHookServer {
-    server = new BridgeHookServer(createServerDeps(port, deps));
+  async function startServer(deps: Partial<BridgeHookServerDeps> = {}): Promise<BridgeHookServer> {
+    server = new BridgeHookServer(createServerDeps(0, deps));
     server.start();
+    await server.ready();
+    port = server.address()!.port;
     return server;
   }
 
@@ -61,12 +66,11 @@ describe('BridgeHookServer — thinking channel messages', () => {
 
   it('posts thinking as channel message', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: pendingWithStart() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -90,12 +94,11 @@ describe('BridgeHookServer — thinking channel messages', () => {
 
   it('wraps thinking content in code block', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: pendingWithStart() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -117,12 +120,11 @@ describe('BridgeHookServer — thinking channel messages', () => {
 
   it('wraps truncated thinking in code block with truncation marker', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: pendingWithStart() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const longThinking = 'y'.repeat(15000);
     const res = await postJSON(port, '/opencode-event', {
@@ -148,12 +150,11 @@ describe('BridgeHookServer — thinking channel messages', () => {
     const mockMessaging = createMockMessaging();
     const pt = createMockPendingTracker();
     pt.getPending.mockReturnValue({ channelId: 'ch-123', messageId: 'msg-user-1' });
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: pt as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -173,12 +174,11 @@ describe('BridgeHookServer — thinking channel messages', () => {
 
   it('does not post empty thinking', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: pendingWithStart() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -196,12 +196,11 @@ describe('BridgeHookServer — thinking channel messages', () => {
 
   it('truncates long thinking content', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: pendingWithStart() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const longThinking = 'x'.repeat(15000);
     const res = await postJSON(port, '/opencode-event', {
@@ -221,12 +220,11 @@ describe('BridgeHookServer — thinking channel messages', () => {
 
   it('does not post whitespace-only thinking', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: pendingWithStart() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -245,12 +243,11 @@ describe('BridgeHookServer — thinking channel messages', () => {
 
   it('does not post thinking when thinking is not a string', async () => {
     const mockMessaging = createMockMessaging();
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: makeState() as any,
       pendingTracker: pendingWithStart() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',

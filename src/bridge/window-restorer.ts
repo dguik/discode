@@ -8,7 +8,7 @@ import type { BridgeConfig } from '../types/index.js';
 import type { AgentRegistry } from '../agents/index.js';
 import type { ClaudeSdkRunner } from '../sdk/index.js';
 import { installAgentIntegration } from '../policy/agent-integration.js';
-import { buildAgentLaunchEnv, buildExportPrefix } from '../policy/agent-launch.js';
+import { buildAgentLaunchEnv, buildExportPrefix, readHookToken } from '../policy/agent-launch.js';
 import { resolveProjectWindowName } from '../policy/window-naming.js';
 import { buildDockerStartCommand } from '../container/index.js';
 import { ContainerSync } from '../container/sync.js';
@@ -119,7 +119,7 @@ function restoreStandardInstance(
       port,
       agentType: instance.agentType,
       instanceId: instance.instanceId,
-
+      hookToken: readHookToken(),
     }),
     ...extraEnv,
   });

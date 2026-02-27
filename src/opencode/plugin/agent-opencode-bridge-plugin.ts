@@ -15,13 +15,20 @@ export const AgentDiscordBridgePlugin = async () => {
   const hostname = process.env.DISCODE_HOSTNAME || process.env.AGENT_DISCORD_HOSTNAME || "127.0.0.1";
   const endpoint = "http://" + hostname + ":" + port + "/opencode-event";
 
+  const hookToken = process.env.DISCODE_HOOK_TOKEN || "";
+
   /** @param {Record<string, unknown>} payload */
   const post = async (payload) => {
     if (!projectName) return;
+    /** @type {Record<string, string>} */
+    const headers = { "content-type": "application/json" };
+    if (hookToken) {
+      headers["authorization"] = "Bearer " + hookToken;
+    }
     try {
       await fetch(endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({
           projectName,
           agentType,

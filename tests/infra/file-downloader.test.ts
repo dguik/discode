@@ -154,20 +154,25 @@ describe('downloadFileAttachments', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns empty array when no supported attachments', async () => {
+  it('returns skipped entry for unsupported file type', async () => {
     const result = await downloadFileAttachments(
       [makeAttachment({ contentType: 'application/zip', filename: 'archive.zip' })],
       tempDir,
     );
-    expect(result).toEqual([]);
+    expect(result.downloaded).toEqual([]);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].filename).toBe('archive.zip');
+    expect(result.skipped[0].reason).toBe('unsupported file type');
   });
 
-  it('skips oversized files (>25MB)', async () => {
+  it('returns skipped entry for oversized files (>25MB)', async () => {
     const result = await downloadFileAttachments(
       [makeAttachment({ size: 26 * 1024 * 1024 })],
       tempDir,
     );
-    expect(result).toEqual([]);
+    expect(result.downloaded).toEqual([]);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].reason).toContain('exceeds');
   });
 
   it('downloads and saves a valid image attachment', async () => {
@@ -186,12 +191,13 @@ describe('downloadFileAttachments', () => {
       tempDir,
     );
 
-    expect(result).toHaveLength(1);
-    expect(result[0].originalName).toBe('screenshot.png');
-    expect(result[0].contentType).toBe('image/png');
-    expect(result[0].localPath).toContain('.discode/files/');
-    expect(result[0].localPath).toContain('screenshot.png');
-    expect(existsSync(result[0].localPath)).toBe(true);
+    expect(result.downloaded).toHaveLength(1);
+    expect(result.downloaded[0].originalName).toBe('screenshot.png');
+    expect(result.downloaded[0].contentType).toBe('image/png');
+    expect(result.downloaded[0].localPath).toContain('.discode/files/');
+    expect(result.downloaded[0].localPath).toContain('screenshot.png');
+    expect(existsSync(result.downloaded[0].localPath)).toBe(true);
+    expect(result.skipped).toEqual([]);
   });
 
   it('downloads and saves a PDF attachment', async () => {
@@ -210,15 +216,15 @@ describe('downloadFileAttachments', () => {
       tempDir,
     );
 
-    expect(result).toHaveLength(1);
-    expect(result[0].originalName).toBe('report.pdf');
-    expect(result[0].contentType).toBe('application/pdf');
-    expect(result[0].localPath).toContain('.discode/files/');
-    expect(result[0].localPath).toContain('report.pdf');
-    expect(existsSync(result[0].localPath)).toBe(true);
+    expect(result.downloaded).toHaveLength(1);
+    expect(result.downloaded[0].originalName).toBe('report.pdf');
+    expect(result.downloaded[0].contentType).toBe('application/pdf');
+    expect(result.downloaded[0].localPath).toContain('.discode/files/');
+    expect(result.downloaded[0].localPath).toContain('report.pdf');
+    expect(existsSync(result.downloaded[0].localPath)).toBe(true);
   });
 
-  it('handles fetch errors gracefully', async () => {
+  it('returns skipped entry for fetch errors', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -230,10 +236,12 @@ describe('downloadFileAttachments', () => {
       tempDir,
     );
 
-    expect(result).toEqual([]);
+    expect(result.downloaded).toEqual([]);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].reason).toContain('HTTP 404');
   });
 
-  it('handles network errors gracefully', async () => {
+  it('returns skipped entry for network errors', async () => {
     const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'));
     vi.stubGlobal('fetch', mockFetch);
 
@@ -242,10 +250,12 @@ describe('downloadFileAttachments', () => {
       tempDir,
     );
 
-    expect(result).toEqual([]);
+    expect(result.downloaded).toEqual([]);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].reason).toBe('download error');
   });
 
-  it('downloads multiple files including documents', async () => {
+  it('downloads supported files and skips unsupported ones', async () => {
     const fakeData = Buffer.from('data');
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -265,7 +275,9 @@ describe('downloadFileAttachments', () => {
       tempDir,
     );
 
-    expect(result).toHaveLength(2);
+    expect(result.downloaded).toHaveLength(2);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].filename).toBe('archive.zip');
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });

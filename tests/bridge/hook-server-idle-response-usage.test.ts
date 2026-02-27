@@ -15,20 +15,25 @@ describe('BridgeHookServer — idle response handling', () => {
   let port: number;
 
   beforeEach(() => {
+    process.env.DISCODE_SHOW_THINKING = '1';
+    process.env.DISCODE_SHOW_USAGE = '1';
     const rawDir = join(tmpdir(), `discode-hookserver-test-${Date.now()}`);
     mkdirSync(rawDir, { recursive: true });
     tempDir = realpathSync(rawDir);
-    port = 19000 + Math.floor(Math.random() * 1000);
   });
 
   afterEach(() => {
+    delete process.env.DISCODE_SHOW_THINKING;
+    delete process.env.DISCODE_SHOW_USAGE;
     server?.stop();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function startServer(deps: Partial<BridgeHookServerDeps> = {}): BridgeHookServer {
-    server = new BridgeHookServer(createServerDeps(port, deps));
+  async function startServer(deps: Partial<BridgeHookServerDeps> = {}): Promise<BridgeHookServer> {
+    server = new BridgeHookServer(createServerDeps(0, deps));
     server.start();
+    await server.ready();
+    port = server.address()!.port;
     return server;
   }
 
@@ -72,13 +77,12 @@ describe('BridgeHookServer — idle response handling', () => {
         lastActive: new Date(),
       },
     });
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: stateManager as any,
       pendingTracker: mockPendingTracker as any,
       streamingUpdater: mockStreaming as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -123,12 +127,11 @@ describe('BridgeHookServer — idle response handling', () => {
         lastActive: new Date(),
       },
     });
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: stateManager as any,
       pendingTracker: mockPendingTracker as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -174,13 +177,12 @@ describe('BridgeHookServer — idle response handling', () => {
         lastActive: new Date(),
       },
     });
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: stateManager as any,
       pendingTracker: mockPendingTracker as any,
       streamingUpdater: mockStreaming as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',
@@ -215,12 +217,11 @@ describe('BridgeHookServer — idle response handling', () => {
         lastActive: new Date(),
       },
     });
-    startServer({
+    await startServer({
       messaging: mockMessaging as any,
       stateManager: stateManager as any,
       pendingTracker: createMockPendingTracker() as any,
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const res = await postJSON(port, '/opencode-event', {
       projectName: 'test',

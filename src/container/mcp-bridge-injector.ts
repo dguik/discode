@@ -5,11 +5,13 @@
  * agent-specific MCP config entries for Claude, Gemini, and OpenCode.
  */
 
-import { execSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { randomBytes, createHash } from 'crypto';
+import { execFileSync } from 'child_process';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdtempSync, rmdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir, tmpdir } from 'os';
 import { findDockerSocket } from './docker-socket.js';
+import { assertValidContainerId } from './manager.js';
 
 const BRIDGE_SCRIPT_FILENAME = 'chrome-mcp-bridge.cjs';
 
@@ -26,6 +28,29 @@ export function resolveBridgeScriptPath(): string | null {
     join(execDir, '..', 'resources', BRIDGE_SCRIPT_FILENAME),              // compiled binary
   ];
   return candidates.find(p => existsSync(p)) ?? null;
+}
+
+/**
+ * Verify the bridge script's SHA-256 checksum against the sidecar `.sha256` file.
+ * Returns true if the hash matches or no sidecar exists (graceful degradation).
+ * Returns false if the sidecar exists but the hash does not match.
+ */
+export function verifyBridgeScriptIntegrity(scriptPath: string): boolean {
+  const sidecarPath = scriptPath + '.sha256';
+  if (!existsSync(sidecarPath)) {
+    // No sidecar — skip verification (development or source layout)
+    return true;
+  }
+  try {
+    const expectedHash = readFileSync(sidecarPath, 'utf-8').trim();
+    const scriptContent = readFileSync(scriptPath);
+    const actualHash = createHash('sha256').update(scriptContent).digest('hex');
+    return actualHash === expectedHash;
+  } catch {
+    // If we can't read files, fail open with a warning
+    console.warn('Chrome MCP bridge integrity check: could not read script or sidecar');
+    return true;
+  }
 }
 
 /**
@@ -102,6 +127,7 @@ export function injectChromeMcpBridge(
   agentType: string,
   socketPath?: string,
 ): boolean {
+  assertValidContainerId(containerId);
   const sock = socketPath || findDockerSocket();
   if (!sock) return false;
 
@@ -111,25 +137,30 @@ export function injectChromeMcpBridge(
     return false;
   }
 
+  if (!verifyBridgeScriptIntegrity(bridgeScriptPath)) {
+    console.warn('Chrome MCP bridge script integrity check failed: SHA-256 mismatch; skipping injection');
+    return false;
+  }
+
   const copyToContainer = (content: string, containerPath: string): void => {
-    const tmp = join(tmpdir(), `discode-inject-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const tmpDir = mkdtempSync(join(tmpdir(), 'discode-inject-'), { mode: 0o700 } as any);
+    const tmp = join(tmpDir, randomBytes(16).toString('hex'));
     try {
-      writeFileSync(tmp, content);
-      execSync(
-        `docker -H unix://${sock} cp ${tmp} ${containerId}:${containerPath}`,
-        { timeout: 10_000 },
-      );
+      writeFileSync(tmp, content, { mode: 0o600 });
+      execFileSync('docker', ['-H', `unix://${sock}`, 'cp', tmp, `${containerId}:${containerPath}`], {
+        timeout: 10_000,
+      });
     } finally {
       try { unlinkSync(tmp); } catch { /* ignore */ }
+      try { rmdirSync(tmpDir); } catch { /* ignore */ }
     }
   };
 
   try {
     // 1. Copy bridge script into container
-    execSync(
-      `docker -H unix://${sock} cp ${bridgeScriptPath} ${containerId}:/tmp/${BRIDGE_SCRIPT_FILENAME}`,
-      { timeout: 10_000 },
-    );
+    execFileSync('docker', ['-H', `unix://${sock}`, 'cp', bridgeScriptPath, `${containerId}:/tmp/${BRIDGE_SCRIPT_FILENAME}`], {
+      timeout: 10_000,
+    });
 
     // 2. Build and inject agent-specific MCP config
     const mcpConfig = getAgentMcpConfig(agentType);

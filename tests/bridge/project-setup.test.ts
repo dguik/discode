@@ -27,6 +27,7 @@ vi.mock('../../src/policy/agent-launch.js', () => ({
   buildAgentLaunchEnv: vi.fn().mockReturnValue({}),
   buildContainerEnv: vi.fn().mockReturnValue({}),
   buildExportPrefix: vi.fn().mockReturnValue('export PREFIX; '),
+  readHookToken: () => 'mock-hook-token',
 }));
 
 vi.mock('../../src/policy/agent-integration.js', () => ({

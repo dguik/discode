@@ -4,7 +4,7 @@ import { stateManager, type ProjectState } from '../state/index.js';
 import type { BridgeConfig, ProjectInstanceState } from '../types/index.js';
 import { agentRegistry } from '../agents/index.js';
 import { normalizeProjectState } from '../state/instances.js';
-import { buildAgentLaunchEnv, buildExportPrefix } from '../policy/agent-launch.js';
+import { buildAgentLaunchEnv, buildExportPrefix, readHookToken } from '../policy/agent-launch.js';
 import { installAgentIntegration } from '../policy/agent-integration.js';
 import { resolveProjectWindowName } from '../policy/window-naming.js';
 import type { AgentRuntime } from '../runtime/interface.js';
@@ -206,6 +206,7 @@ export async function resumeProjectInstance(params: {
         port: params.port,
         agentType: params.instance.agentType,
         instanceId: params.instance.instanceId,
+        hookToken: readHookToken(),
       }),
       ...extraEnv,
     }) + baseCommand;

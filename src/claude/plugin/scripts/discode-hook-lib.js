@@ -115,9 +115,14 @@ function readStdin() {
 
 function postToBridge(port, payload) {
   var hostname = process.env.DISCODE_HOSTNAME || process.env.AGENT_DISCORD_HOSTNAME || "127.0.0.1";
+  var headers = { "content-type": "application/json" };
+  var token = process.env.DISCODE_HOOK_TOKEN;
+  if (token) {
+    headers["authorization"] = "Bearer " + token;
+  }
   return fetch("http://" + hostname + ":" + port + "/opencode-event", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: headers,
     body: JSON.stringify(payload),
   });
 }

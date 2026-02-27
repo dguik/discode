@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
-const mockDownloadFileAttachments = vi.fn().mockResolvedValue([]);
+const mockDownloadFileAttachments = vi.fn().mockResolvedValue({ downloaded: [], skipped: [] });
 const mockBuildFileMarkers = vi.fn().mockReturnValue('');
 
 vi.mock('../../src/infra/file-downloader.js', () => ({
@@ -274,7 +274,7 @@ describe('multi-instance platform → agent routing', () => {
       const downloaded = [
         { localPath: '/home/user/myapp/.discode/files/img.png', originalName: 'img.png', contentType: 'image/png' },
       ];
-      mockDownloadFileAttachments.mockResolvedValue(downloaded);
+      mockDownloadFileAttachments.mockResolvedValue({ downloaded, skipped: [] });
       mockBuildFileMarkers.mockReturnValue('\n[file:img.png]');
 
       const attachments = [
@@ -298,7 +298,7 @@ describe('multi-instance platform → agent routing', () => {
       const downloaded = [
         { localPath: '/home/user/myapp/.discode/files/doc.pdf', originalName: 'doc.pdf', contentType: 'application/pdf' },
       ];
-      mockDownloadFileAttachments.mockResolvedValue(downloaded);
+      mockDownloadFileAttachments.mockResolvedValue({ downloaded, skipped: [] });
       mockBuildFileMarkers.mockReturnValue('\n[file:doc.pdf]');
 
       const attachments = [
@@ -321,7 +321,7 @@ describe('multi-instance platform → agent routing', () => {
       const downloaded = [
         { localPath: '/home/user/myapp/.discode/files/img.png', originalName: 'img.png', contentType: 'image/png' },
       ];
-      mockDownloadFileAttachments.mockResolvedValue(downloaded);
+      mockDownloadFileAttachments.mockResolvedValue({ downloaded, skipped: [] });
       mockBuildFileMarkers.mockReturnValue('\n[file:img.png]');
 
       const attachments = [

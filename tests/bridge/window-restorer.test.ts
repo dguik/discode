@@ -30,6 +30,7 @@ vi.mock('../../src/policy/agent-integration.js', () => ({
 vi.mock('../../src/policy/agent-launch.js', () => ({
   buildAgentLaunchEnv: (...args: any[]) => mockBuildAgentLaunchEnv(...args),
   buildExportPrefix: (...args: any[]) => mockBuildExportPrefix(...args),
+  readHookToken: () => 'mock-hook-token',
 }));
 
 vi.mock('../../src/policy/window-naming.js', () => ({

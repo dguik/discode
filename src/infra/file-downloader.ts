@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync, readdirSync, unlinkSync, statSync } from 'fs'
 import { join, extname } from 'path';
 import type { MessageAttachment } from '../types/index.js';
 import { SUPPORTED_FILE_TYPES } from '../types/index.js';
+import { sanitizePath } from './log-sanitizer.js';
 
 /** Maximum file size to download (25 MB — Discord's limit) */
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -27,6 +28,14 @@ export interface DownloadedFile {
   originalName: string;
   /** MIME type */
   contentType: string;
+}
+
+/**
+ * A file that was skipped during download, with reason.
+ */
+export interface SkippedFile {
+  filename: string;
+  reason: string;
 }
 
 /**
@@ -50,33 +59,44 @@ export function getFilesDir(projectPath: string): string {
   return dir;
 }
 
+export interface DownloadResult {
+  downloaded: DownloadedFile[];
+  skipped: SkippedFile[];
+}
+
 /**
  * Download file attachments from Discord and save them locally.
  *
  * Only supported file types under MAX_FILE_SIZE are downloaded.
- * Returns an array of successfully downloaded files.
+ * Returns downloaded files and skipped files with reasons.
  */
 export async function downloadFileAttachments(
   attachments: MessageAttachment[],
   projectPath: string,
   fetchHeaders?: Record<string, string>,
-): Promise<DownloadedFile[]> {
-  const fileAttachments = attachments.filter(isSupportedFile);
-  if (fileAttachments.length === 0) return [];
+): Promise<DownloadResult> {
+  const skipped: SkippedFile[] = [];
+  const downloaded: DownloadedFile[] = [];
+
+  if (attachments.length === 0) return { downloaded, skipped };
 
   const filesDir = getFilesDir(projectPath);
-  const results: DownloadedFile[] = [];
 
-  for (const attachment of fileAttachments) {
+  for (const attachment of attachments) {
+    if (!isSupportedFile(attachment)) {
+      skipped.push({ filename: attachment.filename, reason: 'unsupported file type' });
+      continue;
+    }
+
     if (attachment.size > MAX_FILE_SIZE) {
-      console.warn(`Skipping oversized file: ${attachment.filename} (${(attachment.size / 1024 / 1024).toFixed(1)} MB)`);
+      skipped.push({ filename: attachment.filename, reason: `exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit (${(attachment.size / 1024 / 1024).toFixed(1)}MB)` });
       continue;
     }
 
     try {
       const response = await fetch(attachment.url, fetchHeaders ? { headers: fetchHeaders } : undefined);
       if (!response.ok) {
-        console.warn(`Failed to download file ${attachment.filename}: HTTP ${response.status}`);
+        skipped.push({ filename: attachment.filename, reason: `download failed (HTTP ${response.status})` });
         continue;
       }
 
@@ -91,22 +111,23 @@ export async function downloadFileAttachments(
 
       writeFileSync(localPath, buffer);
 
-      results.push({
+      downloaded.push({
         localPath,
         originalName: attachment.filename,
         contentType: attachment.contentType || 'application/octet-stream',
       });
 
-      console.log(`📎 Downloaded file: ${attachment.filename} -> ${localPath}`);
+      console.log(`📎 Downloaded file: ${attachment.filename} -> ${sanitizePath(localPath)}`);
     } catch (error) {
       console.warn(`Failed to download file ${attachment.filename}:`, error);
+      skipped.push({ filename: attachment.filename, reason: 'download error' });
     }
   }
 
   // Cleanup: prune old files if cache exceeds limit
   pruneFileCache(filesDir);
 
-  return results;
+  return { downloaded, skipped };
 }
 
 /**

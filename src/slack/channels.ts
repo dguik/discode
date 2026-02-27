@@ -85,6 +85,7 @@ export class SlackChannels {
       const normalized = channelName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '').slice(0, 80);
 
       let channelId = channelsByName.get(normalized);
+      let isNew = false;
       if (channelId) {
         await this.app.client.conversations.join({
           token: this.botToken,
@@ -99,6 +100,7 @@ export class SlackChannels {
           });
           channelId = created.channel?.id;
           if (channelId) {
+            isNew = true;
             await this.app.client.conversations.setTopic({
               token: this.botToken,
               channel: channelId,
@@ -131,6 +133,15 @@ export class SlackChannels {
           agentType: config.name,
           instanceId: instanceIdByAgent?.[config.name],
         });
+
+        if (isNew) {
+          this.app.client.chat.postMessage({
+            token: this.botToken,
+            channel: channelId,
+            text: `\uD83D\uDC4B *Welcome!* This channel is connected to the *${config.displayName}* agent for project *${projectName}*.\nSend a message here to interact with the agent.`,
+          }).catch(() => {});
+        }
+
         result[config.name] = channelId;
       }
     }

@@ -10,7 +10,7 @@ import type { AgentRuntime } from '../runtime/interface.js';
 import { RuntimeControlPlane } from '../runtime/control-plane.js';
 import { agentRegistry } from '../agents/index.js';
 import { installAgentIntegration } from '../policy/agent-integration.js';
-import { buildAgentLaunchEnv, buildExportPrefix } from '../policy/agent-launch.js';
+import { buildAgentLaunchEnv, buildExportPrefix, readHookToken } from '../policy/agent-launch.js';
 import {
   getPrimaryInstanceForAgent,
   getProjectInstance,
@@ -60,7 +60,8 @@ export class HookRuntimeRoutes {
         this.writeJson(res, 404, { error: 'Window not found' });
         return;
       }
-      this.writeJson(res, 400, { error: message });
+      console.error('Runtime buffer error:', error);
+      this.writeJson(res, 400, { error: 'Runtime operation failed' });
     }
   }
 
@@ -98,7 +99,8 @@ export class HookRuntimeRoutes {
       if (message.includes('Window not found') || message.includes('Invalid windowId')) {
         return { status: 404, message: 'Window not found' };
       }
-      return { status: 400, message };
+      console.error('Runtime input error:', error);
+      return { status: 400, message: 'Runtime operation failed' };
     }
   }
 
@@ -122,7 +124,8 @@ export class HookRuntimeRoutes {
       if (message.includes('Runtime stop unavailable')) {
         return { status: 501, message: 'Runtime stop unavailable' };
       }
-      return { status: 400, message };
+      console.error('Runtime stop error:', error);
+      return { status: 400, message: 'Runtime operation failed' };
     }
   }
 
@@ -169,7 +172,7 @@ export class HookRuntimeRoutes {
         port: this.deps.port,
         agentType: instance.agentType,
         instanceId: instance.instanceId,
-
+        hookToken: readHookToken(),
       }),
       ...extraEnv,
     });
