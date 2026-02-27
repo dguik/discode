@@ -24,6 +24,7 @@ export async function setupProjectInstance(params: {
   channelId: string;
   instanceId: string;
 }> {
+  const hookToken = readHookToken();
   const existingProject = stateManager.getProject(params.projectName);
   const bridge = new AgentBridge({ config: params.config });
   await bridge.connect();
@@ -43,7 +44,14 @@ export async function setupProjectInstance(params: {
 
     try {
       await new Promise<void>((resolveDone) => {
-        const req = httpRequest(`http://127.0.0.1:${params.port}/reload`, { method: 'POST' }, () => resolveDone());
+        const req = httpRequest(
+          `http://127.0.0.1:${params.port}/reload`,
+          {
+            method: 'POST',
+            headers: hookToken ? { Authorization: `Bearer ${hookToken}` } : undefined,
+          },
+          () => resolveDone(),
+        );
         req.on('error', () => resolveDone());
         req.setTimeout(2000, () => {
           req.destroy();
@@ -73,6 +81,7 @@ export async function setupProjectInstance(params: {
                 headers: {
                   'Content-Type': 'application/json',
                   'Content-Length': Buffer.byteLength(payload),
+                  ...(hookToken ? { Authorization: `Bearer ${hookToken}` } : {}),
                 },
               },
               (res) => resolveDone(res.statusCode || 0),

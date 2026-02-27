@@ -1,4 +1,5 @@
 import { request as httpRequest } from 'http';
+import { readHookToken } from '../../policy/agent-launch.js';
 
 export type RuntimeWindowInfo = {
   windowId: string;
@@ -26,18 +27,22 @@ export async function runtimeApiRequest(params: {
 }): Promise<RuntimeApiResponse> {
   return await new Promise((resolve, reject) => {
     const body = params.payload === undefined ? '' : JSON.stringify(params.payload);
+    const hookToken = readHookToken();
+    const headers: Record<string, string> = {};
+    if (hookToken) {
+      headers.Authorization = `Bearer ${hookToken}`;
+    }
+    if (params.method === 'POST') {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = String(Buffer.byteLength(body));
+    }
     const req = httpRequest(
       {
         hostname: '127.0.0.1',
         port: params.port,
         path: params.path,
         method: params.method,
-        headers: params.method === 'POST'
-          ? {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(body),
-          }
-          : undefined,
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
       },
       (res) => {
         let data = '';
