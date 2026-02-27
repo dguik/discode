@@ -11,6 +11,18 @@ const claudeConfig: AgentConfig = {
   displayName: 'Claude Code',
   command: 'claude',
   channelSuffix: 'claude',
+  hookCapabilities: {
+    'session.notification': true,
+    'session.start': true,
+    'session.end': true,
+    'tool.activity': true,
+    'session.idle': true,
+    'permission.request': true,
+    'task.completed': true,
+    'prompt.submit': true,
+    'tool.failure': true,
+    'teammate.idle': true,
+  },
 };
 
 export class ClaudeAdapter extends BaseAgentAdapter {

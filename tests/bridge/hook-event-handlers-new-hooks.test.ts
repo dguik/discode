@@ -79,10 +79,27 @@ describe('handlePromptSubmit', () => {
 
     await handlePromptSubmit(deps, ctx);
 
+    expect(deps.pendingTracker.ensureStartMessage).toHaveBeenCalledWith(
+      'myProject',
+      'opencode',
+      undefined,
+      'Fix the login bug',
+    );
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith(
       'ch-1',
-      '📝 *Prompt:* Fix the login bug',
+      '📝 Prompt: Fix the login bug',
     );
+  });
+
+  it('does not send fallback message when start message is created', async () => {
+    const deps = createMockDeps();
+    (deps.pendingTracker.ensureStartMessage as any).mockResolvedValue('start-msg-id');
+    const ctx = createCtx({ text: 'Plan this change' });
+
+    await handlePromptSubmit(deps, ctx);
+
+    expect(deps.pendingTracker.ensureStartMessage).toHaveBeenCalled();
+    expect(deps.messaging.sendToChannel).not.toHaveBeenCalled();
   });
 
   it('does nothing when text is empty', async () => {

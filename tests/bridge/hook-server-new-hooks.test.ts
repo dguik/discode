@@ -92,6 +92,38 @@ describe('BridgeHookServer — new hooks (prompt.submit, tool.failure, teammate.
     expect(mockMessaging.sendToChannel).not.toHaveBeenCalled();
   });
 
+  it('passes prompt.submit for agents without prompt hook support', async () => {
+    const mockMessaging = createMockMessaging();
+    const opencodeState = createMockStateManager({
+      test: {
+        projectName: 'test',
+        projectPath: tempDir,
+        tmuxSession: 'bridge',
+        agents: { opencode: true },
+        discordChannels: { opencode: 'ch-opencode' },
+        instances: {
+          opencode: { instanceId: 'opencode', agentType: 'opencode', channelId: 'ch-opencode' },
+        },
+        createdAt: new Date(),
+        lastActive: new Date(),
+      },
+    });
+    await startServer({
+      messaging: mockMessaging as any,
+      stateManager: opencodeState as any,
+      pendingTracker: createMockPendingTracker() as any,
+    });
+
+    const res = await postJSON(port, '/opencode-event', {
+      projectName: 'test',
+      agentType: 'opencode',
+      type: 'prompt.submit',
+      text: 'This should be ignored',
+    });
+    expect(res.status).toBe(200);
+    expect(mockMessaging.sendToChannel).not.toHaveBeenCalled();
+  });
+
   // --- tool.failure ---
 
   it('handles tool.failure event', async () => {

@@ -3,6 +3,7 @@
  */
 
 import { AgentRegistry, BaseAgentAdapter, type AgentConfig } from '../../src/agents/base.js';
+import { HOOK_EVENT_TYPES } from '../../src/types/hook-contract.js';
 
 class TestAdapter extends BaseAgentAdapter {
   constructor(name: string, suffix: string) {
@@ -89,5 +90,12 @@ describe('AgentRegistry', () => {
 
     const result = registry.parseChannelName('myproject-unknown');
     expect(result).toBeNull();
+  });
+
+  it('defaults hook capabilities to false', () => {
+    const adapter = new TestAdapter('test-agent', 'test');
+    for (const eventType of HOOK_EVENT_TYPES) {
+      expect(adapter.supportsHookEvent(eventType)).toBe(false);
+    }
   });
 });

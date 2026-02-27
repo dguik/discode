@@ -3,6 +3,7 @@
  */
 
 export * from './interfaces.js';
+export * from './hook-contract.js';
 
 export interface DiscordConfig {
   token: string;

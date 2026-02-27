@@ -86,6 +86,19 @@ describe('HookEventPipeline', () => {
       warnSpy.mockRestore();
     });
 
+    it('returns false and warns for invalid envelope field types', async () => {
+      const deps = createMockDeps();
+      const pipeline = new HookEventPipeline(deps);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await pipeline.handleOpencodeEvent({
+        projectName: 'myProject',
+        type: 'session.start',
+        text: 123,
+      })).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('invalid payload'));
+      warnSpy.mockRestore();
+    });
+
     it('returns false and warns when projectName is missing', async () => {
       const deps = createMockDeps();
       const pipeline = new HookEventPipeline(deps);
@@ -157,6 +170,61 @@ describe('HookEventPipeline', () => {
         text: 'Done',
       });
       expect(deps.pendingTracker.ensurePending).toHaveBeenCalled();
+    });
+
+    it('passes submittedPrompt to start message creation on tmux-initiated session.idle', async () => {
+      const deps = createMockDeps();
+      (deps.pendingTracker.hasPending as any).mockReturnValue(true);
+      (deps.pendingTracker.getPending as any).mockReturnValue({
+        channelId: 'ch-1',
+        messageId: '',
+      });
+      const pipeline = new HookEventPipeline(deps);
+      await pipeline.handleOpencodeEvent({
+        projectName: 'myProject',
+        type: 'session.idle',
+        text: 'Done',
+        submittedPrompt: 'tmux prompt raw text',
+      });
+      expect(deps.pendingTracker.ensureStartMessage).toHaveBeenCalledWith(
+        'myProject',
+        'opencode',
+        'primary',
+        'tmux prompt raw text',
+      );
+    });
+
+    it('handles prompt.submit for supported agent hook', async () => {
+      const deps = createMockDeps();
+      const { getPrimaryInstanceForAgent } = await import('../../src/state/instances.js');
+      (getPrimaryInstanceForAgent as any).mockReturnValueOnce({
+        instanceId: 'claude',
+        agentType: 'claude',
+        channelId: 'ch-1',
+      });
+      const pipeline = new HookEventPipeline(deps);
+      await pipeline.handleOpencodeEvent({
+        projectName: 'myProject',
+        agentType: 'claude',
+        type: 'prompt.submit',
+        text: 'Fix login bug',
+      });
+      expect(deps.pendingTracker.ensurePending).toHaveBeenCalled();
+      expect(deps.messaging.sendToChannel).toHaveBeenCalled();
+    });
+
+    it('passes prompt.submit when hook is unsupported by agent', async () => {
+      const deps = createMockDeps();
+      const pipeline = new HookEventPipeline(deps);
+      const result = await pipeline.handleOpencodeEvent({
+        projectName: 'myProject',
+        agentType: 'opencode',
+        type: 'prompt.submit',
+        text: 'Fix login bug',
+      });
+      expect(result).toBe(true);
+      expect(deps.pendingTracker.ensurePending).not.toHaveBeenCalled();
+      expect(deps.messaging.sendToChannel).not.toHaveBeenCalled();
     });
 
     it('resolves instanceId from event payload', async () => {

@@ -7,7 +7,7 @@
  * Fires on `agent-turn-complete` events and:
  *   1. Parses input-messages to extract tool calls from the current turn
  *   2. Sends tool.activity events for each tool call
- *   3. Sends session.idle with the final response text
+ *   3. Sends session.idle with final response text and submitted prompt preview
  */
 
 function shortenPath(fp, maxSegments) {
@@ -20,6 +20,136 @@ function safeParse(str) {
   if (typeof str === "object" && str !== null) return str;
   if (typeof str !== "string") return {};
   try { return JSON.parse(str); } catch { return {}; }
+}
+
+function getStringField(obj, keys) {
+  if (!obj || typeof obj !== "object") return "";
+  for (var i = 0; i < keys.length; i++) {
+    var v = obj[keys[i]];
+    if (typeof v === "string" && v.trim().length > 0) return v;
+  }
+  return "";
+}
+
+function getTextFromContent(content) {
+  if (typeof content === "string") return content;
+
+  if (Array.isArray(content)) {
+    var parts = [];
+    for (var i = 0; i < content.length; i++) {
+      var text = getTextFromContent(content[i]);
+      if (typeof text === "string" && text.length > 0) {
+        parts.push(text);
+      }
+    }
+    return parts.join("\n");
+  }
+
+  if (!content || typeof content !== "object") return "";
+
+  // OpenAI/Codex variants
+  if (typeof content.text === "string") return content.text;
+  if (typeof content.input_text === "string") return content.input_text;
+  if (typeof content.value === "string") return content.value;
+
+  // Some payload variants may nest actual text in `content`.
+  if (typeof content.content === "string") return content.content;
+  if (Array.isArray(content.content) || (content.content && typeof content.content === "object")) {
+    return getTextFromContent(content.content);
+  }
+
+  return "";
+}
+
+function getInputMessages(input) {
+  var direct = input["input-messages"];
+  if (Array.isArray(direct)) return direct;
+
+  var snake = input.input_messages;
+  if (Array.isArray(snake)) return snake;
+
+  var camel = input.inputMessages;
+  if (Array.isArray(camel)) return camel;
+
+  var messages = input.messages;
+  if (Array.isArray(messages)) return messages;
+
+  var nested = input.input && input.input.messages;
+  if (Array.isArray(nested)) return nested;
+
+  return [];
+}
+
+function getLastAssistantMessage(input) {
+  if (typeof input["last-assistant-message"] === "string") return input["last-assistant-message"];
+  if (typeof input.last_assistant_message === "string") return input.last_assistant_message;
+  if (typeof input.lastAssistantMessage === "string") return input.lastAssistantMessage;
+  return "";
+}
+
+function getThreadId(input) {
+  return getStringField(input, [
+    "thread-id",
+    "thread_id",
+    "threadId",
+    "session-id",
+    "session_id",
+    "sessionId",
+  ]);
+}
+
+function getSubmittedPromptFromPayload(input) {
+  return getStringField(input, [
+    "submittedPrompt",
+    "submitted_prompt",
+    "prompt",
+    "promptText",
+    "prompt_text",
+    "userPrompt",
+    "user_prompt",
+  ]);
+}
+
+function getHistoryPath() {
+  if (typeof process.env.CODEX_HISTORY_PATH === "string" && process.env.CODEX_HISTORY_PATH.trim().length > 0) {
+    return process.env.CODEX_HISTORY_PATH;
+  }
+  var home = typeof process.env.HOME === "string" ? process.env.HOME : "";
+  if (!home) return "";
+  return home + "/.codex/history.jsonl";
+}
+
+async function extractPromptFromHistory(threadId) {
+  if (!threadId) return "";
+  var historyPath = getHistoryPath();
+  if (!historyPath) return "";
+
+  try {
+    var fs = await import("node:fs");
+    if (!fs.existsSync(historyPath)) return "";
+
+    var raw = fs.readFileSync(historyPath, "utf8");
+    if (!raw) return "";
+
+    var lines = raw.split("\n");
+    for (var i = lines.length - 1; i >= 0; i--) {
+      var line = lines[i];
+      if (!line) continue;
+      var rec = safeParse(line);
+      if (
+        rec &&
+        rec.session_id === threadId &&
+        typeof rec.text === "string" &&
+        rec.text.trim().length > 0
+      ) {
+        return rec.text;
+      }
+    }
+  } catch {
+    // ignore local history lookup failures
+  }
+
+  return "";
 }
 
 function parseApplyPatch(patchStr) {
@@ -139,15 +269,8 @@ function extractCurrentTurnTools(messages) {
   for (var i = messages.length - 1; i >= 0; i--) {
     var msg = messages[i];
     if (msg.role === "user") {
-      var hasText = typeof msg.content === "string" && msg.content.trim().length > 0;
-      if (!hasText && Array.isArray(msg.content)) {
-        for (var j = 0; j < msg.content.length; j++) {
-          if (msg.content[j] && msg.content[j].type === "text" && msg.content[j].text) {
-            hasText = true;
-            break;
-          }
-        }
-      }
+      var messageText = getTextFromContent(msg.content);
+      var hasText = typeof messageText === "string" && messageText.trim().length > 0;
       if (hasText) {
         turnStartIndex = i + 1;
         break;
@@ -183,6 +306,26 @@ function extractCurrentTurnTools(messages) {
   }
 
   return toolCalls;
+}
+
+/**
+ * Extract the latest user prompt text from input-messages.
+ * Preserves original text content (no truncation/reformatting).
+ */
+function extractLatestUserPrompt(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return "";
+
+  for (var i = messages.length - 1; i >= 0; i--) {
+    var msg = messages[i];
+    if (!msg || msg.role !== "user") continue;
+
+    var promptText = getTextFromContent(msg.content);
+    if (typeof promptText === "string" && promptText.trim().length > 0) {
+      return promptText;
+    }
+  }
+
+  return "";
 }
 
 async function postToBridge(hostname, port, payload) {
@@ -224,8 +367,16 @@ async function main() {
   };
   if (instanceId) basePayload.instanceId = instanceId;
 
-  // 1. Extract and send tool.activity events from input-messages
-  var messages = Array.isArray(input["input-messages"]) ? input["input-messages"] : [];
+  // 1. Extract current-turn prompt + tool calls from input-messages
+  var messages = getInputMessages(input);
+  var submittedPrompt = extractLatestUserPrompt(messages);
+  if (!submittedPrompt) {
+    submittedPrompt = getSubmittedPromptFromPayload(input);
+  }
+  if (!submittedPrompt) {
+    var threadId = getThreadId(input);
+    submittedPrompt = await extractPromptFromHistory(threadId);
+  }
   var toolCalls = extractCurrentTurnTools(messages);
 
   for (var i = 0; i < toolCalls.length; i++) {
@@ -243,15 +394,15 @@ async function main() {
   }
 
   // 2. Send session.idle with final response text
-  var text = typeof input["last-assistant-message"] === "string"
-    ? input["last-assistant-message"].trim()
-    : "";
+  var text = getLastAssistantMessage(input).trim();
 
   try {
-    await postToBridge(hostname, port, Object.assign({}, basePayload, {
+    var idlePayload = Object.assign({}, basePayload, {
       type: "session.idle",
       text: text,
-    }));
+    });
+    if (submittedPrompt) idlePayload.submittedPrompt = submittedPrompt;
+    await postToBridge(hostname, port, idlePayload);
   } catch {
     // ignore bridge delivery failures
   }

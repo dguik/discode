@@ -18,6 +18,12 @@ const geminiConfig: AgentConfig = {
   displayName: 'Gemini CLI',
   command: 'gemini',
   channelSuffix: 'gemini',
+  hookCapabilities: {
+    'session.notification': true,
+    'session.start': true,
+    'session.end': true,
+    'session.idle': true,
+  },
 };
 
 export class GeminiAdapter extends BaseAgentAdapter {

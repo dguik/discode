@@ -109,9 +109,9 @@ export class BridgeMessageRouter {
         // Still create pending context so prompt-start UI stays consistent.
         await this.deps.pendingTracker.ensurePending(projectName, resolvedAgentType, channelId, instanceKey);
       }
-      // Show a start marker immediately on user-submitted requests,
-      // even before tool/thinking events arrive.
-      await this.deps.pendingTracker.ensureStartMessage(projectName, resolvedAgentType, instanceKey, content);
+      // Store prompt preview for hook-driven start message creation.
+      // This does not send any message from router path.
+      (this.deps.pendingTracker as any).setPromptPreview?.(projectName, resolvedAgentType, content, instanceKey);
 
       if (mappedInstance.runtimeType === 'sdk') {
         const runner = this.deps.getSdkRunner?.(projectName, instanceKey);

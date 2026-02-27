@@ -202,13 +202,23 @@ export async function handleSessionIdle(deps: EventHandlerDeps, ctx: EventContex
   deps.activityHistory.delete(idleKey);
   clearTaskChecklist(idleKey);
 
-  const livePending = deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
-  const startMessageId = livePending?.startMessageId;
+  let livePending = deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
+  let startMessageId = livePending?.startMessageId;
+  let createdStartMessageInIdle = false;
+  // Some agents only emit session.idle (no tool/thinking). For tmux-initiated
+  // turns (no source messageId), ensure the start marker still exists so
+  // prompt-start UX remains consistent.
+  if (!startMessageId && livePending && (!livePending.messageId || !!livePending.promptPreview)) {
+    await deps.ensureStartMessageAndStreaming(ctx);
+    livePending = deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
+    startMessageId = livePending?.startMessageId;
+    createdStartMessageInIdle = !!startMessageId;
+  }
 
   const usage = ctx.event.usage as Record<string, unknown> | undefined;
   const hasPrompt = Array.isArray(ctx.event.promptQuestions) && ctx.event.promptQuestions.length > 0
     || (typeof ctx.event.promptText === 'string' && ctx.event.promptText.trim().length > 0);
-  if (startMessageId) {
+  if (startMessageId && (!createdStartMessageInIdle || hasPrompt)) {
     const finalizeHeader = hasPrompt ? '\u2753 Waiting for input...' : buildFinalizeHeader(usage);
     await deps.streamingUpdater.finalize(
       ctx.projectName, ctx.instanceKey,
@@ -267,9 +277,17 @@ export async function handleTaskCompleted(deps: EventHandlerDeps, ctx: EventCont
 }
 
 export async function handlePromptSubmit(deps: EventHandlerDeps, ctx: EventContext): Promise<boolean> {
-  const preview = ctx.text || '';
+  const preview = ctx.text?.trim() || '';
   if (!preview) return true;
-  await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCDD *Prompt:* ${preview}`);
+  const startMessageId = await deps.pendingTracker.ensureStartMessage(
+    ctx.projectName,
+    ctx.agentType,
+    ctx.instanceId,
+    preview,
+  );
+  if (!startMessageId) {
+    await deps.messaging.sendToChannel(ctx.channelId, `\uD83D\uDCDD Prompt: ${preview}`);
+  }
   return true;
 }
 

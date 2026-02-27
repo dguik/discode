@@ -30,6 +30,8 @@ import {
   handleTeammateIdle,
   type EventHandlerDeps,
 } from './hook-event-handlers.js';
+import { validateHookEventEnvelope } from '../types/hook-contract.js';
+import { agentRegistry } from '../agents/index.js';
 
 /** Shared context passed to individual event handlers after common validation. */
 export interface EventContext {
@@ -91,21 +93,21 @@ export class HookEventPipeline {
   }
 
   async handleOpencodeEvent(payload: unknown): Promise<boolean> {
-    if (!payload || typeof payload !== 'object') {
-      console.warn('⚠️ [event-pipeline] invalid payload (not an object)');
+    const validation = validateHookEventEnvelope(payload);
+    if (!validation.ok) {
+      if (validation.errors.some((error) => error.startsWith('projectName'))) {
+        console.warn('⚠️ [event-pipeline] missing projectName in event');
+      } else {
+        console.warn(`⚠️ [event-pipeline] invalid payload (${validation.errors.join('; ')})`);
+      }
       return false;
     }
 
-    const event = payload as Record<string, unknown>;
-    const projectName = typeof event.projectName === 'string' ? event.projectName : undefined;
+    const event = validation.value as Record<string, unknown>;
+    const projectName = event.projectName;
     const agentType = typeof event.agentType === 'string' ? event.agentType : 'opencode';
     const instanceId = typeof event.instanceId === 'string' ? event.instanceId : undefined;
     const eventType = typeof event.type === 'string' ? event.type : undefined;
-
-    if (!projectName) {
-      console.warn('⚠️ [event-pipeline] missing projectName in event');
-      return false;
-    }
 
     const project = this.deps.stateManager.getProject(projectName);
     if (!project) {
@@ -128,6 +130,18 @@ export class HookEventPipeline {
     const resolvedInstanceId = instance?.instanceId;
     const instanceKey = resolvedInstanceId || resolvedAgentType;
 
+    // If the adapter does not support prompt-submit hooks, ignore this event.
+    // Some agents do not expose a dedicated prompt-start hook.
+    if (eventType === 'prompt.submit') {
+      const adapter = agentRegistry.get(resolvedAgentType);
+      if (!adapter?.supportsHookEvent('prompt.submit')) {
+        console.log(
+          `⏭️ [${projectName}/${resolvedAgentType}${resolvedInstanceId ? `#${resolvedInstanceId}` : ''}] event=prompt.submit skipped (unsupported)`,
+        );
+        return true;
+      }
+    }
+
     const intermediateLen = eventType === 'session.idle' && typeof event.intermediateText === 'string' ? event.intermediateText.length : 0;
     const intermediateSuffix = intermediateLen > 0 ? ` intermediate=(${intermediateLen} chars)` : '';
     console.log(
@@ -136,7 +150,7 @@ export class HookEventPipeline {
 
     // Auto-create pending entry for tmux-initiated prompts
     if (
-      (eventType === 'tool.activity' || eventType === 'session.idle') &&
+      (eventType === 'tool.activity' || eventType === 'session.idle' || eventType === 'prompt.submit') &&
       !this.deps.pendingTracker.hasPending(projectName, resolvedAgentType, resolvedInstanceId)
     ) {
       await this.deps.pendingTracker.ensurePending(projectName, resolvedAgentType, channelId, resolvedInstanceId);
@@ -218,8 +232,11 @@ export class HookEventPipeline {
   }
 
   private async ensureStartMessageAndStreaming(ctx: EventContext): Promise<string | undefined> {
+    const submittedPrompt = typeof ctx.event.submittedPrompt === 'string'
+      ? ctx.event.submittedPrompt
+      : undefined;
     const startMessageId = await this.deps.pendingTracker.ensureStartMessage(
-      ctx.projectName, ctx.agentType, ctx.instanceId,
+      ctx.projectName, ctx.agentType, ctx.instanceId, submittedPrompt,
     );
 
     if (startMessageId) {

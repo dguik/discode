@@ -63,6 +63,7 @@ describe('BridgeMessageRouter container file injection', () => {
     pendingTracker = {
       markPending: vi.fn().mockResolvedValue(undefined),
       ensurePending: vi.fn().mockResolvedValue(undefined),
+      setPromptPreview: vi.fn(),
       ensureStartMessage: vi.fn().mockResolvedValue(undefined),
       markError: vi.fn().mockResolvedValue(undefined),
       markCompleted: vi.fn().mockResolvedValue(undefined),
@@ -158,6 +159,32 @@ describe('BridgeMessageRouter container file injection', () => {
     // Should NOT inject file into container
     expect(mockInjectFile).not.toHaveBeenCalled();
   });
+
+  it('does not create start message from router path', async () => {
+    const project = normalizeProjectState({
+      projectName: 'test',
+      projectPath: '/test/path',
+      tmuxSession: 'session',
+      discordChannels: { codex: 'ch-codex' },
+      agents: { codex: true },
+      instances: {
+        codex: {
+          instanceId: 'codex',
+          agentType: 'codex',
+          tmuxWindow: 'test-codex',
+          channelId: 'ch-codex',
+        },
+      },
+      createdAt: new Date(),
+      lastActive: new Date(),
+    });
+    stateManager.getProject.mockReturnValue(project);
+
+    await messageCallback('codex', '흠', 'test', 'ch-codex', 'msg-1');
+
+    expect(pendingTracker.setPromptPreview).toHaveBeenCalledWith('test', 'codex', '흠', 'codex');
+    expect(pendingTracker.ensureStartMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe('BridgeMessageRouter SDK routing', () => {
@@ -181,6 +208,7 @@ describe('BridgeMessageRouter SDK routing', () => {
     pendingTracker = {
       markPending: vi.fn().mockResolvedValue(undefined),
       ensurePending: vi.fn().mockResolvedValue(undefined),
+      setPromptPreview: vi.fn(),
       ensureStartMessage: vi.fn().mockResolvedValue(undefined),
       markError: vi.fn().mockResolvedValue(undefined),
       markCompleted: vi.fn().mockResolvedValue(undefined),

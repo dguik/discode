@@ -371,11 +371,67 @@ describe('handleSessionIdle', () => {
     expect(deps.streamingUpdater.finalize).toHaveBeenCalled();
   });
 
+  it('ensures start message when pending exists without startMessageId', async () => {
+    const deps = createMockDeps();
+    (deps.pendingTracker.getPending as any)
+      .mockReturnValueOnce({
+        channelId: 'ch-1',
+        messageId: '',
+      })
+      .mockReturnValueOnce({
+        channelId: 'ch-1',
+        messageId: '',
+        startMessageId: 'start-late',
+      });
+    const ctx = createCtx();
+
+    await handleSessionIdle(deps, ctx);
+
+    expect(deps.ensureStartMessageAndStreaming).toHaveBeenCalledWith(ctx);
+    expect(deps.streamingUpdater.finalize).not.toHaveBeenCalled();
+  });
+
   it('marks pending as completed', async () => {
     const deps = createMockDeps();
     const ctx = createCtx();
     await handleSessionIdle(deps, ctx);
     expect(deps.pendingTracker.markCompleted).toHaveBeenCalledWith('myProject', 'opencode', undefined);
+  });
+
+  it('does not force start message for source-message pending entries', async () => {
+    const deps = createMockDeps();
+    (deps.pendingTracker.getPending as any).mockReturnValue({
+      channelId: 'ch-1',
+      messageId: 'user-msg-1',
+    });
+    const ctx = createCtx({ text: 'Quick answer' });
+
+    await handleSessionIdle(deps, ctx);
+
+    expect(deps.ensureStartMessageAndStreaming).not.toHaveBeenCalled();
+    expect(deps.streamingUpdater.finalize).not.toHaveBeenCalled();
+  });
+
+  it('ensures start message for source-message pending when prompt preview exists', async () => {
+    const deps = createMockDeps();
+    (deps.pendingTracker.getPending as any)
+      .mockReturnValueOnce({
+        channelId: 'ch-1',
+        messageId: 'user-msg-1',
+        promptPreview: '테스트메세지1',
+      })
+      .mockReturnValueOnce({
+        channelId: 'ch-1',
+        messageId: 'user-msg-1',
+        promptPreview: '테스트메세지1',
+        startMessageId: 'start-with-preview',
+      });
+    const ctx = createCtx({ text: 'Quick answer' });
+
+    await handleSessionIdle(deps, ctx);
+
+    expect(deps.ensureStartMessageAndStreaming).toHaveBeenCalledWith(ctx);
+    expect(deps.streamingUpdater.finalize).not.toHaveBeenCalled();
   });
 
   it('sends response text to channel', async () => {

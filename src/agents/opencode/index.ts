@@ -14,6 +14,13 @@ const opencodeConfig: AgentConfig = {
   displayName: 'OpenCode',
   command: 'opencode',
   channelSuffix: 'opencode',
+  hookCapabilities: {
+    'session.error': true,
+    'session.notification': true,
+    'session.start': true,
+    'session.end': true,
+    'session.idle': true,
+  },
 };
 
 export class OpenCodeAdapter extends BaseAgentAdapter {

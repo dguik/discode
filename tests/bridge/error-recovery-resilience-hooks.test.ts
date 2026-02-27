@@ -133,8 +133,8 @@ describe('hook server error resilience — hook failures & lifecycle', () => {
     });
 
     expect(res.status).toBe(200);
-    // Tool activity now goes through streaming updater, not replyInThreadWithId
-    expect(mockMessaging.sendToChannelWithId).toHaveBeenCalled();
+    // No crash; tool activity still processed after markCompleted cleanup
+    expect(mockMessaging.sendToChannelWithId).not.toHaveBeenCalled();
   });
 
   it('does not crash when ensurePending throws during tool.activity', async () => {
@@ -213,7 +213,8 @@ describe('hook server error resilience — hook failures & lifecycle', () => {
       text: '📖 Read(`src/index.ts`)',
     });
     expect(res1.status).toBe(200);
-    expect(mockMessaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '📝 Prompt (claude)');
+    // Without submitted prompt text, generic tmux start marker is suppressed.
+    expect(mockMessaging.sendToChannelWithId).not.toHaveBeenCalled();
 
     mockMessaging.sendToChannelWithId.mockClear();
     const res2 = await postJSON(port, '/opencode-event', {

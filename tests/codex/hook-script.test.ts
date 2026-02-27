@@ -10,8 +10,10 @@
  * Edge case tests: hook-script-edge-cases.test.ts
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import http from 'http';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { getCodexHookSourcePath } from '../../src/codex/hook-installer.js';
 import {
@@ -70,6 +72,134 @@ describe('codex notify hook script', () => {
       type: 'session.idle',
       text: 'Here is the fix for the bug.',
     });
+  });
+
+  it('includes submittedPrompt in session.idle when input-messages include user text', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'done',
+      'input-messages': [
+        { role: 'user', content: 'tmux prompt raw text' },
+        { role: 'assistant', content: 'done' },
+      ],
+    });
+
+    await runHookScript(scriptPath, payload, {
+      DISCODE_PROJECT: 'test-project',
+      DISCODE_PORT: String(port),
+      DISCODE_HOSTNAME: '127.0.0.1',
+      DISCODE_AGENT: 'codex',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.type).toBe('session.idle');
+    expect(requests[0].body.submittedPrompt).toBe('tmux prompt raw text');
+  });
+
+  it('extracts submittedPrompt from multimodal user content with input_text parts', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'done',
+      'input-messages': [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '첫 줄' },
+            { type: 'input_text', text: '둘째 줄' },
+          ],
+        },
+        { role: 'assistant', content: 'done' },
+      ],
+    });
+
+    await runHookScript(scriptPath, payload, {
+      DISCODE_PROJECT: 'test-project',
+      DISCODE_PORT: String(port),
+      DISCODE_HOSTNAME: '127.0.0.1',
+      DISCODE_AGENT: 'codex',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.type).toBe('session.idle');
+    expect(requests[0].body.submittedPrompt).toBe('첫 줄\n둘째 줄');
+  });
+
+  it('supports input_messages and last_assistant_message payload keys', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      last_assistant_message: 'done snake case',
+      input_messages: [
+        { role: 'user', content: 'snake_case prompt' },
+        { role: 'assistant', content: 'done snake case' },
+      ],
+    });
+
+    await runHookScript(scriptPath, payload, {
+      DISCODE_PROJECT: 'test-project',
+      DISCODE_PORT: String(port),
+      DISCODE_HOSTNAME: '127.0.0.1',
+      DISCODE_AGENT: 'codex',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.type).toBe('session.idle');
+    expect(requests[0].body.text).toBe('done snake case');
+    expect(requests[0].body.submittedPrompt).toBe('snake_case prompt');
+  });
+
+  it('uses submittedPrompt field from payload when input messages are missing', async () => {
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'done',
+      submittedPrompt: 'direct submitted prompt',
+    });
+
+    await runHookScript(scriptPath, payload, {
+      DISCODE_PROJECT: 'test-project',
+      DISCODE_PORT: String(port),
+      DISCODE_HOSTNAME: '127.0.0.1',
+      DISCODE_AGENT: 'codex',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.type).toBe('session.idle');
+    expect(requests[0].body.submittedPrompt).toBe('direct submitted prompt');
+  });
+
+  it('falls back to ~/.codex/history.jsonl by thread-id when input messages are missing', async () => {
+    const tempHome = mkdtempSync(join(tmpdir(), 'codex-hook-home-'));
+    const codexDir = join(tempHome, '.codex');
+    mkdirSync(codexDir, { recursive: true });
+    writeFileSync(
+      join(codexDir, 'history.jsonl'),
+      [
+        JSON.stringify({ session_id: 'thread-1', text: 'older prompt' }),
+        JSON.stringify({ session_id: 'thread-1', text: 'latest prompt from history' }),
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const payload = JSON.stringify({
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'done',
+      'thread-id': 'thread-1',
+    });
+
+    try {
+      await runHookScript(scriptPath, payload, {
+        DISCODE_PROJECT: 'test-project',
+        DISCODE_PORT: String(port),
+        DISCODE_HOSTNAME: '127.0.0.1',
+        DISCODE_AGENT: 'codex',
+        HOME: tempHome,
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body.type).toBe('session.idle');
+    expect(requests[0].body.submittedPrompt).toBe('latest prompt from history');
   });
 
   it('includes instanceId in payload when DISCODE_INSTANCE is set', async () => {

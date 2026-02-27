@@ -5,6 +5,7 @@ export interface PendingEntry {
   messageId: string;
   startMessageId?: string;
   hookActive?: boolean;
+  promptPreview?: string;
 }
 
 export class PendingMessageTracker {
@@ -87,18 +88,36 @@ export class PendingMessageTracker {
     const key = this.pendingKey(projectName, instanceId || agentType);
     const pending = this.pendingMessageByInstance.get(key);
     if (!pending) return undefined;
+    const instanceLabel = `${projectName}/${agentType}${instanceId ? `#${instanceId}` : ''}`;
+
+    if (typeof promptPreview === 'string' && promptPreview.trim().length > 0) {
+      pending.promptPreview = promptPreview;
+    }
+    const effectivePreview = pending.promptPreview;
 
     // Already has a start message
     if (pending.startMessageId) return pending.startMessageId;
+
+    // tmux-initiated turns without known prompt text should not emit
+    // a generic "Prompt (agent)" marker.
+    if (!effectivePreview?.trim() && !pending.messageId) {
+      console.log(`⏭️ [${instanceLabel}] start message skipped (no submitted prompt on source-less turn)`);
+      return undefined;
+    }
 
     if (this.messaging.sendToChannelWithId) {
       try {
         pending.startMessageId = await this.messaging.sendToChannelWithId(
           pending.channelId,
-          this.formatStartMessage(agentType, promptPreview),
+          this.formatStartMessage(agentType, effectivePreview),
         );
+        const previewSuffix = effectivePreview?.trim()
+          ? ` preview=(${effectivePreview.length} chars)`
+          : ' preview=(none)';
+        console.log(`📝 [${instanceLabel}] start message sent${previewSuffix}`);
       } catch {
         // Non-fatal
+        console.log(`⚠️ [${instanceLabel}] start message send failed`);
       }
     }
 
@@ -158,13 +177,22 @@ export class PendingMessageTracker {
     return pending?.hookActive === true;
   }
 
+  setPromptPreview(
+    projectName: string,
+    agentType: string,
+    promptPreview: string,
+    instanceId?: string,
+  ): void {
+    if (promptPreview.trim().length === 0) return;
+    const key = this.pendingKey(projectName, instanceId || agentType);
+    const pending = this.pendingMessageByInstance.get(key);
+    if (!pending) return;
+    pending.promptPreview = promptPreview;
+  }
+
   private formatStartMessage(agentType: string, promptPreview?: string): string {
-    const normalized = (promptPreview ?? '').trim().replace(/\s+/g, ' ');
-    if (normalized.length > 0) {
-      const MAX_PREVIEW = 160;
-      const preview = normalized.length > MAX_PREVIEW
-        ? `${normalized.slice(0, MAX_PREVIEW - 1)}…`
-        : normalized;
+    const preview = promptPreview ?? '';
+    if (preview.trim().length > 0) {
       return `📝 Prompt: ${preview}`;
     }
 

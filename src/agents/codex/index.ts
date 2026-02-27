@@ -16,6 +16,10 @@ const codexConfig: AgentConfig = {
   displayName: 'Codex',
   command: 'codex',
   channelSuffix: 'codex',
+  hookCapabilities: {
+    'tool.activity': true,
+    'session.idle': true,
+  },
 };
 
 export class CodexAdapter extends BaseAgentAdapter {

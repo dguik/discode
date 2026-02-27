@@ -5,12 +5,23 @@
 
 import type { ICommandExecutor } from '../types/interfaces.js';
 import { ShellCommandExecutor } from '../infra/shell.js';
+import {
+  buildHookCapabilities,
+  type HookCapabilityMap,
+  type HookEventType,
+  type NormalizedHookCapabilities,
+} from '../types/hook-contract.js';
 
 export interface AgentConfig {
   name: string;
   displayName: string;
   command: string;
   channelSuffix: string;
+  /**
+   * Event hooks natively emitted by this agent integration.
+   * Missing keys default to false.
+   */
+  hookCapabilities?: HookCapabilityMap;
 }
 
 export type AgentIntegrationMode = 'install' | 'reinstall';
@@ -25,9 +36,11 @@ export type AgentIntegrationResult = {
 
 export abstract class BaseAgentAdapter {
   readonly config: AgentConfig;
+  readonly hookCapabilities: NormalizedHookCapabilities;
 
   constructor(config: AgentConfig) {
     this.config = config;
+    this.hookCapabilities = buildHookCapabilities(config.hookCapabilities);
   }
 
   /**
@@ -92,6 +105,13 @@ export abstract class BaseAgentAdapter {
    */
   getExtraEnvVars(_options?: { permissionAllow?: boolean }): Record<string, string> {
     return {};
+  }
+
+  /**
+   * Whether this adapter natively emits the given hook event.
+   */
+  supportsHookEvent(eventType: HookEventType): boolean {
+    return this.hookCapabilities[eventType];
   }
 }
 
