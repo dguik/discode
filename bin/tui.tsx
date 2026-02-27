@@ -936,7 +936,8 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       return;
     }
 
-    if (evt.ctrl && evt.name === 'p' && (evt.shift || evt.sequence === 'P')) {
+    // Many terminals encode Ctrl+Shift+P as Ctrl+P (0x10), so accept Ctrl+P as a palette shortcut.
+    if (evt.ctrl && evt.name === 'p') {
       evt.preventDefault();
       if (stopOpen()) closeStopDialog();
       if (newOpen()) closeNewDialog();
@@ -1338,7 +1339,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           <text fg={prefixPending() ? palette.primary : palette.muted}>{`prefix: ${PREFIX_LABEL}${prefixPending() ? ' (waiting key)' : ''}`}</text>
           <text fg={palette.muted}>runtime: slash/ctrl pass to AI</text>
           <text fg={palette.muted}>window: prefix + 1..9</text>
-          <text fg={palette.muted}>palette: Ctrl+Shift+P</text>
+          <text fg={palette.muted}>palette: Ctrl+P (Ctrl+Shift+P)</text>
           <text fg={palette.muted}>commands: / + Enter</text>
 
           <box flexDirection="column" marginTop={1}>
