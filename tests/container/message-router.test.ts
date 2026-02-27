@@ -62,6 +62,8 @@ describe('BridgeMessageRouter container file injection', () => {
     };
     pendingTracker = {
       markPending: vi.fn().mockResolvedValue(undefined),
+      ensurePending: vi.fn().mockResolvedValue(undefined),
+      ensureStartMessage: vi.fn().mockResolvedValue(undefined),
       markError: vi.fn().mockResolvedValue(undefined),
       markCompleted: vi.fn().mockResolvedValue(undefined),
     };
@@ -178,6 +180,8 @@ describe('BridgeMessageRouter SDK routing', () => {
     };
     pendingTracker = {
       markPending: vi.fn().mockResolvedValue(undefined),
+      ensurePending: vi.fn().mockResolvedValue(undefined),
+      ensureStartMessage: vi.fn().mockResolvedValue(undefined),
       markError: vi.fn().mockResolvedValue(undefined),
       markCompleted: vi.fn().mockResolvedValue(undefined),
       getPending: vi.fn().mockReturnValue(undefined),

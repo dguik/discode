@@ -73,12 +73,17 @@ export class PendingMessageTracker {
   }
 
   /**
-   * Lazily create the "⏳ Processing..." start message for this pending entry.
-   * Called on the first activity event (thinking.start, tool.activity) so that
-   * commands with no activity (e.g. /compact) never produce a parent message.
+   * Create the "📝 Prompt" start message for this pending entry.
+   * Called either immediately on user prompt submit or lazily on first activity
+   * for tmux-initiated turns.
    * Returns the startMessageId if created or already exists.
    */
-  async ensureStartMessage(projectName: string, agentType: string, instanceId?: string): Promise<string | undefined> {
+  async ensureStartMessage(
+    projectName: string,
+    agentType: string,
+    instanceId?: string,
+    promptPreview?: string,
+  ): Promise<string | undefined> {
     const key = this.pendingKey(projectName, instanceId || agentType);
     const pending = this.pendingMessageByInstance.get(key);
     if (!pending) return undefined;
@@ -88,8 +93,10 @@ export class PendingMessageTracker {
 
     if (this.messaging.sendToChannelWithId) {
       try {
-        const agentSuffix = agentType ? ` (${agentType})` : '';
-        pending.startMessageId = await this.messaging.sendToChannelWithId(pending.channelId, `⏳ Processing...${agentSuffix}`);
+        pending.startMessageId = await this.messaging.sendToChannelWithId(
+          pending.channelId,
+          this.formatStartMessage(agentType, promptPreview),
+        );
       } catch {
         // Non-fatal
       }
@@ -149,5 +156,19 @@ export class PendingMessageTracker {
     const key = this.pendingKey(projectName, instanceId || agentType);
     const pending = this.pendingMessageByInstance.get(key);
     return pending?.hookActive === true;
+  }
+
+  private formatStartMessage(agentType: string, promptPreview?: string): string {
+    const normalized = (promptPreview ?? '').trim().replace(/\s+/g, ' ');
+    if (normalized.length > 0) {
+      const MAX_PREVIEW = 160;
+      const preview = normalized.length > MAX_PREVIEW
+        ? `${normalized.slice(0, MAX_PREVIEW - 1)}…`
+        : normalized;
+      return `📝 Prompt: ${preview}`;
+    }
+
+    const agentSuffix = agentType ? ` (${agentType})` : '';
+    return `📝 Prompt${agentSuffix}`;
   }
 }

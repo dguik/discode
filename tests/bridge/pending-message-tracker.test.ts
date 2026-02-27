@@ -173,12 +173,12 @@ describe('PendingMessageTracker', () => {
     expect(entry!.startMessageId).toBeUndefined();
   });
 
-  it('ensureStartMessage sends Processing message lazily', async () => {
+  it('ensureStartMessage sends Prompt message lazily', async () => {
     const messaging = createMockMessaging();
     const tracker = new PendingMessageTracker(messaging as MessagingClient);
 
     await tracker.ensurePending('proj', 'claude', 'ch-1');
-    // ensurePending does NOT send Processing message
+    // ensurePending does NOT send Prompt message
     expect(messaging.sendToChannelWithId).not.toHaveBeenCalled();
     // Should NOT add reaction (no user message)
     expect(messaging.addReactionToMessage).not.toHaveBeenCalled();
@@ -186,7 +186,7 @@ describe('PendingMessageTracker', () => {
     // ensureStartMessage sends it
     const startId = await tracker.ensureStartMessage('proj', 'claude');
     expect(startId).toBe('start-msg-123');
-    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing... (claude)');
+    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '📝 Prompt (claude)');
   });
 
   it('ensurePending does not duplicate when already pending', async () => {
@@ -198,7 +198,7 @@ describe('PendingMessageTracker', () => {
 
     await tracker.ensurePending('proj', 'claude', 'ch-1');
 
-    // Should not send another Processing message
+    // Should not send another Prompt message
     expect(messaging.sendToChannelWithId).not.toHaveBeenCalled();
     // Original entry preserved
     expect(tracker.getPending('proj', 'claude')!.messageId).toBe('msg-1');
@@ -442,8 +442,18 @@ describe('PendingMessageTracker', () => {
     const startId = await tracker.ensureStartMessage('proj', 'claude');
 
     expect(startId).toBe('start-msg-123');
-    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing... (claude)');
+    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '📝 Prompt (claude)');
     expect(tracker.getPending('proj', 'claude')!.startMessageId).toBe('start-msg-123');
+  });
+
+  it('ensureStartMessage includes submitted prompt preview when provided', async () => {
+    const messaging = createMockMessaging();
+    const tracker = new PendingMessageTracker(messaging as MessagingClient);
+
+    await tracker.markPending('proj', 'claude', 'ch-1', 'msg-1');
+    await tracker.ensureStartMessage('proj', 'claude', undefined, '확인메세지');
+
+    expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '📝 Prompt: 확인메세지');
   });
 
   it('ensureStartMessage is idempotent — returns existing ID on second call', async () => {

@@ -561,7 +561,7 @@ describe('container agent → platform send', () => {
 
       expect(res.status).toBe(200);
       // tool.activity now goes through streaming updater, not direct thread replies
-      expect(mockStreamingUpdater.append).toHaveBeenCalledWith(
+      expect(mockStreamingUpdater.appendCumulative).toHaveBeenCalledWith(
         'multi',
         'claude-2',
         '\uD83D\uDCBB `npm run build`',

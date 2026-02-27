@@ -213,7 +213,7 @@ describe('hook server error resilience — hook failures & lifecycle', () => {
       text: '📖 Read(`src/index.ts`)',
     });
     expect(res1.status).toBe(200);
-    expect(mockMessaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '⏳ Processing... (claude)');
+    expect(mockMessaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', '📝 Prompt (claude)');
 
     mockMessaging.sendToChannelWithId.mockClear();
     const res2 = await postJSON(port, '/opencode-event', {

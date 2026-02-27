@@ -97,8 +97,21 @@ export class BridgeMessageRouter {
       }
 
       if (messageId) {
-        await this.deps.pendingTracker.markPending(projectName, resolvedAgentType, channelId, messageId, instanceKey);
+        try {
+          await this.deps.pendingTracker.markPending(projectName, resolvedAgentType, channelId, messageId, instanceKey);
+        } catch {
+          // If reaction/pending setup fails, continue with ensurePending so
+          // request-start messaging still works.
+          await this.deps.pendingTracker.ensurePending(projectName, resolvedAgentType, channelId, instanceKey);
+        }
+      } else {
+        // Some platform callbacks may not provide a source messageId.
+        // Still create pending context so prompt-start UI stays consistent.
+        await this.deps.pendingTracker.ensurePending(projectName, resolvedAgentType, channelId, instanceKey);
       }
+      // Show a start marker immediately on user-submitted requests,
+      // even before tool/thinking events arrive.
+      await this.deps.pendingTracker.ensureStartMessage(projectName, resolvedAgentType, instanceKey, content);
 
       if (mappedInstance.runtimeType === 'sdk') {
         const runner = this.deps.getSdkRunner?.(projectName, instanceKey);

@@ -130,6 +130,8 @@ describe('multi-instance platform → agent routing', () => {
     };
     pendingTracker = {
       markPending: vi.fn().mockResolvedValue(undefined),
+      ensurePending: vi.fn().mockResolvedValue(undefined),
+      ensureStartMessage: vi.fn().mockResolvedValue(undefined),
       markError: vi.fn().mockResolvedValue(undefined),
       markCompleted: vi.fn().mockResolvedValue(undefined),
       getPending: vi.fn().mockReturnValue(undefined),
@@ -244,6 +246,9 @@ describe('multi-instance platform → agent routing', () => {
       expect(pendingTracker.markPending).toHaveBeenCalledWith(
         'myapp', 'claude', 'ch-primary', 'msg-10', 'claude',
       );
+      expect(pendingTracker.ensureStartMessage).toHaveBeenCalledWith(
+        'myapp', 'claude', 'claude', 'hello',
+      );
     });
 
     it('marks pending with secondary instance key for ch-secondary', async () => {
@@ -253,6 +258,9 @@ describe('multi-instance platform → agent routing', () => {
 
       expect(pendingTracker.markPending).toHaveBeenCalledWith(
         'myapp', 'claude', 'ch-secondary', 'msg-11', 'claude-2',
+      );
+      expect(pendingTracker.ensureStartMessage).toHaveBeenCalledWith(
+        'myapp', 'claude', 'claude-2', 'hello',
       );
     });
 
