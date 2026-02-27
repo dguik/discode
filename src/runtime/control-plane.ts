@@ -1,4 +1,5 @@
 import type { AgentRuntime } from './interface.js';
+import { RUNTIME_CONTROL_PROTOCOL_VERSION } from './protocol.js';
 
 export type RuntimeWindowView = {
   windowId: string;
@@ -21,9 +22,9 @@ export class RuntimeControlPlane {
     return !!this.runtime?.listWindows && !!this.runtime?.getWindowBuffer;
   }
 
-  listWindows(): { activeWindowId?: string; windows: RuntimeWindowView[] } {
+  listWindows(): { protocolVersion: number; activeWindowId?: string; windows: RuntimeWindowView[] } {
     if (!this.runtime?.listWindows) {
-      return { activeWindowId: undefined, windows: [] };
+      return { protocolVersion: RUNTIME_CONTROL_PROTOCOL_VERSION, activeWindowId: undefined, windows: [] };
     }
 
     const windows = this.runtime.listWindows().map((window) => ({
@@ -40,7 +41,7 @@ export class RuntimeControlPlane {
 
     if (windows.length === 0) {
       this.activeWindowId = undefined;
-      return { activeWindowId: undefined, windows };
+      return { protocolVersion: RUNTIME_CONTROL_PROTOCOL_VERSION, activeWindowId: undefined, windows };
     }
 
     if (!this.activeWindowId || !windows.some((window) => window.windowId === this.activeWindowId)) {
@@ -48,6 +49,7 @@ export class RuntimeControlPlane {
     }
 
     return {
+      protocolVersion: RUNTIME_CONTROL_PROTOCOL_VERSION,
       activeWindowId: this.activeWindowId,
       windows,
     };
@@ -105,6 +107,7 @@ export class RuntimeControlPlane {
   }
 
   getBuffer(windowId: string, since: number = 0): {
+    protocolVersion: number;
     windowId: string;
     since: number;
     next: number;
@@ -129,6 +132,7 @@ export class RuntimeControlPlane {
     const chunk = raw.slice(start);
 
     return {
+      protocolVersion: RUNTIME_CONTROL_PROTOCOL_VERSION,
       windowId: this.toWindowId(parsed.sessionName, parsed.windowName),
       since: start,
       next: raw.length,

@@ -9,6 +9,7 @@ export type RuntimeWindowInfo = {
 };
 
 export type RuntimeWindowsResponse = {
+  protocolVersion?: number;
   activeWindowId?: string;
   windows: RuntimeWindowInfo[];
 };
@@ -74,6 +75,9 @@ export async function listRuntimeWindows(port: number): Promise<RuntimeWindowsRe
       return typeof value.windowId === 'string' && typeof value.sessionName === 'string' && typeof value.windowName === 'string';
     });
     return {
+      protocolVersion: Number.isFinite(parsed.protocolVersion)
+        ? Math.floor(parsed.protocolVersion as number)
+        : undefined,
       activeWindowId: typeof parsed.activeWindowId === 'string' ? parsed.activeWindowId : undefined,
       windows,
     };

@@ -182,11 +182,11 @@ P1:
 
 1. [x] wide-char/combining-char 처리 고도화
 2. [x] cursor style/state query 대응 확장
-3. [ ] CLI별(Claude/OpenCode/Codex) 회귀 테스트 세트 구축
+3. [x] CLI별(Claude/OpenCode/Codex) 회귀 테스트 세트 구축 (`tests/runtime/cli-runtime-regression.test.ts`)
 
 P2:
 
-1. [ ] runtime 프로토콜 버전 도입
+1. [x] runtime 프로토콜 버전 도입 (stream hello handshake + control JSON `protocolVersion`)
 2. [ ] Rust sidecar PoC 착수
 
 ---

@@ -110,6 +110,10 @@ Runtime control endpoints:
 - `POST /runtime/stop`
 - `POST /runtime/ensure`
 
+Control response versioning:
+
+- JSON responses from `/runtime/windows` and `/runtime/buffer` include `protocolVersion`
+
 Body limit:
 
 - 256 KiB max request payload (`413 Payload too large`)
@@ -123,13 +127,14 @@ Transport:
 
 Client -> daemon messages:
 
-- `hello`, `subscribe`, `focus`, `input(bytesBase64)`, `resize`
+- `hello(version)`, `subscribe`, `focus`, `input(bytesBase64)`, `resize`
 
 Daemon -> client messages:
 
 - `frame`, `patch`
 - `frame-styled`, `patch-styled`
 - `window-exit`, `error`
+- `hello(ok, streamProtocolVersion)` handshake response
 
 Optional optimization:
 

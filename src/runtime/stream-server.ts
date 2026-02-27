@@ -6,6 +6,7 @@ import type { AgentRuntime } from './interface.js';
 import type { TerminalStyledLine } from './vt-screen.js';
 import { renderTerminalSnapshot } from '../capture/parser.js';
 import { incRuntimeMetric } from './vt-diagnostics.js';
+import { RUNTIME_STREAM_PROTOCOL_VERSION } from './protocol.js';
 
 type RuntimeStreamClientState = {
   socket: Socket;
@@ -35,7 +36,7 @@ type RuntimeStreamServerOptions = {
 };
 
 type RuntimeStreamInbound =
-  | { type: 'hello'; clientId?: string; version?: string }
+  | { type: 'hello'; clientId?: string; version?: number | string }
   | { type: 'subscribe'; windowId: string; cols?: number; rows?: number }
   | { type: 'focus'; windowId: string }
   | { type: 'input'; windowId: string; bytesBase64: string }
@@ -154,9 +155,25 @@ export class RuntimeStreamServer {
     }
 
     switch (message.type) {
-      case 'hello':
-        this.send(client, { type: 'hello', ok: true });
+      case 'hello': {
+        const requestedVersion = parseProtocolVersion(message.version);
+        if (requestedVersion !== undefined && requestedVersion !== RUNTIME_STREAM_PROTOCOL_VERSION) {
+          this.send(client, {
+            type: 'error',
+            code: 'unsupported_protocol_version',
+            message: `Unsupported runtime stream protocol version: ${requestedVersion}`,
+            streamProtocolVersion: RUNTIME_STREAM_PROTOCOL_VERSION,
+          });
+          client.socket.destroy();
+          return;
+        }
+        this.send(client, {
+          type: 'hello',
+          ok: true,
+          streamProtocolVersion: RUNTIME_STREAM_PROTOCOL_VERSION,
+        });
         return;
+      }
       case 'subscribe': {
         if (!message.windowId || typeof message.windowId !== 'string') {
           this.send(client, { type: 'error', code: 'bad_subscribe', message: 'Missing windowId' });
@@ -536,4 +553,15 @@ function cloneStyledLine(line: TerminalStyledLine): TerminalStyledLine {
       underline: seg.underline,
     })),
   };
+}
+
+function parseProtocolVersion(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.floor(value);
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }

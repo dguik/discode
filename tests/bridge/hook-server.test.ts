@@ -3303,7 +3303,8 @@ describe('BridgeHookServer', () => {
 
       const res = await getRequest(port, '/runtime/windows');
       expect(res.status).toBe(200);
-      const parsed = JSON.parse(res.body) as { windows: Array<{ windowId: string }> };
+      const parsed = JSON.parse(res.body) as { protocolVersion?: number; windows: Array<{ windowId: string }> };
+      expect(parsed.protocolVersion).toBe(1);
       expect(parsed.windows[0].windowId).toBe('bridge:project-claude');
     });
 
@@ -3330,7 +3331,8 @@ describe('BridgeHookServer', () => {
 
       const res = await getRequest(port, '/runtime/buffer?windowId=bridge:project-claude&since=5');
       expect(res.status).toBe(200);
-      const parsed = JSON.parse(res.body) as { chunk: string; next: number };
+      const parsed = JSON.parse(res.body) as { protocolVersion?: number; chunk: string; next: number };
+      expect(parsed.protocolVersion).toBe(1);
       expect(parsed.chunk).toBe('-runtime');
       expect(parsed.next).toBe(13);
     });

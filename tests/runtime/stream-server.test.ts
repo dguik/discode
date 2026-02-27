@@ -154,7 +154,36 @@ describe('RuntimeStreamServer', () => {
     await waitFor(() => raw.includes('"type":"hello"'));
     const messages = raw.trim().split('\n').map(l => JSON.parse(l));
     const hello = messages.find((m: any) => m.type === 'hello');
-    expect(hello).toEqual({ type: 'hello', ok: true });
+    expect(hello).toEqual({ type: 'hello', ok: true, streamProtocolVersion: 1 });
+  });
+
+  it('rejects unsupported stream protocol version', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'discode-stream-hello-version-'));
+    registerCleanup(() => rmSync(dir, { recursive: true, force: true }));
+    const socketPath = join(dir, 'runtime.sock');
+
+    const runtime = createRuntimeMock();
+    const server = new RuntimeStreamServer(runtime, socketPath);
+    server.start();
+    registerCleanup(() => server.stop());
+
+    await waitFor(() => existsSync(socketPath));
+
+    const socket = createConnection(socketPath);
+    registerCleanup(() => socket.destroy());
+
+    let raw = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => { raw += chunk; });
+
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    socket.write(`${JSON.stringify({ type: 'hello', version: 999 })}\n`);
+
+    await waitFor(() => raw.includes('"code":"unsupported_protocol_version"'));
+    const messages = raw.trim().split('\n').map(l => JSON.parse(l));
+    const err = messages.find((m: any) => m.type === 'error');
+    expect(err?.code).toBe('unsupported_protocol_version');
+    expect(err?.streamProtocolVersion).toBe(1);
   });
 
   it('responds to focus message and sends frame', async () => {

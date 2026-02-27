@@ -32,6 +32,7 @@ type RuntimeWindowPayload = {
 };
 
 type RuntimeWindowsPayload = {
+  protocolVersion?: number;
   activeWindowId?: string;
   windows: RuntimeWindowPayload[];
 };
@@ -109,6 +110,9 @@ function parseRuntimeWindowsPayload(raw: string): RuntimeWindowsPayload | null {
       }));
 
     return {
+      protocolVersion: Number.isFinite(parsed.protocolVersion)
+        ? Math.floor(parsed.protocolVersion as number)
+        : undefined,
       activeWindowId: typeof parsed.activeWindowId === 'string' ? parsed.activeWindowId : undefined,
       windows,
     };
