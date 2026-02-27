@@ -22,8 +22,9 @@ import { newCommand } from './new.js';
 import { stopCommand } from './stop.js';
 import { onboardCommand } from './onboard.js';
 import type { TerminalStyledLine } from '../../runtime/vt-screen.js';
-import { isPtyRuntimeMode } from '../../runtime/mode.js';
+import { isPtyRuntimeMode, parseRuntimeModeInput } from '../../runtime/mode.js';
 import type { RuntimeMode } from '../../types/index.js';
+import { parseRuntimeWindowId, toRuntimeWindowId } from '../../runtime/window-id.js';
 
 type RuntimeWindowPayload = {
   windowId: string;
@@ -257,10 +258,11 @@ function parseOnboardCommand(raw: string): ParsedOnboardCommand {
 
     if (flag === '--runtime-mode') {
       const value = (readValue() || '').toLowerCase();
-      if (value !== 'tmux' && value !== 'pty' && value !== 'pty-rust') {
-        return { options, error: 'runtime mode must be tmux, pty, or pty-rust.' };
+      const parsed = parseRuntimeModeInput(value);
+      if (!parsed) {
+        return { options, error: 'runtime mode must be tmux, pty-ts, or pty-rust.' };
       }
-      options.runtimeMode = value as RuntimeMode;
+      options.runtimeMode = parsed;
       continue;
     }
 
@@ -371,15 +373,6 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     };
   };
 
-  const splitWindowId = (windowId: string): { sessionName: string; windowName: string } | null => {
-    const idx = windowId.indexOf(':');
-    if (idx <= 0 || idx >= windowId.length - 1) return null;
-    return {
-      sessionName: windowId.slice(0, idx),
-      windowName: windowId.slice(idx + 1),
-    };
-  };
-
   let runtimeStreamConnected = false;
   const streamClient = new RuntimeStreamClient(getDefaultRuntimeSocketPath(), {
     onFrame: (frame) => {
@@ -387,7 +380,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       runtimeFrameLines.set(frame.windowId, frame.lines.slice());
       runtimeFrameCache.set(frame.windowId, output);
       runtimeStyledCache.delete(frame.windowId);
-      const parsed = splitWindowId(frame.windowId);
+      const parsed = parseRuntimeWindowId(frame.windowId);
       if (parsed) {
         for (const listener of runtimeFrameListeners) {
           listener({
@@ -409,7 +402,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
         .join('\n');
       runtimeFrameCache.set(frame.windowId, output);
       runtimeStyledCache.set(frame.windowId, frame.lines);
-      const parsed = splitWindowId(frame.windowId);
+      const parsed = parseRuntimeWindowId(frame.windowId);
       if (parsed) {
         for (const listener of runtimeFrameListeners) {
           listener({
@@ -471,7 +464,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       runtimeFrameCache.set(patch.windowId, output);
       runtimeStyledCache.set(patch.windowId, next);
 
-      const parsed = splitWindowId(patch.windowId);
+      const parsed = parseRuntimeWindowId(patch.windowId);
       if (parsed) {
         for (const listener of runtimeFrameListeners) {
           listener({
@@ -502,7 +495,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       runtimeFrameCache.set(patch.windowId, output);
       runtimeStyledCache.delete(patch.windowId);
 
-      const parsed = splitWindowId(patch.windowId);
+      const parsed = parseRuntimeWindowId(patch.windowId);
       if (parsed) {
         for (const listener of runtimeFrameListeners) {
           listener({
@@ -523,7 +516,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       runtimeFrameLines.delete(event.windowId);
       runtimeStyledCache.delete(event.windowId);
       streamSubscriptions.delete(event.windowId);
-      const parsed = splitWindowId(event.windowId);
+      const parsed = parseRuntimeWindowId(event.windowId);
       if (parsed) {
         for (const listener of runtimeFrameListeners) {
           listener({
@@ -731,7 +724,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     if (!firstInstance) return null;
     const windowName = resolveProjectWindowName(project, firstInstance.agentType, effectiveConfig.tmux, firstInstance.instanceId);
     return {
-      windowId: `${project.tmuxSession}:${windowName}`,
+      windowId: toRuntimeWindowId({ sessionName: project.tmuxSession, windowName }),
       sessionName: project.tmuxSession,
       windowName,
     };
@@ -739,7 +732,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
 
   const parseWindowId = (windowId: string | undefined): { sessionName: string; windowName: string } | null => {
     if (!windowId) return null;
-    return splitWindowId(windowId);
+    return parseRuntimeWindowId(windowId);
   };
 
   const readRuntimeWindowOutput = async (
@@ -757,7 +750,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       return undefined;
     }
 
-    const windowId = `${sessionName}:${windowName}`;
+    const windowId = toRuntimeWindowId({ sessionName, windowName });
 
     try {
       ensureStreamSubscribed(windowId, width, height);
@@ -800,7 +793,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       return;
     }
 
-    const windowId = `${sessionName}:${windowName}`;
+    const windowId = toRuntimeWindowId({ sessionName, windowName });
     try {
       streamClient.input(windowId, Buffer.from(raw, 'utf8'));
       setTransportStatus({
@@ -823,7 +816,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       return;
     }
 
-    const windowId = `${sessionName}:${windowName}`;
+    const windowId = toRuntimeWindowId({ sessionName, windowName });
     try {
       streamClient.resize(windowId, width, height);
       ensureStreamSubscribed(windowId, width, height);
@@ -854,15 +847,15 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     }
 
     if (command === '/help') {
-      append('Commands: /new [name] [agent] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty|pty-rust|toggle]], /help, /exit');
-      append('Onboard options: --platform [discord|slack], --runtime-mode [tmux|pty|pty-rust], --token, --slack-bot-token, --slack-app-token, --default-agent [name|auto], --telemetry [on|off], --opencode-permission [allow|default]');
+      append('Commands: /new [name] [agent] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty-ts|pty-rust|toggle]], /help, /exit');
+      append('Onboard options: --platform [discord|slack], --runtime-mode [tmux|pty-ts|pty-rust], --token, --slack-bot-token, --slack-app-token, --default-agent [name|auto], --telemetry [on|off], --opencode-permission [allow|default]');
       return false;
     }
 
     if (command === '/onboard' || command === 'onboard' || command.startsWith('/onboard ') || command.startsWith('onboard ')) {
       const parsed = parseOnboardCommand(command);
       if (parsed.showUsage) {
-        append('Usage: /onboard [discord|slack] [--platform discord|slack] [--runtime-mode tmux|pty|pty-rust]');
+        append('Usage: /onboard [discord|slack] [--platform discord|slack] [--runtime-mode tmux|pty-ts|pty-rust]');
         append('       [--token TOKEN] [--slack-bot-token TOKEN] [--slack-app-token TOKEN]');
         append('       [--default-agent claude|gemini|opencode|auto] [--telemetry on|off]');
         append('       [--opencode-permission allow|default]');
@@ -898,7 +891,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       append('Usage: /config keepChannel [on|off|toggle]');
       append('Usage: /config defaultAgent [agent|auto]');
       append('Usage: /config defaultChannel [channelId|auto]');
-      append('Usage: /config runtimeMode [tmux|pty|pty-rust|toggle]');
+      append('Usage: /config runtimeMode [tmux|pty-ts|pty-rust|toggle]');
       return false;
     }
 
@@ -977,19 +970,21 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
 
         if (!value) {
           append(`runtimeMode: ${currentMode}`);
-          append('Use: /config runtimeMode [tmux|pty|pty-rust|toggle]');
+          append('Use: /config runtimeMode [tmux|pty-ts|pty-rust|toggle]');
           return false;
         }
 
         let nextMode: RuntimeMode;
         if (value === 'toggle') {
-          nextMode = currentMode === 'tmux' ? 'pty' : 'tmux';
-        } else if (value === 'tmux' || value === 'pty' || value === 'pty-rust') {
-          nextMode = value as RuntimeMode;
+          nextMode = currentMode === 'tmux' ? 'pty-ts' : 'tmux';
         } else {
-          append(`⚠️ Unknown runtime mode: ${parts[2]}`);
-          append('Use tmux, pty, pty-rust, or toggle');
-          return false;
+          const parsed = parseRuntimeModeInput(value);
+          if (!parsed) {
+            append(`⚠️ Unknown runtime mode: ${parts[2]}`);
+            append('Use tmux, pty-ts, pty-rust, or toggle');
+            return false;
+          }
+          nextMode = parsed;
         }
 
         try {

@@ -216,7 +216,12 @@ describe('RuntimeStreamServer', () => {
 
     const messages = raw.trim().split('\n').map(l => JSON.parse(l));
     const focus = messages.find((m: any) => m.type === 'focus');
-    expect(focus).toEqual({ type: 'focus', ok: true, windowId: 'bridge:demo-opencode' });
+    expect(focus).toEqual({
+      type: 'focus',
+      ok: true,
+      windowId: 'bridge:demo-opencode',
+      streamProtocolVersion: 1,
+    });
   });
 
   it('handles input message and calls typeKeysToWindow', async () => {
@@ -249,7 +254,12 @@ describe('RuntimeStreamServer', () => {
 
     const messages = raw.trim().split('\n').map(l => JSON.parse(l));
     const input = messages.find((m: any) => m.type === 'input');
-    expect(input).toEqual({ type: 'input', ok: true, windowId: 'bridge:demo-opencode' });
+    expect(input).toEqual({
+      type: 'input',
+      ok: true,
+      windowId: 'bridge:demo-opencode',
+      streamProtocolVersion: 1,
+    });
     expect(typeKeysSpy).toHaveBeenCalledWith('bridge', 'demo-opencode', 'hello');
   });
 

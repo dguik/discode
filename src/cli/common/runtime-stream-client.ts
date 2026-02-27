@@ -6,6 +6,7 @@ import { RUNTIME_STREAM_PROTOCOL_VERSION } from '../../runtime/protocol.js';
 
 type FrameMessage = {
   type: 'frame';
+  streamProtocolVersion?: number;
   windowId: string;
   seq: number;
   lines: string[];
@@ -13,6 +14,7 @@ type FrameMessage = {
 
 type PatchMessage = {
   type: 'patch';
+  streamProtocolVersion?: number;
   windowId: string;
   seq: number;
   lineCount: number;
@@ -21,6 +23,7 @@ type PatchMessage = {
 
 type FrameStyledMessage = {
   type: 'frame-styled';
+  streamProtocolVersion?: number;
   windowId: string;
   seq: number;
   lines: TerminalStyledLine[];
@@ -31,6 +34,7 @@ type FrameStyledMessage = {
 
 type PatchStyledMessage = {
   type: 'patch-styled';
+  streamProtocolVersion?: number;
   windowId: string;
   seq: number;
   lineCount: number;
@@ -42,6 +46,7 @@ type PatchStyledMessage = {
 
 type WindowExitMessage = {
   type: 'window-exit';
+  streamProtocolVersion?: number;
   windowId: string;
   code?: number | null;
   signal?: string | null;

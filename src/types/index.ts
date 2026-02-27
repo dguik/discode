@@ -31,7 +31,7 @@ export interface SlackConfig {
 }
 
 export type MessagingPlatform = 'discord' | 'slack';
-export type RuntimeMode = 'tmux' | 'pty' | 'pty-rust';
+export type RuntimeMode = 'tmux' | 'pty-ts' | 'pty-rust';
 
 export interface BridgeConfig {
   discord: DiscordConfig;

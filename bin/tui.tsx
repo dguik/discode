@@ -228,7 +228,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [configOpen, setConfigOpen] = createSignal(false);
   const [configSelected, setConfigSelected] = createSignal(0);
   const [configKeepChannel, setConfigKeepChannel] = createSignal<'on' | 'off'>('off');
-  const [configRuntimeMode, setConfigRuntimeMode] = createSignal<'tmux' | 'pty'>('tmux');
+  const [configRuntimeMode, setConfigRuntimeMode] = createSignal<'tmux' | 'pty-ts' | 'pty-rust'>('tmux');
   const [configDefaultAgent, setConfigDefaultAgent] = createSignal('(auto)');
   const [configDefaultChannel, setConfigDefaultChannel] = createSignal('(auto)');
   const [configAgentOptions, setConfigAgentOptions] = createSignal<string[]>([]);
@@ -497,7 +497,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       }
 
       const runtimeMode = parseValueLine(summaryLines, 'runtimeMode');
-      if (runtimeMode === 'tmux' || runtimeMode === 'pty') {
+      if (runtimeMode === 'tmux' || runtimeMode === 'pty-ts' || runtimeMode === 'pty-rust') {
         setConfigRuntimeMode(runtimeMode);
       }
 
@@ -555,8 +555,12 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       label: `runtimeMode -> tmux${configRuntimeMode() === 'tmux' ? ' (current)' : ''}`,
     });
     items.push({
-      command: '/config runtimeMode pty',
-      label: `runtimeMode -> pty${configRuntimeMode() === 'pty' ? ' (current)' : ''}`,
+      command: '/config runtimeMode pty-ts',
+      label: `runtimeMode -> pty-ts${configRuntimeMode() === 'pty-ts' ? ' (current)' : ''}`,
+    });
+    items.push({
+      command: '/config runtimeMode pty-rust',
+      label: `runtimeMode -> pty-rust${configRuntimeMode() === 'pty-rust' ? ' (current)' : ''}`,
     });
 
     const agentSet = new Set<string>(['auto', ...configAgentOptions()]);

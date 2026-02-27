@@ -567,7 +567,7 @@ describe('container mode integration', () => {
         stateManager: mockStateManager,
         registry: createMockRegistry(),
         config: createMockConfig({
-          runtimeMode: 'pty',
+          runtimeMode: 'pty-ts',
           container: { enabled: true },
         }),
       });
@@ -623,7 +623,7 @@ describe('container mode integration', () => {
         runtime: mockRuntime,
         stateManager: mockStateManager,
         registry: createMockRegistry(),
-        config: createMockConfig({ runtimeMode: 'pty' }),
+        config: createMockConfig({ runtimeMode: 'pty-ts' }),
       });
 
       await bridge.start();

@@ -8,7 +8,7 @@ import { copyTextToClipboard } from '../src/cli/common/clipboard.js';
 
 export type OnboardWizardInitialState = {
   platform: 'discord' | 'slack';
-  runtimeMode: 'tmux' | 'pty' | 'pty-rust';
+  runtimeMode: 'tmux' | 'pty-ts' | 'pty-rust';
   discordToken?: string;
   slackBotToken?: string;
   slackAppToken?: string;
@@ -23,7 +23,7 @@ export type OnboardWizardInitialState = {
 
 export type OnboardWizardResult = {
   platform: 'discord' | 'slack';
-  runtimeMode: 'tmux' | 'pty' | 'pty-rust';
+  runtimeMode: 'tmux' | 'pty-ts' | 'pty-rust';
   token?: string;
   slackBotToken?: string;
   slackAppToken?: string;
@@ -79,7 +79,7 @@ function OnboardWizardApp(props: {
   const renderer = useRenderer();
 
   const [platform, setPlatform] = createSignal<'discord' | 'slack'>(props.initial.platform);
-  const [runtimeMode, setRuntimeMode] = createSignal<'tmux' | 'pty' | 'pty-rust'>(props.initial.runtimeMode);
+  const [runtimeMode, setRuntimeMode] = createSignal<'tmux' | 'pty-ts' | 'pty-rust'>(props.initial.runtimeMode);
   const [discordToken, setDiscordToken] = createSignal(props.initial.discordToken || '');
   const [slackBotToken, setSlackBotToken] = createSignal(props.initial.slackBotToken || '');
   const [slackAppToken, setSlackAppToken] = createSignal(props.initial.slackAppToken || '');
@@ -156,7 +156,7 @@ function OnboardWizardApp(props: {
     if (step === 'runtimeMode') {
       return [
         { value: 'tmux', label: 'tmux (recommended)', description: 'Advanced tmux-based runtime mode' },
-        { value: 'pty', label: 'pty', description: 'Simple local runtime mode' },
+        { value: 'pty-ts', label: 'pty-ts', description: 'TypeScript-backed local runtime mode' },
         { value: 'pty-rust', label: 'pty-rust (experimental)', description: 'Rust sidecar PoC mode with TS fallback' },
       ];
     }
@@ -260,7 +260,7 @@ function OnboardWizardApp(props: {
 
     if (step === 'platform' && (selected.value === 'discord' || selected.value === 'slack')) {
       setPlatform(selected.value);
-    } else if (step === 'runtimeMode' && (selected.value === 'tmux' || selected.value === 'pty' || selected.value === 'pty-rust')) {
+    } else if (step === 'runtimeMode' && (selected.value === 'tmux' || selected.value === 'pty-ts' || selected.value === 'pty-rust')) {
       setRuntimeMode(selected.value);
     } else if (step === 'defaultAgent' && typeof selected.value === 'string') {
       setDefaultAgentCli(selected.value);

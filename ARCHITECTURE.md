@@ -9,7 +9,7 @@ discode is a global daemon bridge that connects:
 
 - Messaging platforms: Discord and Slack
 - Agent CLIs: Claude, Gemini, OpenCode
-- Local runtime backends: `tmux`, `pty`, or `pty-rust` (PoC)
+- Local runtime backends: `tmux`, `pty-ts`, or `pty-rust` (PoC)
 
 Current architecture principles:
 
@@ -40,13 +40,15 @@ Implementations:
 
 - `TmuxRuntime` (`src/runtime/tmux-runtime.ts`) via `TmuxManager`
 - `PtyRuntime` (`src/runtime/pty-runtime.ts`) process-backed windows (+ optional `node-pty`)
-- `PtyRustRuntime` (`src/runtime/pty-rust-runtime.ts`) PoC mode (currently TS fallback)
+- `PtyRustRuntime` (`src/runtime/pty-rust-runtime.ts`) PoC mode (Rust sidecar RPC with TS fallback)
 
 Runtime selection:
 
-- Config key: `runtimeMode: 'tmux' | 'pty' | 'pty-rust'`
+- Config key: `runtimeMode: 'tmux' | 'pty-ts' | 'pty-rust'`
+- Legacy config value `pty` is still accepted and normalized to `pty-ts`
 - Sources: `~/.discode/config.json`, `DISCODE_RUNTIME_MODE`
 - Loader default: `tmux`
+- Optional sidecar binary override: `DISCODE_PTY_RUST_SIDECAR_BIN`
 
 ## 4. Core Components
 
@@ -147,13 +149,13 @@ Optional optimization:
   - Ensures daemon
   - Creates/resumes instance state and channel mapping
   - `tmux`: starts/attaches tmux window and can bootstrap TUI pane
-  - `pty`/`pty-rust`: ensures runtime window in daemon via `/runtime/ensure`; attach opens TUI
+  - `pty-ts`/`pty-rust`: ensures runtime window in daemon via `/runtime/ensure`; attach opens TUI
 - `attach`
   - `tmux`: attaches/switches tmux target
-  - `pty`/`pty-rust`: focuses runtime window then launches TUI
+  - `pty-ts`/`pty-rust`: focuses runtime window then launches TUI
 - `stop`
   - `tmux`: kills tmux window/session + state/channel cleanup
-  - `pty`/`pty-rust`: stops runtime window via `/runtime/stop` + state/channel cleanup
+  - `pty-ts`/`pty-rust`: stops runtime window via `/runtime/stop` + state/channel cleanup
 - `status` / `list`
   - Runtime-aware active window detection (`tmux` session/window checks vs `/runtime/windows`)
 - `daemon`
@@ -214,6 +216,6 @@ Compatibility:
 ## 12. Operational Notes
 
 - Daemon is global singleton; restart after runtime/config/integration changes
-- In `pty`/`pty-rust` mode, daemon restores missing runtime windows from persisted state at startup
+- In `pty-ts`/`pty-rust` mode, daemon restores missing runtime windows from persisted state at startup
 - Agent integrations are reinstalled during bootstrap to keep hooks/plugins consistent
 - CLI includes optional telemetry (opt-in) and interactive update prompt for npm releases

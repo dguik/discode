@@ -8,6 +8,8 @@ import { normalizeDiscordToken } from '../../config/token.js';
 import { ensureOpencodePermissionChoice } from '../common/opencode-permission.js';
 import { confirmYesNo, isInteractiveShell, prompt } from '../common/interactive.js';
 import { ensureTelemetryInstallId } from '../../telemetry/index.js';
+import { parseRuntimeModeInput } from '../../runtime/mode.js';
+import type { RuntimeMode } from '../../types/index.js';
 
 type RegisteredAgentAdapter = ReturnType<typeof agentRegistry.getAll>[number];
 
@@ -74,9 +76,10 @@ async function choosePlatform(interactive: boolean = isInteractiveShell()): Prom
 async function chooseRuntimeMode(
   explicitMode?: string,
   interactive: boolean = isInteractiveShell()
-): Promise<'tmux' | 'pty' | 'pty-rust'> {
-  if (explicitMode === 'tmux' || explicitMode === 'pty' || explicitMode === 'pty-rust') {
-    return explicitMode;
+): Promise<RuntimeMode> {
+  const parsedExplicit = parseRuntimeModeInput(explicitMode);
+  if (parsedExplicit) {
+    return parsedExplicit;
   }
 
   if (!interactive) {
@@ -86,13 +89,13 @@ async function chooseRuntimeMode(
 
   console.log(chalk.white('\nChoose runtime mode'));
   console.log(chalk.gray('   1. tmux (default)'));
-  console.log(chalk.gray('   2. pty'));
+  console.log(chalk.gray('   2. pty-ts'));
   console.log(chalk.gray('   3. pty-rust (experimental PoC)'));
 
   while (true) {
     const answer = await prompt(chalk.white('\nSelect runtime mode [1-3] (Enter = default): '));
     if (!answer || answer === '1') return 'tmux';
-    if (answer === '2') return 'pty';
+    if (answer === '2') return 'pty-ts';
     if (answer === '3') return 'pty-rust';
     console.log(chalk.yellow('Please enter a valid number.'));
   }

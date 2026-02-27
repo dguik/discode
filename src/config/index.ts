@@ -4,12 +4,12 @@
 
 import { config as loadEnv } from 'dotenv';
 import { join } from 'path';
-import type { BridgeConfig, MessagingPlatform, RuntimeMode } from '../types/index.js';
+import type { BridgeConfig, MessagingPlatform } from '../types/index.js';
 import type { IStorage, IEnvironment } from '../types/interfaces.js';
 import { FileStorage } from '../infra/storage.js';
 import { SystemEnvironment } from '../infra/environment.js';
 import { normalizeDiscordToken } from './token.js';
-import { normalizeRuntimeMode } from '../runtime/mode.js';
+import { normalizeRuntimeMode, type RuntimeModeInput } from '../runtime/mode.js';
 
 export interface StoredConfig {
   token?: string;
@@ -22,7 +22,7 @@ export interface StoredConfig {
   slackBotToken?: string;
   slackAppToken?: string;
   messagingPlatform?: 'discord' | 'slack';
-  runtimeMode?: RuntimeMode;
+  runtimeMode?: RuntimeModeInput;
   containerEnabled?: boolean;
   containerSocketPath?: string;
   containerSyncIntervalMs?: number;

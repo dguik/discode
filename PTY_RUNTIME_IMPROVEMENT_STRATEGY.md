@@ -121,7 +121,7 @@
 
 ---
 
-## 4.3 Phase 3: 아키텍처 경계 정리 (Hybrid 준비) [NOT STARTED]
+## 4.3 Phase 3: 아키텍처 경계 정리 (Hybrid 준비) [IN PROGRESS]
 
 목표: TS 구현 한계에 대비해 Rust sidecar로 이동 가능한 인터페이스를 만든다.
 
@@ -145,9 +145,17 @@
 - 어댑터 레이어
 - feature flag + fallback 경로
 
+진행 메모 (2026-02):
+
+- `runtimeMode`를 `tmux | pty-ts | pty-rust`로 정리하고 legacy `pty`는 `pty-ts`로 정규화
+- 윈도우 식별자 규약을 `src/runtime/window-id.ts`로 통합
+- Runtime window adapter(`src/runtime/window-api.ts`) 도입
+- control/stream plane에서 adapter + 공통 window-id 사용
+- Runtime window API 문서 추가 (`docs/RUNTIME_WINDOW_API.md`)
+
 ---
 
-## 4.4 Phase 4: Rust sidecar PoC (선택적, 기준 충족 시) [NOT STARTED]
+## 4.4 Phase 4: Rust sidecar PoC (선택적, 기준 충족 시) [IN PROGRESS]
 
 진입 조건 (아래 중 2개 이상):
 
@@ -166,6 +174,14 @@ PoC 범위:
 - 핵심 fixture pass율 상승
 - CPU 사용량 개선 또는 동급
 - 사용자 체감 오류 감소
+
+진행 메모 (2026-02):
+
+- Rust sidecar crate 초안 추가 (`sidecar/pty-rust`)
+- UDS request/response RPC 경로 도입 (`server`/`request`)
+- `pty-rust` 런타임에서 sidecar 우선 사용 + 자동 TS fallback 연결
+- PoC 문서 추가 (`docs/PTY_RUST_SIDECAR_POC.md`)
+- sidecar `get_window_frame`를 ANSI strip 기반에서 VT-lite renderer 기반으로 확장 (cursor/style/clear/alt-screen 기본 지원)
 
 ---
 
