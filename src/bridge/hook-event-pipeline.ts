@@ -246,7 +246,20 @@ export class HookEventPipeline {
       if (!this.deps.streamingUpdater.has(ctx.projectName, ctx.instanceKey)) {
         const pending = this.deps.pendingTracker.getPending(ctx.projectName, ctx.agentType, ctx.instanceId);
         if (pending) {
-          this.deps.streamingUpdater.start(ctx.projectName, ctx.instanceKey, pending.channelId, startMessageId);
+          // Create a separate message for streaming updates so the start message
+          // ("📝 Prompt: ...") is preserved and not overwritten by tool activity.
+          let streamingMsgId = startMessageId;
+          if (this.deps.messaging.sendToChannelWithId) {
+            try {
+              const newId = await this.deps.messaging.sendToChannelWithId(
+                pending.channelId, '\u23F3 Working...',
+              );
+              if (newId) streamingMsgId = newId;
+            } catch {
+              // Fall back to reusing startMessageId
+            }
+          }
+          this.deps.streamingUpdater.start(ctx.projectName, ctx.instanceKey, pending.channelId, streamingMsgId);
         }
       }
     }

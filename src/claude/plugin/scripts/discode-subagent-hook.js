@@ -30,7 +30,10 @@ async function main() {
   var instanceId = process.env.DISCODE_INSTANCE || process.env.AGENT_DISCORD_INSTANCE || "";
   var port = process.env.DISCODE_PORT || process.env.AGENT_DISCORD_PORT || "18470";
 
-  var subagentType = typeof input.agent_type === "string" ? input.agent_type : "unknown";
+  var subagentType = typeof input.agent_type === "string" ? input.agent_type : "";
+  // Skip when agent_type is empty — these are suggested next prompts, not real subagents
+  if (!subagentType) return;
+
   var lastMessage = typeof input.last_assistant_message === "string" ? input.last_assistant_message : "";
 
   var summary = truncate(lastMessage, 200);

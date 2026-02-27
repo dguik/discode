@@ -239,7 +239,8 @@ export async function handleSessionIdle(deps: EventHandlerDeps, ctx: EventContex
   deps.pendingTracker.markCompleted(ctx.projectName, ctx.agentType, ctx.instanceId).catch(() => {});
 
   await postUsageToChannel(deps.messaging, ctx.channelId, usage);
-  await postIntermediateTextToChannel(deps.messaging, ctx.channelId, ctx.event);
+  // intermediateText is already delivered in real-time via the streaming updater
+  // during tool activity, so skip re-posting it at idle to avoid duplication.
   await postThinkingToChannel(deps.messaging, ctx.channelId, ctx.event);
 
   // Main response: text + files (separated for change isolation)
