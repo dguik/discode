@@ -1,5 +1,6 @@
 import { config, saveConfig } from '../../config/index.js';
 import { agentRegistry } from '../../agents/index.js';
+import type { RuntimeMode } from '../../types/index.js';
 import type { TuiCommandDeps } from './tui-command-handler.js';
 
 export function handleConfigShow(append: (line: string) => void, deps: TuiCommandDeps): 'handled' {
@@ -104,7 +105,7 @@ function handleConfigDefaultChannel(parts: string[], append: (line: string) => v
 }
 
 function handleConfigRuntimeMode(parts: string[], append: (line: string) => void): 'handled' {
-  const currentMode = config.runtimeMode === 'pty' ? 'pty' : 'tmux';
+  const currentMode = config.runtimeMode || 'tmux';
   const value = (parts[2] || '').trim().toLowerCase();
 
   if (!value) {
@@ -113,14 +114,16 @@ function handleConfigRuntimeMode(parts: string[], append: (line: string) => void
     return 'handled';
   }
 
-  let nextMode: 'tmux' | 'pty';
+  let nextMode: RuntimeMode;
   if (value === 'toggle') {
-    nextMode = currentMode === 'pty' ? 'tmux' : 'pty';
-  } else if (value === 'tmux' || value === 'pty') {
+    nextMode = currentMode === 'tmux' ? 'pty-ts' : 'tmux';
+  } else if (value === 'tmux' || value === 'pty-ts' || value === 'pty-rust') {
     nextMode = value;
+  } else if (value === 'pty') {
+    nextMode = 'pty-ts';
   } else {
     append(`⚠️ Unknown runtime mode: ${parts[2]}`);
-    append('Use tmux, pty, or toggle');
+    append('Use tmux, pty-ts, pty-rust, or toggle');
     return 'handled';
   }
 

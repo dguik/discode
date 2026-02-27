@@ -10,9 +10,9 @@
  * - /workspace as the hardcoded working directory
  */
 
-import { createHash, randomBytes } from 'crypto';
+import { createHash } from 'crypto';
 import { execSync } from 'child_process';
-import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'fs';
+import { writeFileSync, rmSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { AgentType } from '../agents/base.js';

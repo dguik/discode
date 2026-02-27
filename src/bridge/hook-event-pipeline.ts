@@ -104,7 +104,7 @@ export class HookEventPipeline {
     }
 
     const event = validation.value as Record<string, unknown>;
-    const projectName = event.projectName;
+    const projectName = typeof event.projectName === 'string' ? event.projectName : '';
     const agentType = typeof event.agentType === 'string' ? event.agentType : 'opencode';
     const instanceId = typeof event.instanceId === 'string' ? event.instanceId : undefined;
     const eventType = typeof event.type === 'string' ? event.type : undefined;

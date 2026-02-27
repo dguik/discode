@@ -6,7 +6,7 @@ const mockSaveConfig = vi.hoisted(() => vi.fn());
 const mockConfig = vi.hoisted(() => ({
   defaultAgentCli: 'claude',
   discord: { channelId: '' },
-  runtimeMode: 'tmux' as 'tmux' | 'pty',
+  runtimeMode: 'tmux' as 'tmux' | 'pty-ts' | 'pty-rust',
 }));
 
 vi.mock('../../../src/config/index.js', () => ({
@@ -204,22 +204,22 @@ describe('handleConfigSet', () => {
   });
 
   describe('runtimeMode', () => {
-    it('sets runtimeMode to pty', () => {
+    it('sets runtimeMode to pty-ts (pty is aliased to pty-ts)', () => {
       const deps = createMockDeps();
       handleConfigSet('/config runtimeMode pty', append, deps);
-      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty' });
-      expect(lines[0]).toContain('runtimeMode is now pty');
+      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-ts' });
+      expect(lines[0]).toContain('runtimeMode is now pty-ts');
     });
 
-    it('toggles runtimeMode from tmux to pty', () => {
+    it('toggles runtimeMode from tmux to pty-ts', () => {
       mockConfig.runtimeMode = 'tmux';
       const deps = createMockDeps();
       handleConfigSet('/config runtimeMode toggle', append, deps);
-      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty' });
+      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-ts' });
     });
 
-    it('toggles runtimeMode from pty to tmux', () => {
-      mockConfig.runtimeMode = 'pty';
+    it('toggles runtimeMode from pty-ts to tmux', () => {
+      mockConfig.runtimeMode = 'pty-ts';
       const deps = createMockDeps();
       handleConfigSet('/config runtimeMode toggle', append, deps);
       expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'tmux' });
@@ -240,7 +240,7 @@ describe('handleConfigSet', () => {
     it('accepts runtime-mode alias', () => {
       const deps = createMockDeps();
       handleConfigSet('/config runtime-mode pty', append, deps);
-      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty' });
+      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-ts' });
     });
   });
 

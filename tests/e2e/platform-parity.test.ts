@@ -138,9 +138,10 @@ describe('Multi-Platform Parity', () => {
         ctx.messaging.sendToChannelWithId as ReturnType<typeof vi.fn>,
         1,
       );
+      // Start message format is now "Prompt (agent)" rather than "Processing"
       expect(ctx.messaging.sendToChannelWithId).toHaveBeenCalledWith(
         'ch-1',
-        expect.stringContaining('Processing'),
+        expect.stringContaining('Prompt'),
       );
     });
 
@@ -833,7 +834,7 @@ describe('Multi-Platform Parity', () => {
 
   describe('Auto-created pending entry', () => {
     it.each(['discord', 'slack'] as const)(
-      '%s: tool.activity without prior markPending auto-creates a pending entry',
+      '%s: tool.activity without prior markPending auto-creates a pending entry (no start message without prompt)',
       async (platform) => {
         const ctx = await startFullHookServer({
           platform,
@@ -841,7 +842,9 @@ describe('Multi-Platform Parity', () => {
           channelId: 'ch-1',
         });
         try {
-          // Do NOT call markPending — the pipeline should auto-create via ensurePending
+          // Do NOT call markPending — the pipeline auto-creates via ensurePending.
+          // However, since there is no messageId and no prompt preview, the start
+          // message is intentionally skipped (source-less turn without prompt text).
           await postEvent(ctx.port, {
             projectName: 'test-proj',
             type: 'tool.activity',
@@ -849,14 +852,14 @@ describe('Multi-Platform Parity', () => {
             text: 'Auto-created entry',
           });
 
-          await waitForCalls(
-            ctx.messaging.sendToChannelWithId as ReturnType<typeof vi.fn>,
-            1,
-          );
-          expect(ctx.messaging.sendToChannelWithId).toHaveBeenCalledWith(
-            'ch-1',
-            expect.stringContaining('Processing'),
-          );
+          // Allow time for the pipeline to run
+          await new Promise((r) => setTimeout(r, 300));
+
+          // The streaming updater still records the activity even though
+          // no visible start message is sent (no sendToChannelWithId call).
+          const withIdCalls = (ctx.messaging.sendToChannelWithId as ReturnType<typeof vi.fn>).mock
+            .calls.length;
+          expect(withIdCalls).toBe(0);
         } finally {
           ctx.server.stop();
         }

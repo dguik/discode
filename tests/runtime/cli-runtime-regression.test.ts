@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PtyRuntime } from '../../src/runtime/pty-runtime.js';
 import { VtScreen } from '../../src/runtime/vt-screen.js';
+import { buildTerminalResponse } from '../../src/runtime/pty-query-handler.js';
 
 type QueryRecord = {
   screen: VtScreen;
@@ -16,11 +17,10 @@ function createQueryRecord(cols = 80, rows = 24): QueryRecord {
   };
 }
 
-function runQueryChunks(runtime: PtyRuntime, record: QueryRecord, chunks: string[]): string {
-  const runtimeAny = runtime as any;
+function runQueryChunks(_runtime: PtyRuntime, record: QueryRecord, chunks: string[]): string {
   let response = '';
   for (const chunk of chunks) {
-    response += runtimeAny.buildTerminalResponse(record, chunk);
+    response += buildTerminalResponse(record, chunk);
   }
   return response;
 }

@@ -33,7 +33,7 @@ export interface WindowRestorerDeps {
 }
 
 export function restoreRuntimeWindowsIfNeeded(deps: WindowRestorerDeps): void {
-  if ((deps.bridgeConfig.runtimeMode || 'tmux') !== 'pty') return;
+  if (deps.bridgeConfig.runtimeMode === 'tmux' || !deps.bridgeConfig.runtimeMode) return;
 
   const port = deps.bridgeConfig.hookServerPort || 18470;
   const permissionAllow = deps.bridgeConfig.opencode?.permissionMode === 'allow';

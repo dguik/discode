@@ -269,7 +269,7 @@ describe('RuntimeControlPlane', () => {
 
   describe('stopWindow', () => {
     it('throws when runtime lacks stopWindow', () => {
-      const rt = createMockRuntime();
+      const rt = createMockRuntime([{ sessionName: 'sess1', windowName: 'win1' }]);
       rt.stopWindow = undefined;
       const cp = new RuntimeControlPlane(rt);
       expect(() => cp.stopWindow('sess1:win1')).toThrow('Runtime stop unavailable');

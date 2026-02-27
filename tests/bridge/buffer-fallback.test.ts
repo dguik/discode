@@ -309,7 +309,7 @@ describe('buffer fallback for interactive prompts', () => {
 
   // ── No pending (no messageId) ───────────────────────────────────
 
-  it('does not fire fallback when message has no messageId', async () => {
+  it('fires fallback even when message has no messageId (ensurePending still creates pending entry)', async () => {
     runtime.getWindowBuffer.mockReturnValue(MODEL_MENU);
 
     await messageCallback('claude', 'test msg', 'myapp', 'ch-1', undefined, undefined);
@@ -317,7 +317,12 @@ describe('buffer fallback for interactive prompts', () => {
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(2000);
 
-    expect(messaging.sendToChannel).not.toHaveBeenCalled();
+    // The router now calls ensurePending even without messageId, so a
+    // pending entry exists and the buffer fallback fires.
+    expect(messaging.sendToChannel).toHaveBeenCalledWith(
+      'ch-1',
+      expect.stringContaining('Select model'),
+    );
   });
 
   // ── Empty / error conditions ────────────────────────────────────

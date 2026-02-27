@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import { config, getConfigValue } from '../../config/index.js';
@@ -7,6 +7,8 @@ import { stateManager } from '../../state/index.js';
 import { agentRegistry } from '../../agents/index.js';
 import { TmuxManager } from '../../tmux/manager.js';
 import { listProjectInstances } from '../../state/instances.js';
+import { defaultDaemonManager } from '../../daemon.js';
+import { isPtyRuntimeMode } from '../../runtime/mode.js';
 import type { TmuxCliOptions } from '../common/types.js';
 import {
   applyTmuxCliOverrides,
@@ -19,6 +21,38 @@ import { RuntimeSessionManager } from '../common/runtime-session-manager.js';
 import { handleTuiCommand } from './tui-command-handler.js';
 import { attachCommand } from './attach.js';
 import { stopCommand } from './stop.js';
+
+type RuntimeBackendStatus = 'sidecar' | 'ts-fallback';
+
+function readFileTailUtf8(filePath: string, maxBytes: number = 65536): string {
+  const stats = statSync(filePath);
+  if (!Number.isFinite(stats.size) || stats.size <= 0) return '';
+
+  const size = stats.size;
+  const length = Math.max(0, Math.min(size, Math.floor(maxBytes)));
+  if (length <= 0) return '';
+
+  const fd = openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(length);
+    const position = Math.max(0, size - length);
+    const bytesRead = readSync(fd, buffer, 0, length, position);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function detectPtyRustBackendStatus(logText: string): RuntimeBackendStatus | undefined {
+  if (!logText) return undefined;
+  const lines = logText.replace(/\r/g, '').split('\n');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line.includes('using TS fallback implementation')) return 'ts-fallback';
+    if (line.includes('pty-rust mode enabled (PoC); sidecar connected')) return 'sidecar';
+  }
+  return undefined;
+}
 
 function nextProjectName(baseName: string): string {
   if (!stateManager.getProject(baseName)) return baseName;
@@ -317,7 +351,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     clearTmuxHealthTimer();
     process.off('exit', clearTmuxHealthTimer);
 
-    if (effectiveConfig.runtimeMode === 'pty') {
+    if (isPtyRuntimeMode(effectiveConfig.runtimeMode)) {
       console.log(chalk.cyan('\n📺 Opening terminal...\n'));
       const shell = process.env.SHELL || '/bin/bash';
       const { spawnSync } = await import('child_process');

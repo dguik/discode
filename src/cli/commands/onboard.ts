@@ -7,6 +7,8 @@ import { confirmYesNo, isInteractiveShell, prompt } from '../common/interactive.
 import { ensureTelemetryInstallId } from '../../telemetry/index.js';
 import { onboardDiscord } from './onboard-discord.js';
 import { onboardSlack } from './onboard-slack.js';
+import { parseRuntimeModeInput } from '../../runtime/mode.js';
+import type { RuntimeMode } from '../../types/index.js';
 
 type RegisteredAgentAdapter = ReturnType<typeof agentRegistry.getAll>[number];
 

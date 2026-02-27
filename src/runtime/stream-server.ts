@@ -5,12 +5,23 @@ import { homedir } from 'os';
 import type { AgentRuntime } from './interface.js';
 import { incRuntimeMetric } from './vt-diagnostics.js';
 import {
-  parseWindowId,
   clampNumber,
   decodeBase64,
   type RuntimeStreamClientState,
 } from './stream-utilities.js';
 import { flushClientFrame, type FrameRendererOptions } from './stream-frame-renderer.js';
+import { createRuntimeWindowApi, type RuntimeWindowApi } from './window-api.js';
+import { parseRuntimeWindowId } from './window-id.js';
+import { RUNTIME_STREAM_PROTOCOL_VERSION } from './protocol.js';
+
+function parseProtocolVersion(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
 
 type RuntimeStreamServerOptions = {
   tickMs?: number;
@@ -30,6 +41,7 @@ export class RuntimeStreamServer {
   private server?: Server;
   private clients = new Set<RuntimeStreamClientState>();
   private pollTimer?: NodeJS.Timeout;
+  private runtime: AgentRuntime;
   private runtimeApi: RuntimeWindowApi;
   private tickMs: number;
   private frameOptions: FrameRendererOptions;
@@ -39,6 +51,7 @@ export class RuntimeStreamServer {
     private socketPath: string = getDefaultRuntimeSocketPath(),
     options?: RuntimeStreamServerOptions,
   ) {
+    this.runtime = runtime;
     this.runtimeApi = createRuntimeWindowApi(runtime);
     this.tickMs = clampNumber(options?.tickMs, 16, 200, 33);
     this.frameOptions = {
