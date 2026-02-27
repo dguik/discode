@@ -3,6 +3,7 @@ import { agentRegistry } from '../../agents/index.js';
 import { stateManager } from '../../state/index.js';
 import { config, getConfigPath, getConfigValue, saveConfig } from '../../config/index.js';
 import { normalizeDiscordToken } from '../../config/token.js';
+import { parseRuntimeModeInput } from '../../runtime/mode.js';
 import {
   ensureTelemetryInstallId,
   isValidTelemetryEndpoint,
@@ -20,7 +21,7 @@ export async function configCommand(options: {
   slackBotToken?: string;
   slackAppToken?: string;
   platform?: string;
-  runtimeMode?: 'tmux' | 'pty';
+  runtimeMode?: string;
   containerEnabled?: boolean;
   containerSocketPath?: string;
   telemetry?: 'on' | 'off';
@@ -101,8 +102,13 @@ export async function configCommand(options: {
   }
 
   if (options.runtimeMode) {
-    saveConfig({ runtimeMode: options.runtimeMode });
-    console.log(chalk.green(`✅ Runtime mode saved: ${options.runtimeMode}`));
+    const parsed = parseRuntimeModeInput(options.runtimeMode.trim().toLowerCase());
+    if (!parsed) {
+      console.error(chalk.red(`Invalid runtime mode: ${options.runtimeMode}`));
+      process.exit(1);
+    }
+    saveConfig({ runtimeMode: parsed });
+    console.log(chalk.green(`✅ Runtime mode saved: ${parsed}`));
     updated = true;
   }
 
@@ -195,7 +201,7 @@ export async function configCommand(options: {
     console.log(chalk.gray('  discode config --channel 123456789012345678'));
     console.log(chalk.gray('  discode config --default-agent claude'));
     console.log(chalk.gray('  discode config --platform slack'));
-    console.log(chalk.gray('  discode config --runtime-mode pty'));
+    console.log(chalk.gray('  discode config --runtime-mode pty-ts'));
     console.log(chalk.gray('  discode config --slack-bot-token xoxb-...'));
     console.log(chalk.gray('  discode config --slack-app-token xapp-...'));
     console.log(chalk.gray('  discode config --opencode-permission allow'));

@@ -126,6 +126,24 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   const runtimeActiveAtStartup = parseWindowId(runtimeAtStartup?.activeWindowId);
   const currentSession = runtimeActiveAtStartup?.sessionName || tmux.getCurrentSession(process.env.TMUX_PANE);
   const currentWindow = runtimeActiveAtStartup?.windowName || tmux.getCurrentWindow(process.env.TMUX_PANE);
+  const runtimeModeAtLaunch = effectiveConfig.runtimeMode || 'tmux';
+  const daemonLogFile = defaultDaemonManager.getLogFile();
+  let runtimeBackendCache: { mtimeMs: number; status: RuntimeBackendStatus | undefined } | undefined;
+
+  const getRuntimeBackendStatus = async (): Promise<RuntimeBackendStatus | undefined> => {
+    if (runtimeModeAtLaunch !== 'pty-rust') return undefined;
+    if (!existsSync(daemonLogFile)) return undefined;
+
+    const mtimeMs = statSync(daemonLogFile).mtimeMs;
+    if (runtimeBackendCache && runtimeBackendCache.mtimeMs === mtimeMs) {
+      return runtimeBackendCache.status;
+    }
+
+    const tail = readFileTailUtf8(daemonLogFile, 96 * 1024);
+    const status = detectPtyRustBackendStatus(tail);
+    runtimeBackendCache = { mtimeMs, status };
+    return status;
+  };
 
   const sourceCandidates = [
     new URL('./tui.js', import.meta.url),
@@ -160,6 +178,8 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
     await mod.runTui({
       currentSession: currentSession || undefined,
       currentWindow: currentWindow || undefined,
+      runtimeMode: effectiveConfig.runtimeMode || 'tmux',
+      getRuntimeBackendStatus,
       initialCommand: options.initialTuiCommand,
       onCommand: async (command: string, append: (line: string) => void): Promise<boolean> => {
         const result = await handleTuiCommand(command, append, {
@@ -185,7 +205,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
             };
           }
         }
-        if (effectiveConfig.runtimeMode === 'pty') {
+        if (isPtyRuntimeMode(effectiveConfig.runtimeMode || 'tmux')) {
           return runtimeTarget
             ? {
               currentSession: runtimeTarget.sessionName,
@@ -250,6 +270,25 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       },
       getCurrentWindowOutput: async (sessionName: string, windowName: string, width?: number, height?: number) => {
         return session.readWindowOutput(sessionName, windowName, width, height);
+      },
+      getDaemonLogs: async (maxLines?: number) => {
+        const logFile = defaultDaemonManager.getLogFile();
+        if (!existsSync(logFile)) {
+          return [
+            `No daemon log found: ${logFile}`,
+            'Start daemon first: discode daemon start',
+          ];
+        }
+
+        const cap = typeof maxLines === 'number' && Number.isFinite(maxLines)
+          ? Math.max(50, Math.min(2000, Math.floor(maxLines)))
+          : 500;
+        const raw = readFileSync(logFile, 'utf8');
+        const lines = raw
+          .replace(/\r/g, '')
+          .split('\n')
+          .filter((line, index, arr) => !(index === arr.length - 1 && line.length === 0));
+        return lines.slice(-cap);
       },
       onRuntimeKey: async (sessionName: string, windowName: string, raw: string) => {
         await session.sendRawKey(sessionName, windowName, raw);

@@ -10,8 +10,7 @@ import { DiscordClient } from './discord/client.js';
 import { SlackClient } from './slack/client.js';
 import type { MessagingClient } from './messaging/interface.js';
 import type { AgentRuntime } from './runtime/interface.js';
-import { TmuxRuntime } from './runtime/tmux-runtime.js';
-import { PtyRuntime } from './runtime/pty-runtime.js';
+import { createRuntimeForMode } from './runtime/factory.js';
 import { stateManager as defaultStateManager } from './state/index.js';
 import { config as defaultConfig } from './config/index.js';
 import { agentRegistry as defaultAgentRegistry, AgentRegistry } from './agents/index.js';
@@ -95,10 +94,7 @@ export class AgentBridge {
   }
 
   private createRuntime(): AgentRuntime {
-    if (this.bridgeConfig.runtimeMode === 'pty') {
-      return new PtyRuntime();
-    }
-    return TmuxRuntime.create(this.bridgeConfig.tmux.sessionPrefix);
+    return createRuntimeForMode(this.bridgeConfig.runtimeMode, this.bridgeConfig.tmux.sessionPrefix);
   }
 
   private createMessagingClient(): MessagingClient {

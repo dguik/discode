@@ -6,6 +6,7 @@ import { agentRegistry } from '../../agents/index.js';
 import { getConfigValue } from '../../config/index.js';
 import { normalizeDiscordToken } from '../../config/token.js';
 import type { OnboardWizardInitialState, OnboardWizardResult } from '../../../bin/onboard-tui.js';
+import { parseRuntimeModeInput } from '../../runtime/mode.js';
 
 type OnboardWizardCliOptions = {
   platform?: string;
@@ -115,11 +116,10 @@ export async function onboardWizardCommand(options: OnboardWizardCliOptions): Pr
     : configuredPlatform === 'slack' ? 'slack' : 'discord';
 
   const storedRuntimeMode = getConfigValue('runtimeMode');
-  const initialRuntimeMode = options.runtimeMode === 'tmux' || options.runtimeMode === 'pty'
-    ? options.runtimeMode
-    : storedRuntimeMode === 'tmux' || storedRuntimeMode === 'pty'
-      ? storedRuntimeMode
-      : 'pty';
+  const initialRuntimeMode =
+    parseRuntimeModeInput(options.runtimeMode)
+    || parseRuntimeModeInput(storedRuntimeMode)
+    || 'pty-ts';
 
   const installedAgents = agentRegistry
     .getAll()

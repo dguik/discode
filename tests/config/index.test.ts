@@ -152,6 +152,38 @@ describe('ConfigManager', () => {
       expect(config.discord.guildId).toBe('stored-guild-wins');
     });
 
+    it('accepts pty-rust runtime mode from env and stored config', () => {
+      const storage = new MockStorage();
+      const env = new MockEnvironment();
+      env.set('DISCODE_RUNTIME_MODE', 'pty-rust');
+
+      const managerFromEnv = new ConfigManager(storage, env, configDir);
+      expect(managerFromEnv.config.runtimeMode).toBe('pty-rust');
+
+      const storedConfig: StoredConfig = {
+        runtimeMode: 'pty-rust',
+      };
+      storage.setFile(configFile, JSON.stringify(storedConfig));
+      const managerFromStored = new ConfigManager(storage, env, configDir);
+      expect(managerFromStored.config.runtimeMode).toBe('pty-rust');
+    });
+
+    it('normalizes legacy pty runtime mode to pty-ts', () => {
+      const storage = new MockStorage();
+      const env = new MockEnvironment();
+      env.set('DISCODE_RUNTIME_MODE', 'pty');
+
+      const managerFromEnv = new ConfigManager(storage, env, configDir);
+      expect(managerFromEnv.config.runtimeMode).toBe('pty-ts');
+
+      const storedConfig: StoredConfig = {
+        runtimeMode: 'pty',
+      };
+      storage.setFile(configFile, JSON.stringify(storedConfig));
+      const managerFromStored = new ConfigManager(storage, env, configDir);
+      expect(managerFromStored.config.runtimeMode).toBe('pty-ts');
+    });
+
     it('normalizes token from stored config and env', () => {
       const storage = new MockStorage();
       const env = new MockEnvironment();

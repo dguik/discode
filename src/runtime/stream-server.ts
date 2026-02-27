@@ -20,7 +20,7 @@ type RuntimeStreamServerOptions = {
 };
 
 type RuntimeStreamInbound =
-  | { type: 'hello'; clientId?: string; version?: string }
+  | { type: 'hello'; clientId?: string; version?: number | string }
   | { type: 'subscribe'; windowId: string; cols?: number; rows?: number }
   | { type: 'focus'; windowId: string }
   | { type: 'input'; windowId: string; bytesBase64: string }
@@ -30,14 +30,16 @@ export class RuntimeStreamServer {
   private server?: Server;
   private clients = new Set<RuntimeStreamClientState>();
   private pollTimer?: NodeJS.Timeout;
+  private runtimeApi: RuntimeWindowApi;
   private tickMs: number;
   private frameOptions: FrameRendererOptions;
 
   constructor(
-    private runtime: AgentRuntime,
+    runtime: AgentRuntime,
     private socketPath: string = getDefaultRuntimeSocketPath(),
     options?: RuntimeStreamServerOptions,
   ) {
+    this.runtimeApi = createRuntimeWindowApi(runtime);
     this.tickMs = clampNumber(options?.tickMs, 16, 200, 33);
     this.frameOptions = {
       minEmitIntervalMs: clampNumber(options?.minEmitIntervalMs, 16, 250, 50),
@@ -139,9 +141,25 @@ export class RuntimeStreamServer {
     }
 
     switch (message.type) {
-      case 'hello':
-        this.send(client, { type: 'hello', ok: true });
+      case 'hello': {
+        const requestedVersion = parseProtocolVersion(message.version);
+        if (requestedVersion !== undefined && requestedVersion !== RUNTIME_STREAM_PROTOCOL_VERSION) {
+          this.send(client, {
+            type: 'error',
+            code: 'unsupported_protocol_version',
+            message: `Unsupported runtime stream protocol version: ${requestedVersion}`,
+            streamProtocolVersion: RUNTIME_STREAM_PROTOCOL_VERSION,
+          });
+          client.socket.destroy();
+          return;
+        }
+        this.send(client, {
+          type: 'hello',
+          ok: true,
+          streamProtocolVersion: RUNTIME_STREAM_PROTOCOL_VERSION,
+        });
         return;
+      }
       case 'subscribe': {
         if (!message.windowId || typeof message.windowId !== 'string') {
           this.send(client, { type: 'error', code: 'bad_subscribe', message: 'Missing windowId' });
@@ -166,7 +184,7 @@ export class RuntimeStreamServer {
         return;
       }
       case 'input': {
-        const parsed = parseWindowId(message.windowId);
+        const parsed = parseRuntimeWindowId(message.windowId);
         if (!parsed) {
           this.send(client, { type: 'error', code: 'bad_input', message: 'Invalid windowId' });
           return;
@@ -176,7 +194,7 @@ export class RuntimeStreamServer {
           this.send(client, { type: 'error', code: 'bad_input', message: 'Invalid bytesBase64' });
           return;
         }
-        if (!this.runtime.windowExists(parsed.sessionName, parsed.windowName)) {
+        if (!this.runtimeApi.exists(parsed)) {
           this.send(client, {
             type: 'window-exit',
             windowId: message.windowId,
@@ -186,7 +204,7 @@ export class RuntimeStreamServer {
           return;
         }
         try {
-          this.runtime.typeKeysToWindow(parsed.sessionName, parsed.windowName, bytes.toString('utf8'));
+          this.runtimeApi.input(parsed, bytes.toString('utf8'));
         } catch (error) {
           this.send(client, {
             type: 'window-exit',
@@ -205,10 +223,10 @@ export class RuntimeStreamServer {
         client.windowId = message.windowId;
         client.cols = clampNumber(message.cols, 30, 240, client.cols);
         client.rows = clampNumber(message.rows, 10, 120, client.rows);
-        const parsed = parseWindowId(message.windowId);
+        const parsed = parseRuntimeWindowId(message.windowId);
         if (parsed) {
           try {
-            this.runtime.resizeWindow?.(parsed.sessionName, parsed.windowName, client.cols, client.rows);
+            this.runtimeApi.resize(parsed, client.cols, client.rows);
           } catch {
             // best effort; client-side view still updates with requested size
           }
@@ -244,7 +262,13 @@ export class RuntimeStreamServer {
 
   private send(client: RuntimeStreamClientState, payload: unknown): void {
     try {
-      client.socket.write(`${JSON.stringify(payload)}\n`);
+      const withVersion = payload && typeof payload === 'object'
+        ? {
+          ...(payload as Record<string, unknown>),
+          streamProtocolVersion: RUNTIME_STREAM_PROTOCOL_VERSION,
+        }
+        : payload;
+      client.socket.write(`${JSON.stringify(withVersion)}\n`);
     } catch {
       this.clients.delete(client);
     }

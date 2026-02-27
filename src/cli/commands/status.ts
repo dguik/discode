@@ -7,6 +7,7 @@ import { agentRegistry } from '../../agents/index.js';
 import type { TmuxCliOptions } from '../common/types.js';
 import { applyTmuxCliOverrides, resolveProjectWindowName } from '../common/tmux.js';
 import { listRuntimeWindows } from '../common/runtime-api.js';
+import { isPtyRuntimeMode } from '../../runtime/mode.js';
 
 export async function statusCommand(options: TmuxCliOptions) {
   const effectiveConfig = applyTmuxCliOverrides(config, options);
@@ -14,7 +15,7 @@ export async function statusCommand(options: TmuxCliOptions) {
   const projects = stateManager.listProjects();
   const tmux = new TmuxManager(effectiveConfig.tmux.sessionPrefix);
   const sessions = tmux.listSessions();
-  const runtimeWindows = runtimeMode === 'pty'
+  const runtimeWindows = isPtyRuntimeMode(runtimeMode)
     ? await listRuntimeWindows(effectiveConfig.hookServerPort || 18470)
     : null;
   const runtimeSet = new Set((runtimeWindows?.windows || []).map((window) => `${window.sessionName}:${window.windowName}`));

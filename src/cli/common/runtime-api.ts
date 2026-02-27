@@ -10,6 +10,7 @@ export type RuntimeWindowInfo = {
 };
 
 export type RuntimeWindowsResponse = {
+  protocolVersion?: number;
   activeWindowId?: string;
   windows: RuntimeWindowInfo[];
 };

@@ -1,15 +1,15 @@
-# PTY Query Responses (discode `pty` runtime)
+# PTY Query Responses (discode `pty-ts` runtime)
 
 ## 목적
 
 `src/runtime/pty-runtime.ts`의 `buildTerminalResponse()`가 어떤 터미널 질의(escape query)에
 어떻게 응답하는지 명시한다.
 
-이 문서는 `pty` 모드에서의 호환 범위를 고정하기 위한 운영 문서다.
+이 문서는 `pty-ts` 모드에서의 호환 범위를 고정하기 위한 운영 문서다.
 
 ## 범위
 
-- 대상: `runtimeMode = "pty"`
+- 대상: `runtimeMode = "pty-ts"` (`"pty"` legacy alias 포함)
 - 비대상: `runtimeMode = "tmux"` (tmux/terminal native behavior 사용)
 
 ## 지원 질의와 응답
@@ -93,4 +93,3 @@
   - DSR 응답
   - private mode 응답
   - OSC color query 응답
-

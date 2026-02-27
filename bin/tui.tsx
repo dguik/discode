@@ -43,6 +43,12 @@ const ENABLE_RUNTIME_CURSOR_OVERLAY = process.env.DISCODE_TUI_RUNTIME_CURSOR !==
 type TuiInput = {
   currentSession?: string;
   currentWindow?: string;
+  runtimeMode?: 'tmux' | 'pty-ts' | 'pty-rust';
+  getRuntimeBackendStatus?: () =>
+    | 'sidecar'
+    | 'ts-fallback'
+    | undefined
+    | Promise<'sidecar' | 'ts-fallback' | undefined>;
   initialCommand?: string;
   onCommand: (command: string, append: (line: string) => void) => Promise<boolean | void>;
   onStopProject: (project: string) => Promise<void>;
@@ -72,6 +78,7 @@ type TuiInput = {
       lastError?: string;
     }>;
   getCurrentWindowOutput?: (sessionName: string, windowName: string, width?: number, height?: number) => Promise<string | undefined>;
+  getDaemonLogs?: (maxLines?: number) => Promise<string[]>;
   getProjects: () =>
     | Array<{
       project: string;
@@ -228,12 +235,17 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [configOpen, setConfigOpen] = createSignal(false);
   const [configSelected, setConfigSelected] = createSignal(0);
   const [configKeepChannel, setConfigKeepChannel] = createSignal<'on' | 'off'>('off');
-  const [configRuntimeMode, setConfigRuntimeMode] = createSignal<'tmux' | 'pty'>('tmux');
+  const [configRuntimeMode, setConfigRuntimeMode] = createSignal<'tmux' | 'pty-ts' | 'pty-rust'>('tmux');
   const [configDefaultAgent, setConfigDefaultAgent] = createSignal('(auto)');
   const [configDefaultChannel, setConfigDefaultChannel] = createSignal('(auto)');
   const [configAgentOptions, setConfigAgentOptions] = createSignal<string[]>([]);
   const [configMessage, setConfigMessage] = createSignal('Select an option');
   const [configLoading, setConfigLoading] = createSignal(false);
+  const [logsOpen, setLogsOpen] = createSignal(false);
+  const [logsLoading, setLogsLoading] = createSignal(false);
+  const [logsLines, setLogsLines] = createSignal<string[]>([]);
+  const [logsScroll, setLogsScroll] = createSignal(0);
+  const [logsStatus, setLogsStatus] = createSignal('logs: unavailable');
   const [stopOpen, setStopOpen] = createSignal(false);
   const [stopSelected, setStopSelected] = createSignal(0);
   const [currentSession, setCurrentSession] = createSignal(props.input.currentSession);
@@ -245,6 +257,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [cursorBlinkOn, setCursorBlinkOn] = createSignal(true);
   const [prefixPending, setPrefixPending] = createSignal(false);
   const [runtimeInputMode, setRuntimeInputMode] = createSignal(true);
+  const [runtimeBackendStatus, setRuntimeBackendStatus] = createSignal<'sidecar' | 'ts-fallback' | undefined>(undefined);
   const [runtimeStatusLine, setRuntimeStatusLine] = createSignal('transport: stream');
   const [commandStatusLine, setCommandStatusLine] = createSignal('status: ready');
   const [clipboardToast, setClipboardToast] = createSignal<string | undefined>(undefined);
@@ -260,6 +273,16 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   let textarea: TextareaRenderable;
   let paletteInput: InputRenderable;
   let clipboardToastTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const runtimeModeLabel = createMemo(() => {
+    const mode = props.input.runtimeMode || 'tmux';
+    const backend = runtimeBackendStatus();
+    if (mode !== 'pty-rust') return mode;
+    if (backend === 'sidecar') return 'pty-rust (sidecar)';
+    if (backend === 'ts-fallback') return 'pty-rust (ts fallback)';
+    return 'pty-rust';
+  });
+  const logsBodyHeight = createMemo(() => Math.max(8, Math.min(Math.floor(dims().height * 0.55), dims().height - 12)));
 
   const openProjects = createMemo(() => projects().filter((item) => item.open));
   const sidebarWidth = createMemo(() => Math.max(34, Math.min(52, Math.floor(dims().width * 0.33))));
@@ -304,9 +327,25 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
 
   const shouldShowRuntimeCursor = createMemo(() => {
     if (!ENABLE_RUNTIME_CURSOR_OVERLAY) return false;
-    const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen();
+    const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen() || logsOpen();
     const runtimeActive = runtimeInputMode() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
     return runtimeActive && !dialogOpen && cursorBlinkOn() && windowCursorVisible();
+  });
+
+  const logsMaxScroll = createMemo(() => Math.max(0, logsLines().length - logsBodyHeight()));
+  const logsRangeLabel = createMemo(() => {
+    const lines = logsLines();
+    if (lines.length === 0) return '0/0';
+    const start = Math.min(logsScroll(), logsMaxScroll());
+    const from = start + 1;
+    const to = Math.min(start + logsBodyHeight(), lines.length);
+    return `${from}-${to}/${lines.length}`;
+  });
+  const visibleLogLines = createMemo(() => {
+    const lines = logsLines();
+    if (lines.length === 0) return ['(no logs)'];
+    const start = Math.min(logsScroll(), logsMaxScroll());
+    return lines.slice(start, start + logsBodyHeight());
   });
 
   const renderedStyledLines = createMemo(() => {
@@ -497,7 +536,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       }
 
       const runtimeMode = parseValueLine(summaryLines, 'runtimeMode');
-      if (runtimeMode === 'tmux' || runtimeMode === 'pty') {
+      if (runtimeMode === 'tmux' || runtimeMode === 'pty-ts' || runtimeMode === 'pty-rust') {
         setConfigRuntimeMode(runtimeMode);
       }
 
@@ -522,6 +561,47 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const closeConfigDialog = () => {
     setConfigOpen(false);
     setConfigSelected(0);
+  };
+
+  const closeLogsDialog = () => {
+    setLogsOpen(false);
+  };
+
+  const clampLogsScroll = (delta: number) => {
+    const max = logsMaxScroll();
+    setLogsScroll((current) => Math.max(0, Math.min(max, current + delta)));
+  };
+
+  const refreshLogsDialog = async () => {
+    if (!props.input.getDaemonLogs) {
+      setLogsLines(['Daemon logs are unavailable in this build.']);
+      setLogsStatus('logs: unavailable');
+      setLogsScroll(0);
+      return;
+    }
+
+    setLogsLoading(true);
+    setLogsStatus('logs: loading...');
+    try {
+      const next = await props.input.getDaemonLogs(900);
+      const lines = next.length > 0 ? next : ['(daemon log is empty)'];
+      setLogsLines(lines);
+      setLogsScroll(Math.max(0, lines.length - logsBodyHeight()));
+      setLogsStatus(`logs: loaded ${lines.length} line(s)`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLogsLines([`Failed to read daemon log: ${message}`]);
+      setLogsScroll(0);
+      setLogsStatus('logs: read failed');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const openLogsDialog = () => {
+    setLogsOpen(true);
+    textarea?.blur();
+    void refreshLogsDialog();
   };
 
   const openConfigDialog = () => {
@@ -555,8 +635,12 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       label: `runtimeMode -> tmux${configRuntimeMode() === 'tmux' ? ' (current)' : ''}`,
     });
     items.push({
-      command: '/config runtimeMode pty',
-      label: `runtimeMode -> pty${configRuntimeMode() === 'pty' ? ' (current)' : ''}`,
+      command: '/config runtimeMode pty-ts',
+      label: `runtimeMode -> pty-ts${configRuntimeMode() === 'pty-ts' ? ' (current)' : ''}`,
+    });
+    items.push({
+      command: '/config runtimeMode pty-rust',
+      label: `runtimeMode -> pty-rust${configRuntimeMode() === 'pty-rust' ? ' (current)' : ''}`,
     });
 
     const agentSet = new Set<string>(['auto', ...configAgentOptions()]);
@@ -771,14 +855,21 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   };
 
   const canHandleRuntimeInput = () => {
-    return runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
+    return runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && !logsOpen() && !!currentSession() && !!currentWindow() && !value().startsWith('/');
   };
+
+  createEffect(() => {
+    const max = logsMaxScroll();
+    if (logsScroll() > max) {
+      setLogsScroll(max);
+    }
+  });
 
   createEffect(() => {
     if (!composerReady()) return;
     if (!textarea || textarea.isDestroyed) return;
 
-    const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen();
+    const dialogOpen = paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen() || logsOpen();
     if (dialogOpen) {
       textarea.blur();
       return;
@@ -870,7 +961,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
 
       const prefixedNumberIndex = resolvePrefixedNumberIndex(evt);
       if (prefixedNumberIndex !== null) {
-        if (!paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen()) {
+        if (!paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && !logsOpen()) {
           void quickSwitchToIndex(prefixedNumberIndex);
         }
         return;
@@ -895,6 +986,10 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
         }
         if (configOpen()) {
           clampConfigSelection(-1);
+          return;
+        }
+        if (logsOpen()) {
+          clampLogsScroll(-1);
           return;
         }
         openCommandPalette();
@@ -922,6 +1017,24 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           clampConfigSelection(1);
           return;
         }
+        if (logsOpen()) {
+          clampLogsScroll(1);
+          return;
+        }
+      }
+
+      if (evt.name === 'l') {
+        if (logsOpen()) {
+          closeLogsDialog();
+          return;
+        }
+        if (paletteOpen()) closeCommandPalette();
+        if (stopOpen()) closeStopDialog();
+        if (newOpen()) closeNewDialog();
+        if (listOpen()) closeListDialog();
+        if (configOpen()) closeConfigDialog();
+        openLogsDialog();
+        return;
       }
 
       if (evt.name === PREFIX_KEY_NAME && canHandleRuntimeInput()) {
@@ -936,12 +1049,14 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       return;
     }
 
-    if (evt.ctrl && evt.name === 'p' && (evt.shift || evt.sequence === 'P')) {
+    // Many terminals encode Ctrl+Shift+P as Ctrl+P (0x10), so accept Ctrl+P as a palette shortcut.
+    if (evt.ctrl && evt.name === 'p') {
       evt.preventDefault();
       if (stopOpen()) closeStopDialog();
       if (newOpen()) closeNewDialog();
       if (listOpen()) closeListDialog();
       if (configOpen()) closeConfigDialog();
+      if (logsOpen()) closeLogsDialog();
       if (!paletteOpen()) {
         openCommandPalette();
       }
@@ -1093,7 +1208,50 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       }
     }
 
-    if (!runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && evt.name === 'escape') {
+    if (logsOpen()) {
+      if (evt.name === 'escape') {
+        evt.preventDefault();
+        closeLogsDialog();
+        return;
+      }
+      if (evt.name === 'up') {
+        evt.preventDefault();
+        clampLogsScroll(-1);
+        return;
+      }
+      if (evt.name === 'down') {
+        evt.preventDefault();
+        clampLogsScroll(1);
+        return;
+      }
+      if (evt.name === 'pageup') {
+        evt.preventDefault();
+        clampLogsScroll(-Math.max(6, logsBodyHeight() - 2));
+        return;
+      }
+      if (evt.name === 'pagedown') {
+        evt.preventDefault();
+        clampLogsScroll(Math.max(6, logsBodyHeight() - 2));
+        return;
+      }
+      if (evt.name === 'home') {
+        evt.preventDefault();
+        setLogsScroll(0);
+        return;
+      }
+      if (evt.name === 'end') {
+        evt.preventDefault();
+        setLogsScroll(logsMaxScroll());
+        return;
+      }
+      if (evt.name === 'r') {
+        evt.preventDefault();
+        void refreshLogsDialog();
+        return;
+      }
+    }
+
+    if (!runtimeInputMode() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && !logsOpen() && evt.name === 'escape') {
       evt.preventDefault();
       textarea?.setText('');
       setValue('');
@@ -1148,6 +1306,17 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
             setWindowStyledLines(undefined);
             setWindowCursor(undefined);
             setWindowCursorVisible(true);
+          }
+        }
+
+        if (props.input.getRuntimeBackendStatus) {
+          try {
+            const backend = await props.input.getRuntimeBackendStatus();
+            if (!stopped) {
+              setRuntimeBackendStatus(backend);
+            }
+          } catch {
+            // best effort
           }
         }
       } catch (error) {
@@ -1336,9 +1505,11 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           <text fg={palette.muted}>{runtimeStatusLine()}</text>
           <text fg={palette.muted}>{commandStatusLine()}</text>
           <text fg={prefixPending() ? palette.primary : palette.muted}>{`prefix: ${PREFIX_LABEL}${prefixPending() ? ' (waiting key)' : ''}`}</text>
-          <text fg={palette.muted}>runtime: slash/ctrl pass to AI</text>
+          <text fg={palette.muted}>{`runtime: ${runtimeModeLabel()}`}</text>
+          <text fg={palette.muted}>input: slash/ctrl pass to AI</text>
           <text fg={palette.muted}>window: prefix + 1..9</text>
-          <text fg={palette.muted}>palette: Ctrl+Shift+P</text>
+          <text fg={palette.muted}>logs: prefix + l</text>
+          <text fg={palette.muted}>palette: Ctrl+P (Ctrl+Shift+P)</text>
           <text fg={palette.muted}>commands: / + Enter</text>
 
           <box flexDirection="column" marginTop={1}>
@@ -1397,7 +1568,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
             marginTop={1}
             marginBottom={1}
             border
-            borderColor={!canHandleRuntimeInput() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() ? palette.focus : palette.border}
+            borderColor={!canHandleRuntimeInput() && !paletteOpen() && !stopOpen() && !newOpen() && !listOpen() && !configOpen() && !logsOpen() ? palette.focus : palette.border}
             backgroundColor={palette.panel}
             flexDirection="column"
           >
@@ -1424,7 +1595,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
                   setSelected(0);
                 }}
                 onKeyDown={(event) => {
-                  if (paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen()) {
+                  if (paletteOpen() || stopOpen() || newOpen() || listOpen() || configOpen() || logsOpen()) {
                     event.preventDefault();
                     return;
                   }
@@ -1670,6 +1841,49 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
             </box>
             <box paddingLeft={4} paddingRight={2}>
               <text fg={palette.muted}>{configMessage()}</text>
+            </box>
+          </box>
+        </box>
+      </Show>
+
+      <Show when={logsOpen()}>
+        <box
+          width={dims().width}
+          height={dims().height}
+          backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+          position="absolute"
+          left={0}
+          top={0}
+          alignItems="center"
+          paddingTop={Math.floor(dims().height / 8)}
+        >
+          <box
+            width={Math.max(70, Math.min(120, dims().width - 2))}
+            backgroundColor={palette.panel}
+            flexDirection="column"
+            paddingTop={1}
+            paddingBottom={1}
+          >
+            <box paddingLeft={4} paddingRight={4} flexDirection="row" justifyContent="space-between">
+              <text fg={palette.primary} attributes={TextAttributes.BOLD}>Daemon logs</text>
+              <text fg={palette.muted}>esc</text>
+            </box>
+            <box paddingLeft={4} paddingRight={4} paddingTop={1} flexDirection="row" justifyContent="space-between">
+              <text fg={palette.muted}>{logsStatus()}</text>
+              <text fg={palette.muted}>{logsRangeLabel()}</text>
+            </box>
+            <Show when={!logsLoading()} fallback={<box paddingLeft={4} paddingRight={4} paddingTop={1}><text fg={palette.muted}>Loading...</text></box>}>
+              <box paddingLeft={4} paddingRight={4} paddingTop={1} flexDirection="column">
+                <For each={visibleLogLines()}>
+                  {(line) => <text fg={palette.text}>{line.length > 0 ? line : ' '}</text>}
+                </For>
+              </box>
+            </Show>
+            <box paddingLeft={4} paddingRight={2} paddingTop={1}>
+              <text fg={palette.text}>Scroll </text>
+              <text fg={palette.muted}>up/down pgup/pgdn</text>
+              <text fg={palette.text}>  Refresh </text>
+              <text fg={palette.muted}>r</text>
             </box>
           </box>
         </box>

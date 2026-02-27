@@ -18,6 +18,7 @@ import { stopRuntimeWindow } from '../common/runtime-api.js';
 import { stopContainer, removeContainer } from '../../container/index.js';
 import { ContainerSync } from '../../container/sync.js';
 import type { ProjectInstanceState } from '../../types/index.js';
+import { isPtyRuntimeMode } from '../../runtime/mode.js';
 
 /**
  * Clean up a container-mode instance: final sync, stop, remove.
@@ -65,7 +66,7 @@ export async function stopCommand(
   const runtimePort = effectiveConfig.hookServerPort || 18470;
   const effectiveKeepChannel = options.keepChannel ?? getConfigValue('keepChannelOnStop') ?? false;
 
-  if (runtimeMode === 'pty') {
+  if (isPtyRuntimeMode(runtimeMode)) {
     if (project && requestedInstanceId) {
       const instance = getProjectInstance(project, requestedInstanceId);
       if (!instance) {

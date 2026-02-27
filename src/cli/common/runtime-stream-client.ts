@@ -2,9 +2,11 @@ import { createConnection, type Socket } from 'net';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { TerminalStyledLine } from '../../runtime/vt-screen.js';
+import { RUNTIME_STREAM_PROTOCOL_VERSION } from '../../runtime/protocol.js';
 
 type FrameMessage = {
   type: 'frame';
+  streamProtocolVersion?: number;
   windowId: string;
   seq: number;
   lines: string[];
@@ -12,6 +14,7 @@ type FrameMessage = {
 
 type PatchMessage = {
   type: 'patch';
+  streamProtocolVersion?: number;
   windowId: string;
   seq: number;
   lineCount: number;
@@ -20,6 +23,7 @@ type PatchMessage = {
 
 type FrameStyledMessage = {
   type: 'frame-styled';
+  streamProtocolVersion?: number;
   windowId: string;
   seq: number;
   lines: TerminalStyledLine[];
@@ -30,6 +34,7 @@ type FrameStyledMessage = {
 
 type PatchStyledMessage = {
   type: 'patch-styled';
+  streamProtocolVersion?: number;
   windowId: string;
   seq: number;
   lineCount: number;
@@ -41,6 +46,7 @@ type PatchStyledMessage = {
 
 type WindowExitMessage = {
   type: 'window-exit';
+  streamProtocolVersion?: number;
   windowId: string;
   code?: number | null;
   signal?: string | null;
@@ -52,10 +58,10 @@ type RuntimeStreamMessage =
   | FrameStyledMessage
   | PatchStyledMessage
   | WindowExitMessage
-  | { type: 'hello'; ok: boolean }
+  | { type: 'hello'; ok: boolean; streamProtocolVersion?: number }
   | { type: 'focus'; ok: boolean; windowId: string }
   | { type: 'input'; ok: boolean; windowId: string }
-  | { type: 'error'; code: string; message: string };
+  | { type: 'error'; code: string; message: string; streamProtocolVersion?: number };
 
 type RuntimeStreamClientHandlers = {
   onFrame?: (frame: FrameMessage) => void;
@@ -71,6 +77,7 @@ export class RuntimeStreamClient {
   private socket?: Socket;
   private readBuffer = '';
   private connected = false;
+  private streamProtocolVersion?: number;
 
   constructor(
     private socketPath: string,
@@ -96,8 +103,9 @@ export class RuntimeStreamClient {
       const socket = createConnection(this.socketPath, () => {
         this.socket = socket;
         this.connected = true;
+        this.streamProtocolVersion = undefined;
         this.handlers.onStateChange?.('connected');
-        this.send({ type: 'hello', version: 1 });
+        this.send({ type: 'hello', version: RUNTIME_STREAM_PROTOCOL_VERSION });
         finish(true);
       });
 
@@ -149,6 +157,10 @@ export class RuntimeStreamClient {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  getStreamProtocolVersion(): number | undefined {
+    return this.streamProtocolVersion;
   }
 
   subscribe(windowId: string, cols: number, rows: number): void {
@@ -207,6 +219,12 @@ export class RuntimeStreamClient {
     }
     if (msg.type === 'window-exit') {
       this.handlers.onWindowExit?.(msg);
+      return;
+    }
+    if (msg.type === 'hello') {
+      if (Number.isFinite(msg.streamProtocolVersion)) {
+        this.streamProtocolVersion = Math.floor(msg.streamProtocolVersion!);
+      }
       return;
     }
     if (msg.type === 'error') {

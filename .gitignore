@@ -17,3 +17,6 @@ opencode-ref/
 
 dmux/
 zellij/
+
+sidecar/pty-rust/target/
+sidecar/pty-rust/Cargo.lock

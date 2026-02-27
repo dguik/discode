@@ -46,6 +46,9 @@ describe('RuntimeStreamClient', () => {
         const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
         for (const line of lines) {
           const msg = JSON.parse(line) as { type?: string };
+          if (msg.type === 'hello') {
+            socket.write(`${JSON.stringify({ type: 'hello', ok: true, streamProtocolVersion: 1 })}\n`);
+          }
           if (msg.type === 'subscribe') {
             socket.write(`${JSON.stringify({
               type: 'frame',
@@ -71,6 +74,8 @@ describe('RuntimeStreamClient', () => {
 
     const connected = await client.connect();
     expect(connected).toBe(true);
+    await waitFor(() => client.getStreamProtocolVersion() === 1);
+    expect(client.getStreamProtocolVersion()).toBe(1);
 
     client.subscribe('bridge:demo-opencode', 120, 40);
     await waitFor(() => frames.length > 0);

@@ -57,7 +57,7 @@
 
 ## 4. 실행 전략
 
-## 4.1 Phase 1: TS 런타임 하드닝 (즉시 착수)
+## 4.1 Phase 1: TS 런타임 하드닝 (즉시 착수) [IN PROGRESS]
 
 목표: 현재 구조를 유지하면서 가장 큰 오류를 빠르게 줄인다.
 
@@ -93,7 +93,7 @@
 
 ---
 
-## 4.2 Phase 2: 테스트 체계 강화 (Phase 1과 병행)
+## 4.2 Phase 2: 테스트 체계 강화 (Phase 1과 병행) [IN PROGRESS]
 
 목표: “고친 뒤 다시 깨짐”을 막는다.
 
@@ -121,7 +121,7 @@
 
 ---
 
-## 4.3 Phase 3: 아키텍처 경계 정리 (Hybrid 준비)
+## 4.3 Phase 3: 아키텍처 경계 정리 (Hybrid 준비) [IN PROGRESS]
 
 목표: TS 구현 한계에 대비해 Rust sidecar로 이동 가능한 인터페이스를 만든다.
 
@@ -145,9 +145,17 @@
 - 어댑터 레이어
 - feature flag + fallback 경로
 
+진행 메모 (2026-02):
+
+- `runtimeMode`를 `tmux | pty-ts | pty-rust`로 정리하고 legacy `pty`는 `pty-ts`로 정규화
+- 윈도우 식별자 규약을 `src/runtime/window-id.ts`로 통합
+- Runtime window adapter(`src/runtime/window-api.ts`) 도입
+- control/stream plane에서 adapter + 공통 window-id 사용
+- Runtime window API 문서 추가 (`docs/RUNTIME_WINDOW_API.md`)
+
 ---
 
-## 4.4 Phase 4: Rust sidecar PoC (선택적, 기준 충족 시)
+## 4.4 Phase 4: Rust sidecar PoC (선택적, 기준 충족 시) [IN PROGRESS]
 
 진입 조건 (아래 중 2개 이상):
 
@@ -167,27 +175,35 @@ PoC 범위:
 - CPU 사용량 개선 또는 동급
 - 사용자 체감 오류 감소
 
+진행 메모 (2026-02):
+
+- Rust sidecar crate 초안 추가 (`sidecar/pty-rust`)
+- UDS request/response RPC 경로 도입 (`server`/`request`)
+- `pty-rust` 런타임에서 sidecar 우선 사용 + 자동 TS fallback 연결
+- PoC 문서 추가 (`docs/PTY_RUST_SIDECAR_POC.md`)
+- sidecar `get_window_frame`를 ANSI strip 기반에서 VT-lite renderer 기반으로 확장 (cursor/style/clear/alt-screen 기본 지원)
+
 ---
 
 ## 5. 구체 작업 백로그
 
 P0:
 
-1. `vt-screen`의 alt-screen + scroll region 경계 버그 보강
-2. `buildTerminalResponse` 응답 범위 문서화/정리
-3. stream frame/patch 경계 안정화
-4. VT fixture 테스트 최소 20개 확보
+1. [x] `vt-screen`의 alt-screen + scroll region 경계 버그 보강
+2. [x] `buildTerminalResponse` 응답 범위 문서화/정리
+3. [x] stream frame/patch 경계 안정화
+4. [x] VT fixture 테스트 최소 20개 확보 (`tests/runtime/vt-fixture.test.ts`, 28 fixtures)
 
 P1:
 
-1. wide-char/combining-char 처리 고도화
-2. cursor style/state query 대응 확장
-3. CLI별(Claude/OpenCode/Codex) 회귀 테스트 세트 구축
+1. [x] wide-char/combining-char 처리 고도화
+2. [x] cursor style/state query 대응 확장
+3. [x] CLI별(Claude/OpenCode/Codex) 회귀 테스트 세트 구축 (`tests/runtime/cli-runtime-regression.test.ts`)
 
 P2:
 
-1. runtime 프로토콜 버전 도입
-2. Rust sidecar PoC 착수
+1. [x] runtime 프로토콜 버전 도입 (stream hello handshake + control JSON `protocolVersion`)
+2. [x] Rust sidecar PoC 착수 (feature flag `runtimeMode=pty-rust` + TS fallback skeleton)
 
 ---
 

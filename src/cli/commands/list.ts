@@ -6,12 +6,15 @@ import { listProjectInstances } from '../../state/instances.js';
 import { agentRegistry } from '../../agents/index.js';
 import { resolveProjectWindowName } from '../common/tmux.js';
 import { listRuntimeWindows } from '../common/runtime-api.js';
+import { isPtyRuntimeMode } from '../../runtime/mode.js';
 
 export async function listCommand(options?: { prune?: boolean }) {
   const projects = stateManager.listProjects();
   const tmux = new TmuxManager(config.tmux.sessionPrefix);
   const runtimeMode = config.runtimeMode || 'tmux';
-  const runtimeWindows = runtimeMode === 'pty' ? await listRuntimeWindows(config.hookServerPort || 18470) : null;
+  const runtimeWindows = isPtyRuntimeMode(runtimeMode)
+    ? await listRuntimeWindows(config.hookServerPort || 18470)
+    : null;
   const runtimeSet = new Set((runtimeWindows?.windows || []).map((window) => `${window.sessionName}:${window.windowName}`));
   const prune = !!options?.prune;
 

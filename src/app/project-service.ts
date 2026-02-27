@@ -10,6 +10,7 @@ import { resolveProjectWindowName } from '../policy/window-naming.js';
 import type { AgentRuntime } from '../runtime/interface.js';
 import { TmuxRuntime } from '../runtime/tmux-runtime.js';
 import { containerExists, buildDockerStartCommand } from '../container/index.js';
+import { isPtyRuntimeMode } from '../runtime/mode.js';
 
 export async function setupProjectInstance(params: {
   config: BridgeConfig;
@@ -38,7 +39,7 @@ export async function setupProjectInstance(params: {
       params.port,
       {
         instanceId: params.instanceId,
-        skipRuntimeStart: (params.config.runtimeMode || 'tmux') === 'pty',
+        skipRuntimeStart: isPtyRuntimeMode(params.config.runtimeMode || 'tmux'),
       },
     );
 
@@ -63,7 +64,7 @@ export async function setupProjectInstance(params: {
       // daemon will pick up on next restart
     }
 
-    if ((params.config.runtimeMode || 'tmux') === 'pty') {
+    if (isPtyRuntimeMode(params.config.runtimeMode || 'tmux')) {
       try {
         const ensureOnce = async () => {
           return await new Promise<number>((resolveDone) => {
