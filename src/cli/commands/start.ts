@@ -11,13 +11,14 @@ import {
   ensureTmuxInstalled,
   resolveProjectWindowName,
 } from '../common/tmux.js';
+import { isPtyRuntimeMode } from '../../runtime/mode.js';
 
 export async function startCommand(options: TmuxCliOptions & { project?: string; attach?: boolean }) {
   try {
     validateConfig();
     const effectiveConfig = applyTmuxCliOverrides(config, options);
     const runtimeMode = effectiveConfig.runtimeMode || 'tmux';
-    if (runtimeMode === 'tmux') {
+    if (!isPtyRuntimeMode(runtimeMode)) {
       ensureTmuxInstalled();
     }
 
@@ -77,7 +78,7 @@ export async function startCommand(options: TmuxCliOptions & { project?: string;
       const attachTarget = windowName ? `${sessionName}:${windowName}` : sessionName;
 
       await bridge.start();
-      if (runtimeMode === 'tmux') {
+      if (!isPtyRuntimeMode(runtimeMode)) {
         console.log(chalk.cyan(`\n📺 Attaching to ${attachTarget}...\n`));
         attachToTmux(sessionName, windowName);
       } else {

@@ -4,11 +4,12 @@
 
 import { config as loadEnv } from 'dotenv';
 import { join } from 'path';
-import type { BridgeConfig, MessagingPlatform } from '../types/index.js';
+import type { BridgeConfig, MessagingPlatform, RuntimeMode } from '../types/index.js';
 import type { IStorage, IEnvironment } from '../types/interfaces.js';
 import { FileStorage } from '../infra/storage.js';
 import { SystemEnvironment } from '../infra/environment.js';
 import { normalizeDiscordToken } from './token.js';
+import { normalizeRuntimeMode } from '../runtime/mode.js';
 
 export interface StoredConfig {
   token?: string;
@@ -21,7 +22,7 @@ export interface StoredConfig {
   slackBotToken?: string;
   slackAppToken?: string;
   messagingPlatform?: 'discord' | 'slack';
-  runtimeMode?: 'tmux' | 'pty';
+  runtimeMode?: RuntimeMode;
   containerEnabled?: boolean;
   containerSocketPath?: string;
   containerSyncIntervalMs?: number;
@@ -71,7 +72,7 @@ export class ConfigManager {
       const slackBotToken = storedConfig.slackBotToken || this.env.get('SLACK_BOT_TOKEN');
       const slackAppToken = storedConfig.slackAppToken || this.env.get('SLACK_APP_TOKEN');
       const runtimeModeRaw = storedConfig.runtimeMode || this.env.get('DISCODE_RUNTIME_MODE');
-      const runtimeMode = runtimeModeRaw === 'pty' ? 'pty' : 'tmux';
+      const runtimeMode = normalizeRuntimeMode(runtimeModeRaw);
 
       const containerEnabled = storedConfig.containerEnabled === true || this.env.get('DISCODE_CONTAINER') === '1';
       const containerSocketPath = storedConfig.containerSocketPath || this.env.get('DISCODE_CONTAINER_SOCKET_PATH');

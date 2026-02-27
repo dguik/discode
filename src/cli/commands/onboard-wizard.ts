@@ -89,9 +89,9 @@ export async function onboardWizardCommand(options: OnboardWizardCliOptions): Pr
     : configuredPlatform === 'slack' ? 'slack' : 'discord';
 
   const storedRuntimeMode = getConfigValue('runtimeMode');
-  const initialRuntimeMode = options.runtimeMode === 'tmux' || options.runtimeMode === 'pty'
+  const initialRuntimeMode = options.runtimeMode === 'tmux' || options.runtimeMode === 'pty' || options.runtimeMode === 'pty-rust'
     ? options.runtimeMode
-    : storedRuntimeMode === 'tmux' || storedRuntimeMode === 'pty'
+    : storedRuntimeMode === 'tmux' || storedRuntimeMode === 'pty' || storedRuntimeMode === 'pty-rust'
       ? storedRuntimeMode
       : 'pty';
 

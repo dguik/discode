@@ -31,6 +31,7 @@ export interface SlackConfig {
 }
 
 export type MessagingPlatform = 'discord' | 'slack';
+export type RuntimeMode = 'tmux' | 'pty' | 'pty-rust';
 
 export interface BridgeConfig {
   discord: DiscordConfig;
@@ -38,7 +39,7 @@ export interface BridgeConfig {
   /** Which messaging platform to use. Defaults to 'discord'. */
   messagingPlatform?: MessagingPlatform;
   /** Runtime backend for agent window/process management. */
-  runtimeMode?: 'tmux' | 'pty';
+  runtimeMode?: RuntimeMode;
   tmux: {
     sessionPrefix: string;
     /**

@@ -2,10 +2,11 @@ import chalk from 'chalk';
 import { ensureDaemonRunning, getDaemonStatus, stopDaemon } from '../../app/daemon-service.js';
 import { config } from '../../config/index.js';
 import { ensureTmuxInstalled } from '../common/tmux.js';
+import { isPtyRuntimeMode } from '../../runtime/mode.js';
 
 export async function daemonCommand(action: string) {
   const runtimeMode = config.runtimeMode || 'tmux';
-  const requiresTmux = runtimeMode === 'tmux';
+  const requiresTmux = !isPtyRuntimeMode(runtimeMode);
 
   switch (action) {
     case 'start': {

@@ -3,6 +3,7 @@ import { agentRegistry } from '../../agents/index.js';
 import { stateManager } from '../../state/index.js';
 import { config, getConfigPath, getConfigValue, saveConfig } from '../../config/index.js';
 import { normalizeDiscordToken } from '../../config/token.js';
+import type { RuntimeMode } from '../../types/index.js';
 import {
   ensureTelemetryInstallId,
   isValidTelemetryEndpoint,
@@ -20,7 +21,7 @@ export async function configCommand(options: {
   slackBotToken?: string;
   slackAppToken?: string;
   platform?: string;
-  runtimeMode?: 'tmux' | 'pty';
+  runtimeMode?: RuntimeMode;
   containerEnabled?: boolean;
   containerSocketPath?: string;
   telemetry?: 'on' | 'off';
@@ -195,7 +196,7 @@ export async function configCommand(options: {
     console.log(chalk.gray('  discode config --channel 123456789012345678'));
     console.log(chalk.gray('  discode config --default-agent claude'));
     console.log(chalk.gray('  discode config --platform slack'));
-    console.log(chalk.gray('  discode config --runtime-mode pty'));
+    console.log(chalk.gray('  discode config --runtime-mode pty-rust'));
     console.log(chalk.gray('  discode config --slack-bot-token xoxb-...'));
     console.log(chalk.gray('  discode config --slack-app-token xapp-...'));
     console.log(chalk.gray('  discode config --opencode-permission allow'));

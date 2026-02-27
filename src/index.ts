@@ -8,6 +8,7 @@ import type { MessagingClient } from './messaging/interface.js';
 import type { AgentRuntime } from './runtime/interface.js';
 import { TmuxRuntime } from './runtime/tmux-runtime.js';
 import { PtyRuntime } from './runtime/pty-runtime.js';
+import { PtyRustRuntime } from './runtime/pty-rust-runtime.js';
 import { stateManager as defaultStateManager } from './state/index.js';
 import { config as defaultConfig } from './config/index.js';
 import { agentRegistry as defaultAgentRegistry, AgentRegistry } from './agents/index.js';
@@ -43,6 +44,7 @@ import { BridgeProjectBootstrap } from './bridge/project-bootstrap.js';
 import { BridgeMessageRouter } from './bridge/message-router.js';
 import { BridgeHookServer } from './bridge/hook-server.js';
 import { RuntimeStreamServer, getDefaultRuntimeSocketPath } from './runtime/stream-server.js';
+import { isPtyRuntimeMode } from './runtime/mode.js';
 
 export interface AgentBridgeDeps {
   messaging?: MessagingClient;
@@ -97,6 +99,9 @@ export class AgentBridge {
   }
 
   private createRuntime(): AgentRuntime {
+    if (this.bridgeConfig.runtimeMode === 'pty-rust') {
+      return new PtyRustRuntime();
+    }
     if (this.bridgeConfig.runtimeMode === 'pty') {
       return new PtyRuntime();
     }
@@ -436,7 +441,7 @@ export class AgentBridge {
   }
 
   private restoreRuntimeWindowsIfNeeded(): void {
-    if ((this.bridgeConfig.runtimeMode || 'tmux') !== 'pty') return;
+    if (!isPtyRuntimeMode(this.bridgeConfig.runtimeMode || 'tmux')) return;
 
     const port = this.bridgeConfig.hookServerPort || 18470;
     const permissionAllow = this.bridgeConfig.opencode?.permissionMode === 'allow';

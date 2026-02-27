@@ -250,7 +250,7 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
       'Full-screen onboarding wizard',
       (y: Argv) => y
         .option('platform', { type: 'string', choices: ['discord', 'slack'], describe: 'Messaging platform to use' })
-        .option('runtime-mode', { type: 'string', choices: ['tmux', 'pty'], describe: 'Runtime backend to use' })
+        .option('runtime-mode', { type: 'string', choices: ['tmux', 'pty', 'pty-rust'], describe: 'Runtime backend to use' })
         .option('token', { alias: 't', type: 'string', describe: 'Discord bot token (pre-fill value)' })
         .option('slack-bot-token', { type: 'string', describe: 'Slack bot token (xoxb-...)' })
         .option('slack-app-token', { type: 'string', describe: 'Slack app-level token (xapp-...)' })
@@ -340,7 +340,7 @@ export async function runCli(rawArgs: string[] = hideBin(process.argv)): Promise
         .option('port', { alias: 'p', type: 'string', describe: 'Set hook server port' })
         .option('default-agent', { type: 'string', describe: 'Set default AI CLI for `discode new`' })
         .option('platform', { type: 'string', choices: ['discord', 'slack'], describe: 'Set messaging platform' })
-        .option('runtime-mode', { type: 'string', choices: ['tmux', 'pty'], describe: 'Set runtime backend' })
+        .option('runtime-mode', { type: 'string', choices: ['tmux', 'pty', 'pty-rust'], describe: 'Set runtime backend' })
         .option('slack-bot-token', { type: 'string', describe: 'Set Slack bot token (xoxb-...)' })
         .option('slack-app-token', { type: 'string', describe: 'Set Slack app-level token (xapp-...)' })
         .option('opencode-permission', {

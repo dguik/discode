@@ -187,7 +187,7 @@ P1:
 P2:
 
 1. [x] runtime 프로토콜 버전 도입 (stream hello handshake + control JSON `protocolVersion`)
-2. [ ] Rust sidecar PoC 착수
+2. [x] Rust sidecar PoC 착수 (feature flag `runtimeMode=pty-rust` + TS fallback skeleton)
 
 ---
 

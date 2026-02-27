@@ -12,11 +12,12 @@ import {
   resolveProjectWindowName,
 } from '../common/tmux.js';
 import { ensureRuntimeWindow, focusRuntimeWindow } from '../common/runtime-api.js';
+import { isPtyRuntimeMode } from '../../runtime/mode.js';
 
 export async function attachCommand(projectName: string | undefined, options: TmuxCliOptions & { instance?: string }) {
   const effectiveConfig = applyTmuxCliOverrides(config, options);
   const runtimeMode = effectiveConfig.runtimeMode || 'tmux';
-  if (runtimeMode === 'tmux') {
+  if (!isPtyRuntimeMode(runtimeMode)) {
     ensureTmuxInstalled();
   }
   const tmux = new TmuxManager(effectiveConfig.tmux.sessionPrefix);
@@ -53,7 +54,7 @@ export async function attachCommand(projectName: string | undefined, options: Tm
       : undefined;
   const attachTarget = windowName ? `${sessionName}:${windowName}` : sessionName;
 
-  if (runtimeMode === 'pty') {
+  if (isPtyRuntimeMode(runtimeMode)) {
     if (windowName) {
       const windowId = `${sessionName}:${windowName}`;
       const port = effectiveConfig.hookServerPort || 18470;

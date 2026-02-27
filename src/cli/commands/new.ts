@@ -25,6 +25,7 @@ import {
 } from '../common/tmux.js';
 import { isInteractiveShell, prompt } from '../common/interactive.js';
 import { ensureOpencodePermissionChoice } from '../common/opencode-permission.js';
+import { isPtyRuntimeMode } from '../../runtime/mode.js';
 
 export async function newCommand(
   agentArg: string | undefined,
@@ -37,7 +38,7 @@ export async function newCommand(
       effectiveConfig.container = { enabled: true, ...effectiveConfig.container };
     }
     const runtimeMode = effectiveConfig.runtimeMode || 'tmux';
-    if (runtimeMode === 'tmux') {
+    if (!isPtyRuntimeMode(runtimeMode)) {
       ensureTmuxInstalled();
     }
 
@@ -58,7 +59,7 @@ export async function newCommand(
 
     console.log(chalk.cyan(`\n🚀 discode new — ${projectName}\n`));
 
-    const tmux = runtimeMode === 'tmux' ? new TmuxManager(effectiveConfig.tmux.sessionPrefix) : undefined;
+    const tmux = isPtyRuntimeMode(runtimeMode) ? undefined : new TmuxManager(effectiveConfig.tmux.sessionPrefix);
     if (tmux) {
       const prunedProjects = pruneStaleProjects(tmux, effectiveConfig.tmux);
       if (prunedProjects.length > 0) {
@@ -236,7 +237,7 @@ export async function newCommand(
     } else if (!isInteractive) {
       console.log(chalk.gray('   Non-interactive shell detected; skipping automatic discode TUI pane startup.'));
     } else {
-      console.log(chalk.gray('   Runtime mode is pty; skipping tmux pane startup.'));
+      console.log(chalk.gray(`   Runtime mode is ${runtimeMode}; skipping tmux pane startup.`));
     }
     console.log(chalk.cyan('\n✨ Ready!\n'));
     console.log(chalk.gray(`   Project:  ${projectName}`));
@@ -248,7 +249,7 @@ export async function newCommand(
     if (options.attach !== false) {
       const windowName = statusWindowName;
       const attachTarget = `${sessionName}:${windowName}`;
-      if (runtimeMode === 'tmux') {
+      if (!isPtyRuntimeMode(runtimeMode)) {
         console.log(chalk.cyan(`\n📺 Attaching to ${attachTarget}...\n`));
         attachToTmux(sessionName, windowName);
         return;

@@ -152,6 +152,22 @@ describe('ConfigManager', () => {
       expect(config.discord.guildId).toBe('stored-guild-wins');
     });
 
+    it('accepts pty-rust runtime mode from env and stored config', () => {
+      const storage = new MockStorage();
+      const env = new MockEnvironment();
+      env.set('DISCODE_RUNTIME_MODE', 'pty-rust');
+
+      const managerFromEnv = new ConfigManager(storage, env, configDir);
+      expect(managerFromEnv.config.runtimeMode).toBe('pty-rust');
+
+      const storedConfig: StoredConfig = {
+        runtimeMode: 'pty-rust',
+      };
+      storage.setFile(configFile, JSON.stringify(storedConfig));
+      const managerFromStored = new ConfigManager(storage, env, configDir);
+      expect(managerFromStored.config.runtimeMode).toBe('pty-rust');
+    });
+
     it('normalizes token from stored config and env', () => {
       const storage = new MockStorage();
       const env = new MockEnvironment();
