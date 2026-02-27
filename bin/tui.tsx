@@ -44,6 +44,11 @@ type TuiInput = {
   currentSession?: string;
   currentWindow?: string;
   runtimeMode?: 'tmux' | 'pty-ts' | 'pty-rust';
+  getRuntimeBackendStatus?: () =>
+    | 'sidecar'
+    | 'ts-fallback'
+    | undefined
+    | Promise<'sidecar' | 'ts-fallback' | undefined>;
   initialCommand?: string;
   onCommand: (command: string, append: (line: string) => void) => Promise<boolean | void>;
   onStopProject: (project: string) => Promise<void>;
@@ -252,6 +257,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [cursorBlinkOn, setCursorBlinkOn] = createSignal(true);
   const [prefixPending, setPrefixPending] = createSignal(false);
   const [runtimeInputMode, setRuntimeInputMode] = createSignal(true);
+  const [runtimeBackendStatus, setRuntimeBackendStatus] = createSignal<'sidecar' | 'ts-fallback' | undefined>(undefined);
   const [runtimeStatusLine, setRuntimeStatusLine] = createSignal('transport: stream');
   const [commandStatusLine, setCommandStatusLine] = createSignal('status: ready');
   const [clipboardToast, setClipboardToast] = createSignal<string | undefined>(undefined);
@@ -268,7 +274,14 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   let paletteInput: InputRenderable;
   let clipboardToastTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const runtimeModeLabel = createMemo(() => props.input.runtimeMode || 'tmux');
+  const runtimeModeLabel = createMemo(() => {
+    const mode = props.input.runtimeMode || 'tmux';
+    const backend = runtimeBackendStatus();
+    if (mode !== 'pty-rust') return mode;
+    if (backend === 'sidecar') return 'pty-rust (sidecar)';
+    if (backend === 'ts-fallback') return 'pty-rust (ts fallback)';
+    return 'pty-rust';
+  });
   const logsBodyHeight = createMemo(() => Math.max(8, Math.min(Math.floor(dims().height * 0.55), dims().height - 12)));
 
   const openProjects = createMemo(() => projects().filter((item) => item.open));
@@ -1293,6 +1306,17 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
             setWindowStyledLines(undefined);
             setWindowCursor(undefined);
             setWindowCursorVisible(true);
+          }
+        }
+
+        if (props.input.getRuntimeBackendStatus) {
+          try {
+            const backend = await props.input.getRuntimeBackendStatus();
+            if (!stopped) {
+              setRuntimeBackendStatus(backend);
+            }
+          } catch {
+            // best effort
           }
         }
       } catch (error) {

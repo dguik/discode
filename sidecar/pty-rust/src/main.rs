@@ -23,7 +23,7 @@ mod unix_main {
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Serialize)]
     struct RpcRequest {
         method: String,
         #[serde(default)]

@@ -192,15 +192,36 @@ export class RustSidecarClient {
       timeout: 1500,
     });
 
-    if (result.status !== 0) {
-      throw new Error(result.stderr?.trim() || `sidecar request failed (${method})`);
+    if (result.error || result.status !== 0) {
+      const details: string[] = [];
+      if (result.error) {
+        details.push(`error=${result.error.message}`);
+      }
+      if (Number.isInteger(result.status)) {
+        details.push(`exit=${result.status}`);
+      }
+      if (result.signal) {
+        details.push(`signal=${result.signal}`);
+      }
+
+      const stderr = normalizeLogText(result.stderr || '');
+      if (stderr) {
+        details.push(`stderr=${stderr}`);
+      }
+
+      const stdout = normalizeLogText(result.stdout || '');
+      if (stdout) {
+        details.push(`stdout=${stdout}`);
+      }
+
+      throw new Error(`sidecar request failed (${method}): ${details.join(', ') || 'unknown failure'}`);
     }
 
     let payload: SidecarRpcResponse<T>;
     try {
       payload = JSON.parse(result.stdout || '{}') as SidecarRpcResponse<T>;
     } catch {
-      throw new Error(`invalid sidecar response for ${method}`);
+      throw new Error(`invalid sidecar response for ${method}: ${normalizeLogText(result.stdout || '') || 'empty stdout'}`);
     }
 
     if (!payload.ok) {
@@ -209,6 +230,13 @@ export class RustSidecarClient {
 
     return payload.result as T;
   }
+}
+
+function normalizeLogText(input: string, maxLength: number = 240): string {
+  const compact = input.replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength - 3)}...`;
 }
 
 function resolveSidecarBinaryPath(explicitPath?: string): string | null {

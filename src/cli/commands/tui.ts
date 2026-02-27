@@ -1,7 +1,7 @@
 import { basename } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { request as httpRequest } from 'http';
-import { existsSync, readFileSync } from 'fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import { config, getConfigValue, saveConfig, validateConfig } from '../../config/index.js';
@@ -52,6 +52,38 @@ type RuntimeTransportStatus = {
   detail: string;
   lastError?: string;
 };
+
+type RuntimeBackendStatus = 'sidecar' | 'ts-fallback';
+
+function readFileTailUtf8(filePath: string, maxBytes: number = 65536): string {
+  const stats = statSync(filePath);
+  if (!Number.isFinite(stats.size) || stats.size <= 0) return '';
+
+  const size = stats.size;
+  const length = Math.max(0, Math.min(size, Math.floor(maxBytes)));
+  if (length <= 0) return '';
+
+  const fd = openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(length);
+    const position = Math.max(0, size - length);
+    const bytesRead = readSync(fd, buffer, 0, length, position);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function detectPtyRustBackendStatus(logText: string): RuntimeBackendStatus | undefined {
+  if (!logText) return undefined;
+  const lines = logText.replace(/\r/g, '').split('\n');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line.includes('using TS fallback implementation')) return 'ts-fallback';
+    if (line.includes('pty-rust mode enabled (PoC); sidecar connected')) return 'sidecar';
+  }
+  return undefined;
+}
 
 function requestRuntimeApi(params: {
   port: number;
@@ -1227,6 +1259,24 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
   const runtimeActiveAtStartup = parseWindowId(runtimeAtStartup?.activeWindowId);
   const currentSession = runtimeActiveAtStartup?.sessionName || tmux.getCurrentSession(process.env.TMUX_PANE);
   const currentWindow = runtimeActiveAtStartup?.windowName || tmux.getCurrentWindow(process.env.TMUX_PANE);
+  const runtimeModeAtLaunch = effectiveConfig.runtimeMode || 'tmux';
+  const daemonLogFile = defaultDaemonManager.getLogFile();
+  let runtimeBackendCache: { mtimeMs: number; status: RuntimeBackendStatus | undefined } | undefined;
+
+  const getRuntimeBackendStatus = async (): Promise<RuntimeBackendStatus | undefined> => {
+    if (runtimeModeAtLaunch !== 'pty-rust') return undefined;
+    if (!existsSync(daemonLogFile)) return undefined;
+
+    const mtimeMs = statSync(daemonLogFile).mtimeMs;
+    if (runtimeBackendCache && runtimeBackendCache.mtimeMs === mtimeMs) {
+      return runtimeBackendCache.status;
+    }
+
+    const tail = readFileTailUtf8(daemonLogFile, 96 * 1024);
+    const status = detectPtyRustBackendStatus(tail);
+    runtimeBackendCache = { mtimeMs, status };
+    return status;
+  };
 
   const sourceCandidates = [
     new URL('./tui.js', import.meta.url),
@@ -1263,6 +1313,7 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       currentSession: currentSession || undefined,
       currentWindow: currentWindow || undefined,
       runtimeMode: effectiveConfig.runtimeMode || 'tmux',
+      getRuntimeBackendStatus,
       initialCommand: options.initialTuiCommand,
       onCommand: handler,
       onAttachProject: async (project: string) => {
