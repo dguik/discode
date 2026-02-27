@@ -57,7 +57,7 @@
 
 ## 4. 실행 전략
 
-## 4.1 Phase 1: TS 런타임 하드닝 (즉시 착수)
+## 4.1 Phase 1: TS 런타임 하드닝 (즉시 착수) [IN PROGRESS]
 
 목표: 현재 구조를 유지하면서 가장 큰 오류를 빠르게 줄인다.
 
@@ -93,7 +93,7 @@
 
 ---
 
-## 4.2 Phase 2: 테스트 체계 강화 (Phase 1과 병행)
+## 4.2 Phase 2: 테스트 체계 강화 (Phase 1과 병행) [IN PROGRESS]
 
 목표: “고친 뒤 다시 깨짐”을 막는다.
 
@@ -121,7 +121,7 @@
 
 ---
 
-## 4.3 Phase 3: 아키텍처 경계 정리 (Hybrid 준비)
+## 4.3 Phase 3: 아키텍처 경계 정리 (Hybrid 준비) [NOT STARTED]
 
 목표: TS 구현 한계에 대비해 Rust sidecar로 이동 가능한 인터페이스를 만든다.
 
@@ -147,7 +147,7 @@
 
 ---
 
-## 4.4 Phase 4: Rust sidecar PoC (선택적, 기준 충족 시)
+## 4.4 Phase 4: Rust sidecar PoC (선택적, 기준 충족 시) [NOT STARTED]
 
 진입 조건 (아래 중 2개 이상):
 
@@ -173,21 +173,21 @@ PoC 범위:
 
 P0:
 
-1. `vt-screen`의 alt-screen + scroll region 경계 버그 보강
-2. `buildTerminalResponse` 응답 범위 문서화/정리
-3. stream frame/patch 경계 안정화
-4. VT fixture 테스트 최소 20개 확보
+1. [x] `vt-screen`의 alt-screen + scroll region 경계 버그 보강
+2. [x] `buildTerminalResponse` 응답 범위 문서화/정리
+3. [x] stream frame/patch 경계 안정화
+4. [x] VT fixture 테스트 최소 20개 확보 (`tests/runtime/vt-fixture.test.ts`, 28 fixtures)
 
 P1:
 
-1. wide-char/combining-char 처리 고도화
-2. cursor style/state query 대응 확장
-3. CLI별(Claude/OpenCode/Codex) 회귀 테스트 세트 구축
+1. [x] wide-char/combining-char 처리 고도화
+2. [x] cursor style/state query 대응 확장
+3. [ ] CLI별(Claude/OpenCode/Codex) 회귀 테스트 세트 구축
 
 P2:
 
-1. runtime 프로토콜 버전 도입
-2. Rust sidecar PoC 착수
+1. [ ] runtime 프로토콜 버전 도입
+2. [ ] Rust sidecar PoC 착수
 
 ---
 
