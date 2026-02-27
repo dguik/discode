@@ -1,10 +1,11 @@
 import { basename } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { request as httpRequest } from 'http';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import { config, getConfigValue, saveConfig, validateConfig } from '../../config/index.js';
+import { defaultDaemonManager } from '../../daemon.js';
 import { stateManager } from '../../state/index.js';
 import { agentRegistry } from '../../agents/index.js';
 import { TmuxManager } from '../../tmux/manager.js';
@@ -1341,6 +1342,25 @@ export async function tuiCommand(options: TmuxCliOptions): Promise<void> {
       },
       getCurrentWindowOutput: async (sessionName: string, windowName: string, width?: number, height?: number) => {
         return readRuntimeWindowOutput(sessionName, windowName, width, height);
+      },
+      getDaemonLogs: async (maxLines?: number) => {
+        const logFile = defaultDaemonManager.getLogFile();
+        if (!existsSync(logFile)) {
+          return [
+            `No daemon log found: ${logFile}`,
+            'Start daemon first: discode daemon start',
+          ];
+        }
+
+        const cap = typeof maxLines === 'number' && Number.isFinite(maxLines)
+          ? Math.max(50, Math.min(2000, Math.floor(maxLines)))
+          : 500;
+        const raw = readFileSync(logFile, 'utf8');
+        const lines = raw
+          .replace(/\r/g, '')
+          .split('\n')
+          .filter((line, index, arr) => !(index === arr.length - 1 && line.length === 0));
+        return lines.slice(-cap);
       },
       onRuntimeKey: async (sessionName: string, windowName: string, raw: string) => {
         await sendRuntimeRawKey(sessionName, windowName, raw);
