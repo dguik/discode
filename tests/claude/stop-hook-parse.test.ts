@@ -392,6 +392,29 @@ describe('parseTurnTexts', () => {
     expect(result.displayText).toBe('Answer');
   });
 
+  it('stops at user message with mixed system-reminder and real text blocks', () => {
+    // Claude Code often wraps user messages with <system-reminder> tags in
+    // separate content blocks. The turn boundary detection must check each
+    // text block individually — if ANY block is real user text, it's a boundary.
+    const tail = [
+      // Previous turn (should NOT be included)
+      line({ type: 'user', message: { content: [{ type: 'text', text: 'Previous question' }] } }),
+      line({ type: 'assistant', message: { id: 'msg_old', content: [{ type: 'text', text: 'Previous answer with details' }] } }),
+      // Current turn — user message has BOTH system-reminder AND real text
+      line({ type: 'user', message: { content: [
+        { type: 'text', text: '<system-reminder>gitStatus: clean</system-reminder>' },
+        { type: 'text', text: '다시 보내줘' },
+      ] } }),
+      line({ type: 'assistant', message: { id: 'msg_new', content: [{ type: 'text', text: 'Done!' }] } }),
+    ].join('\n');
+
+    const result = parseTurnTexts(tail);
+    expect(result.displayText).toBe('Done!');
+    expect(result.turnText).toBe('Done!');
+    // Previous turn text should NOT leak into intermediate
+    expect(result.intermediateText).toBe('');
+  });
+
   it('handles assistant entry without messageId', () => {
     const tail = line({
       type: 'assistant',

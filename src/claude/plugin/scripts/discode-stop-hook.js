@@ -164,12 +164,15 @@ function parseTurnTexts(tail) {
       });
       if (hasUserText) {
         // Skip system-injected messages (Skill context, interruptions, etc.)
-        // that appear mid-turn — only break at genuine user prompts
-        const userText = content
+        // that appear mid-turn — only break at genuine user prompts.
+        // Check each text block individually because Claude Code often wraps
+        // user messages with <system-reminder> tags — if ANY text block is
+        // genuine user input, this is a real turn boundary.
+        const textBlocks = content
           .filter((c) => { const co = asObject(c); return co && co.type === "text"; })
-          .map((c) => { const co = asObject(c); return co && typeof co.text === "string" ? co.text : ""; })
-          .join("\n");
-        if (isSystemInjectedMessage(userText)) continue;
+          .map((c) => { const co = asObject(c); return co && typeof co.text === "string" ? co.text : ""; });
+        const hasRealUserText = textBlocks.some((t) => t.trim().length > 0 && !isSystemInjectedMessage(t));
+        if (!hasRealUserText) continue;
         break;
       }
       // tool_result entries — skip and continue scanning

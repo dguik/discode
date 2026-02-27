@@ -56,6 +56,15 @@ var payload = JSON.stringify({
 });
 
 var hostname = process.env.DISCODE_HOSTNAME || process.env.AGENT_DISCORD_HOSTNAME || "127.0.0.1";
+var hookToken = process.env.DISCODE_HOOK_TOKEN || "";
+
+var headers = {
+  "Content-Type": "application/json",
+  "Content-Length": Buffer.byteLength(payload),
+};
+if (hookToken) {
+  headers["Authorization"] = "Bearer " + hookToken;
+}
 
 var req = http.request(
   {
@@ -63,10 +72,7 @@ var req = http.request(
     port: port,
     path: "/send-files",
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Content-Length": Buffer.byteLength(payload),
-    },
+    headers: headers,
   },
   function (res) {
     var body = "";
