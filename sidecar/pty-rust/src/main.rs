@@ -496,18 +496,14 @@ mod unix_main {
     ) -> Result<T, String> {
         let key = window_key(session_name, window_name);
         let window = {
-            let guard = state
-                .lock()
-                .map_err(|_| "state lock poisoned".to_string())?;
+            let guard = lock_state(state);
             guard
                 .windows
                 .get(&key)
                 .cloned()
                 .ok_or_else(|| format!("window not found: {key}"))?
         };
-        let mut guard = window
-            .lock()
-            .map_err(|_| "window lock poisoned".to_string())?;
+        let mut guard = lock_window(&window);
         f(&mut guard)
     }
 
@@ -519,9 +515,7 @@ mod unix_main {
     ) -> Result<(), String> {
         let key = window_key(&session_name, &window_name);
         let env = {
-            let guard = state
-                .lock()
-                .map_err(|_| "state lock poisoned".to_string())?;
+            let guard = lock_state(state);
             guard
                 .sessions
                 .get(&session_name)
@@ -530,9 +524,7 @@ mod unix_main {
         };
 
         let window = {
-            let mut guard = state
-                .lock()
-                .map_err(|_| "state lock poisoned".to_string())?;
+            let mut guard = lock_state(state);
             guard
                 .windows
                 .entry(key)
@@ -560,9 +552,7 @@ mod unix_main {
         };
 
         let (cols, rows) = {
-            let mut w = window
-                .lock()
-                .map_err(|_| "window lock poisoned".to_string())?;
+            let mut w = lock_window(&window);
             if w.child.is_some() && w.snapshot.status == "running" {
                 return Ok(());
             }
@@ -619,9 +609,7 @@ mod unix_main {
             .map_err(|e| format!("take writer failed: {e}"))?;
 
         {
-            let mut w = window
-                .lock()
-                .map_err(|_| "window lock poisoned".to_string())?;
+            let mut w = lock_window(&window);
             w.snapshot.status = "running".to_string();
             w.snapshot.pid = pid;
             w.master = Some(pair.master);
@@ -634,9 +622,7 @@ mod unix_main {
         }
 
         let max_buffer = {
-            let guard = state
-                .lock()
-                .map_err(|_| "state lock poisoned".to_string())?;
+            let guard = lock_state(state);
             guard.max_buffer_bytes
         };
 
@@ -659,8 +645,7 @@ mod unix_main {
                             let text = String::from_utf8_lossy(&buf[..n]);
                             w.buffer.push_str(&text);
                             if w.buffer.len() > max_buffer {
-                                let keep = w.buffer.len() - max_buffer;
-                                w.buffer = w.buffer[keep..].to_string();
+                                trim_buffer_to_max_bytes(&mut w.buffer, max_buffer);
                             }
                         }
                     }
@@ -676,6 +661,36 @@ mod unix_main {
         });
 
         Ok(())
+    }
+
+    fn lock_state<'a>(
+        state: &'a Arc<Mutex<SidecarState>>,
+    ) -> std::sync::MutexGuard<'a, SidecarState> {
+        state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn lock_window<'a>(
+        window: &'a Arc<Mutex<WindowState>>,
+    ) -> std::sync::MutexGuard<'a, WindowState> {
+        window
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn trim_buffer_to_max_bytes(buffer: &mut String, max_bytes: usize) {
+        if buffer.len() <= max_bytes {
+            return;
+        }
+
+        let overflow = buffer.len() - max_bytes;
+        let mut start = overflow;
+        while start < buffer.len() && !buffer.is_char_boundary(start) {
+            start += 1;
+        }
+
+        buffer.drain(..start);
     }
 
     fn now_unix_seconds() -> i64 {
