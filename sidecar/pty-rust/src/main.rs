@@ -1,4 +1,25 @@
 #[cfg(unix)]
+mod grid_scrollback;
+
+#[cfg(unix)]
+mod pty_bus;
+
+#[cfg(unix)]
+mod renderer;
+
+#[cfg(unix)]
+mod rpc;
+
+#[cfg(unix)]
+mod screen;
+
+#[cfg(unix)]
+mod session_manager;
+
+#[cfg(unix)]
+mod terminal_pane;
+
+#[cfg(unix)]
 mod vt_lite;
 
 #[cfg(not(unix))]
