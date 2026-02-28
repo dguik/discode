@@ -46,8 +46,8 @@ Exit criteria:
 
 Exit criteria:
 
-- [ ] `main.rs` is thin bootstrap + transport wiring only
-- [ ] refactor passes all pre-existing sidecar/runtime tests
+- [x] `main.rs` is thin bootstrap + transport wiring only
+- [x] refactor passes all pre-existing sidecar/runtime tests
 
 ## Phase 2 - Runtime Transport and Execution Model Hardening
 
