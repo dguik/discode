@@ -2,7 +2,11 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RustSidecarClient } from '../../src/runtime/rust-sidecar-client.js';
+import {
+  getDefaultRustSidecarSocketPathForPlatform,
+  getSidecarBinaryCandidates,
+  RustSidecarClient,
+} from '../../src/runtime/rust-sidecar-client.js';
 
 const tempDirs: string[] = [];
 
@@ -13,6 +17,46 @@ afterEach(() => {
 });
 
 describe('RustSidecarClient', () => {
+  it('returns unix socket path for darwin and linux', () => {
+    expect(getDefaultRustSidecarSocketPathForPlatform('darwin', 1234, '/tmp')).toBe('/tmp/discode-pty-rust-1234.sock');
+    expect(getDefaultRustSidecarSocketPathForPlatform('linux', 5678, '/var/tmp')).toBe('/var/tmp/discode-pty-rust-5678.sock');
+  });
+
+  it('resolves binary candidates with explicit/env and unix package paths', () => {
+    const candidates = getSidecarBinaryCandidates({
+      explicitPath: '/explicit/discode-pty-sidecar',
+      envPath: '/env/discode-pty-sidecar',
+      cwd: '/repo',
+      homeDir: '/home/demo',
+      platform: 'linux',
+      arch: 'x64',
+    });
+
+    expect(candidates[0]).toBe('/explicit/discode-pty-sidecar');
+    expect(candidates[1]).toBe('/env/discode-pty-sidecar');
+    expect(candidates).toContain('/repo/sidecar/pty-rust/target/release/discode-pty-sidecar');
+    expect(candidates).toContain('/repo/dist/release/sidecar/discode-pty-sidecar-linux-x64/bin/discode-pty-sidecar');
+    expect(candidates).toContain('/home/demo/.discode/bin/discode-pty-sidecar');
+    expect(candidates).toContain('/home/demo/.discode/bin/sidecar/linux-x64/discode-pty-sidecar');
+  });
+
+  it('omits unix platform package candidate when platform is unsupported', () => {
+    const candidates = getSidecarBinaryCandidates({
+      cwd: '/repo',
+      homeDir: '/home/demo',
+      platform: 'freebsd',
+      arch: 'x64',
+    });
+
+    expect(candidates).toContain('/repo/sidecar/pty-rust/target/release/discode-pty-sidecar');
+    expect(
+      candidates.some((item) => item.includes('/dist/release/sidecar/discode-pty-sidecar-')),
+    ).toBe(false);
+    expect(
+      candidates.some((item) => item.includes('/.discode/bin/sidecar/')),
+    ).toBe(false);
+  });
+
   it('connects to sidecar RPC helper and maps responses', () => {
     const dir = mkdtempSync(join(tmpdir(), 'discode-sidecar-mock-'));
     tempDirs.push(dir);

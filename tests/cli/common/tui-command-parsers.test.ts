@@ -118,12 +118,22 @@ describe('parseOnboardCommand', () => {
 
   it('parses --runtime-mode pty', () => {
     const result = parseOnboardCommand('/onboard --runtime-mode pty');
-    expect(result.options.runtimeMode).toBe('pty');
+    expect(result.options.runtimeMode).toBe('pty-rust');
+  });
+
+  it('parses --runtime-mode pty-ts as pty-rust', () => {
+    const result = parseOnboardCommand('/onboard --runtime-mode pty-ts');
+    expect(result.options.runtimeMode).toBe('pty-rust');
+  });
+
+  it('parses --runtime-mode pty-rust', () => {
+    const result = parseOnboardCommand('/onboard --runtime-mode pty-rust');
+    expect(result.options.runtimeMode).toBe('pty-rust');
   });
 
   it('returns error for invalid runtime-mode', () => {
     const result = parseOnboardCommand('/onboard --runtime-mode screen');
-    expect(result.error).toBe('runtime mode must be tmux or pty.');
+    expect(result.error).toBe('runtime mode must be tmux or pty-rust.');
   });
 
   it('parses --token', () => {

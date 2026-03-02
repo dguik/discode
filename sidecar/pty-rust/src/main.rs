@@ -5,6 +5,9 @@ mod grid_scrollback;
 mod pty_bus;
 
 #[cfg(unix)]
+mod query_policy;
+
+#[cfg(unix)]
 mod renderer;
 
 #[cfg(unix)]
@@ -319,6 +322,72 @@ mod unix_main {
         }
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{run_server, send_request};
+        use crate::rpc::RpcRequest;
+        use serde_json::json;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::thread;
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        fn unique_test_socket() -> PathBuf {
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or_default();
+            std::env::temp_dir().join(format!(
+                "discode-pty-sidecar-test-{}-{}.sock",
+                std::process::id(),
+                stamp
+            ))
+        }
+
+        #[test]
+        fn server_removes_socket_file_on_dispose_shutdown() {
+            let socket_path = unique_test_socket();
+            if socket_path.exists() {
+                let _ = fs::remove_file(&socket_path);
+            }
+
+            let server_socket = socket_path.clone();
+            let handle = thread::spawn(move || run_server(server_socket));
+
+            let mut ready = false;
+            for _ in 0..80 {
+                if socket_path.exists() {
+                    ready = true;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(ready, "socket should appear for server startup");
+
+            let response = send_request(
+                &socket_path,
+                &RpcRequest {
+                    id: Some(1),
+                    method: "dispose".to_string(),
+                    params: json!({}),
+                    timeout_ms: Some(2_000),
+                },
+            )
+            .unwrap_or_else(|err| panic!("dispose request failed: {err}"));
+            assert!(response.contains("\"ok\":true"));
+
+            let joined = handle
+                .join()
+                .unwrap_or_else(|_| panic!("server thread should not panic"));
+            assert!(joined.is_ok(), "server should stop cleanly");
+
+            assert!(
+                !socket_path.exists(),
+                "socket file should be removed after shutdown"
+            );
+        }
     }
 }
 

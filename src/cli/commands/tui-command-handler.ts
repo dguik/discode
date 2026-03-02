@@ -36,8 +36,8 @@ export async function handleTuiCommand(
   }
 
   if (command === '/help') {
-    append('Commands: /new [name] [agent] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty|toggle]], /help, /exit');
-    append('Onboard options: --platform [discord|slack], --runtime-mode [tmux|pty], --token, --slack-bot-token, --slack-app-token, --default-agent [name|auto], --telemetry [on|off], --opencode-permission [allow|default]');
+    append('Commands: /new [name] [agent] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty-rust|toggle]], /help, /exit');
+    append('Onboard options: --platform [discord|slack], --runtime-mode [tmux|pty-rust], --token, --slack-bot-token, --slack-app-token, --default-agent [name|auto], --telemetry [on|off], --opencode-permission [allow|default]');
     return 'handled';
   }
 
@@ -93,7 +93,7 @@ export async function handleTuiCommand(
 async function handleOnboard(command: string, append: (line: string) => void): Promise<'handled'> {
   const parsed = parseOnboardCommand(command);
   if (parsed.showUsage) {
-    append('Usage: /onboard [discord|slack] [--platform discord|slack] [--runtime-mode tmux|pty]');
+    append('Usage: /onboard [discord|slack] [--platform discord|slack] [--runtime-mode tmux|pty-rust]');
     append('       [--token TOKEN] [--slack-bot-token TOKEN] [--slack-app-token TOKEN]');
     append('       [--default-agent claude|gemini|opencode|auto] [--telemetry on|off]');
     append('       [--opencode-permission allow|default]');

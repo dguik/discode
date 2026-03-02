@@ -1,8 +1,9 @@
 use crate::grid_scrollback::{
-    applied_style, blank_cell, char_display_width, make_row, segment_json, style_key, Cell,
-    CellStyle, SavedScreen,
+    blank_cell, char_display_width, make_row, Cell, CellStyle, SavedScreen,
 };
-use serde_json::{json, Value};
+use crate::renderer::Renderer;
+use crate::screen::Screen;
+use serde_json::Value;
 
 struct VtLite {
     cols: usize,
@@ -131,6 +132,39 @@ impl VtLite {
                         break;
                     }
                     i = j;
+                    continue;
+                }
+
+                if matches!(next, 'P' | 'X' | '^' | '_') {
+                    let mut j = i + 2;
+                    let mut terminated = false;
+                    while j < chars.len() {
+                        if chars[j] == '\x1b' && j + 1 < chars.len() && chars[j + 1] == '\\' {
+                            j += 2;
+                            terminated = true;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if !terminated {
+                        self.pending_escape = chars[i..].iter().collect::<String>();
+                        break;
+                    }
+                    i = j;
+                    continue;
+                }
+
+                if matches!(next, '=' | '>' | '\\') {
+                    i += 2;
+                    continue;
+                }
+
+                if matches!(next, '(' | ')' | '*' | '+' | '-' | '.' | '/') {
+                    if i + 2 >= chars.len() {
+                        self.pending_escape = chars[i..].iter().collect::<String>();
+                        break;
+                    }
+                    i += 3;
                     continue;
                 }
 
@@ -333,7 +367,7 @@ impl VtLite {
                             25 => {
                                 self.cursor_visible = set;
                             }
-                            1049 => {
+                            47 | 1047 | 1049 => {
                                 if set {
                                     self.enter_alt_screen();
                                 } else {
@@ -375,6 +409,7 @@ impl VtLite {
         self.style = CellStyle::default();
         self.scroll_top = 0;
         self.scroll_bottom = self.rows.saturating_sub(1);
+        self.cursor_visible = true;
         self.wrap_pending = false;
     }
 
@@ -386,8 +421,16 @@ impl VtLite {
             self.saved_row = saved.saved_row.min(self.rows.saturating_sub(1));
             self.saved_col = saved.saved_col.min(self.cols.saturating_sub(1));
             self.style = saved.style;
-            self.scroll_top = saved.scroll_top.min(self.rows.saturating_sub(1));
-            self.scroll_bottom = saved.scroll_bottom.min(self.rows.saturating_sub(1));
+            let max_row = self.rows.saturating_sub(1);
+            let top = saved.scroll_top.min(max_row);
+            let bottom = saved.scroll_bottom.min(max_row);
+            if top < bottom {
+                self.scroll_top = top;
+                self.scroll_bottom = bottom;
+            } else {
+                self.scroll_top = 0;
+                self.scroll_bottom = max_row;
+            }
             self.cursor_visible = saved.cursor_visible;
             self.wrap_pending = false;
         }
@@ -522,14 +565,12 @@ impl VtLite {
 
         let width = char_display_width(ch);
         if width == 0 {
-            let prev_col = if self.cursor_col > 0 {
-                self.cursor_col - 1
-            } else {
-                self.cursor_col
-            };
-            if self.cursor_row < self.rows && prev_col < self.cols {
-                self.lines[self.cursor_row][prev_col].text.push(ch);
-            }
+            self.append_combining_char(ch);
+            return;
+        }
+
+        if self.should_join_with_previous(ch) {
+            self.append_combining_char(ch);
             return;
         }
 
@@ -544,16 +585,77 @@ impl VtLite {
             self.line_feed();
         }
 
+        if width == 1 {
+            self.lines[self.cursor_row][self.cursor_col] = Cell {
+                text: ch.to_string(),
+                style: self.style.clone(),
+            };
+
+            if self.cursor_col >= self.cols.saturating_sub(1) {
+                self.wrap_pending = true;
+            } else {
+                self.cursor_col += 1;
+            }
+            return;
+        }
+
+        if self.cursor_col >= self.cols.saturating_sub(1) {
+            self.cursor_col = 0;
+            self.line_feed();
+        }
+
         self.lines[self.cursor_row][self.cursor_col] = Cell {
             text: ch.to_string(),
             style: self.style.clone(),
         };
-
-        if self.cursor_col >= self.cols.saturating_sub(1) {
-            self.wrap_pending = true;
-        } else {
-            self.cursor_col += 1;
+        if self.cursor_col + 1 < self.cols {
+            self.lines[self.cursor_row][self.cursor_col + 1] = Cell {
+                text: String::new(),
+                style: self.style.clone(),
+            };
         }
+
+        if self.cursor_col < self.cols.saturating_sub(2) {
+            self.cursor_col += 2;
+        } else {
+            self.cursor_col = self.cols.saturating_sub(1);
+            self.wrap_pending = true;
+        }
+    }
+
+    fn append_combining_char(&mut self, ch: char) {
+        if self.cursor_row >= self.rows {
+            return;
+        }
+
+        let mut col = if self.wrap_pending {
+            self.cursor_col.min(self.cols.saturating_sub(1))
+        } else if self.cursor_col > 0 {
+            self.cursor_col - 1
+        } else {
+            self.cursor_col
+        };
+
+        while col > 0 && self.lines[self.cursor_row][col].text.is_empty() {
+            col -= 1;
+        }
+
+        if col < self.cols {
+            self.lines[self.cursor_row][col].text.push(ch);
+        }
+    }
+
+    fn should_join_with_previous(&self, ch: char) -> bool {
+        if self.cursor_row >= self.rows || self.cursor_col == 0 || char_display_width(ch) == 0 {
+            return false;
+        }
+
+        let mut col = self.cursor_col.saturating_sub(1);
+        while col > 0 && self.lines[self.cursor_row][col].text.is_empty() {
+            col -= 1;
+        }
+
+        self.lines[self.cursor_row][col].text.ends_with('\u{200d}')
     }
 
     fn apply_sgr(&mut self, params: &[Option<i32>]) {
@@ -630,45 +732,15 @@ impl VtLite {
     }
 
     fn into_frame(&self) -> Value {
-        let mut line_values = Vec::with_capacity(self.rows);
-
-        for row in &self.lines {
-            let mut end = row.len();
-            while end > 0 && row[end - 1].text == " " {
-                end -= 1;
-            }
-
-            if end == 0 {
-                line_values.push(json!({ "segments": [ { "text": "" } ] }));
-                continue;
-            }
-
-            let mut segments = Vec::new();
-            let mut current_text = String::new();
-            let mut current_style = applied_style(&row[0].style);
-
-            for cell in row.iter().take(end) {
-                let style = applied_style(&cell.style);
-                if style_key(&style) != style_key(&current_style) {
-                    segments.push(segment_json(&current_text, &current_style));
-                    current_text.clear();
-                    current_style = style;
-                }
-                current_text.push_str(&cell.text);
-            }
-
-            segments.push(segment_json(&current_text, &current_style));
-            line_values.push(json!({ "segments": segments }));
-        }
-
-        json!({
-            "cols": self.cols,
-            "rows": self.rows,
-            "lines": line_values,
-            "cursorRow": self.cursor_row.min(self.rows.saturating_sub(1)),
-            "cursorCol": self.cursor_col.min(self.cols.saturating_sub(1)),
-            "cursorVisible": self.cursor_visible,
-        })
+        let screen = Screen::new().compose(
+            &self.lines,
+            self.cols,
+            self.rows,
+            self.cursor_row,
+            self.cursor_col,
+            self.cursor_visible,
+        );
+        Renderer::new().render_styled_frame(&screen)
     }
 }
 

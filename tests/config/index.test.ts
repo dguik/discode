@@ -168,20 +168,27 @@ describe('ConfigManager', () => {
       expect(managerFromStored.config.runtimeMode).toBe('pty-rust');
     });
 
-    it('normalizes legacy pty runtime mode to pty-ts', () => {
+    it('normalizes legacy pty runtime mode to pty-rust', () => {
       const storage = new MockStorage();
       const env = new MockEnvironment();
       env.set('DISCODE_RUNTIME_MODE', 'pty');
 
       const managerFromEnv = new ConfigManager(storage, env, configDir);
-      expect(managerFromEnv.config.runtimeMode).toBe('pty-ts');
+      expect(managerFromEnv.config.runtimeMode).toBe('pty-rust');
+
+      const storedLegacyTs: StoredConfig = {
+        runtimeMode: 'pty-ts',
+      };
+      storage.setFile(configFile, JSON.stringify(storedLegacyTs));
+      const managerFromStoredLegacyTs = new ConfigManager(storage, env, configDir);
+      expect(managerFromStoredLegacyTs.config.runtimeMode).toBe('pty-rust');
 
       const storedConfig: StoredConfig = {
         runtimeMode: 'pty',
       };
       storage.setFile(configFile, JSON.stringify(storedConfig));
       const managerFromStored = new ConfigManager(storage, env, configDir);
-      expect(managerFromStored.config.runtimeMode).toBe('pty-ts');
+      expect(managerFromStored.config.runtimeMode).toBe('pty-rust');
     });
 
     it('normalizes token from stored config and env', () => {

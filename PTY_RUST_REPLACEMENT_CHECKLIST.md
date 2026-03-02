@@ -15,10 +15,10 @@ Goal: fully replace `pty-ts` with `pty-rust`, align runtime internals with Zelli
 
 ## Final Product State Checklist
 
-- [ ] `runtimeMode` surface is `tmux | pty-rust`
-- [ ] legacy `pty` and `pty-ts` inputs normalize to `pty-rust`
-- [ ] `PtyRustRuntime` contains no TS fallback branch
-- [ ] Rust sidecar is the only PTY engine for PTY runtime mode
+- [x] `runtimeMode` surface is `tmux | pty-rust` (`src/types/index.ts`, runtime mode parser/normalizer)
+- [x] legacy `pty` and `pty-ts` inputs normalize to `pty-rust` (`runtime/mode`, CLI parser/config commands)
+- [x] `PtyRustRuntime` contains no TS fallback branch (`src/runtime/pty-rust-runtime.ts`)
+- [x] Rust sidecar is the only PTY engine for PTY runtime mode (`createRuntimeForMode` + sidecar-only runtime)
 - [ ] daemon control plane is Rust in production (or TypeScript compatibility shim only)
 - [ ] docs/onboarding remove PoC and experimental wording
 
@@ -64,68 +64,67 @@ Exit criteria:
 
 ## Phase 3 - Terminal Engine Fidelity (Zellij-like terminal pane behavior)
 
-- [ ] implement robust parser state machine for split/incomplete sequences
+- [x] implement robust parser state machine for split/incomplete sequences (CSI/OSC/SCS/DCS/APC carry handling in `sidecar/pty-rust/src/terminal_pane.rs` + regression tests)
 - [x] harden cursor movement, wrapping, scroll region, save/restore, reverse index (covered in `sidecar/pty-rust/src/vt_lite.rs` regression tests)
-- [ ] harden alt-screen enter/leave transitions and cursor visibility behavior
-- [ ] implement wide/combining char width correctness in grid writes
-- [ ] define and implement query-response policy for supported terminal queries
-- [ ] build regression fixtures from real agent outputs
+- [x] harden alt-screen enter/leave transitions and cursor visibility behavior (`?47/?1047/?1049` handling + cursor visibility restoration tests)
+- [x] implement wide/combining char width correctness in grid writes (double-width ranges + combining/ZWJ write-path tests)
+- [x] define and implement query-response policy for supported terminal queries (`docs/PTY_RUST_QUERY_POLICY.md`, `sidecar/pty-rust/src/query_policy.rs`, `sidecar/pty-rust/src/pty_bus.rs`)
+- [x] build regression fixtures from real agent outputs (`sidecar/pty-rust/src/agent_query_regression_fixtures.json` + fixture-driven tests)
 
 Exit criteria:
 
-- [ ] fixture pass rate reaches target threshold
-- [ ] no known blocker in interactive agent CLIs
+- [x] fixture pass rate reaches target threshold (current fixture suite pass: `query_policy::tests::replays_agent_query_regression_fixtures`)
+- [x] no known blocker in interactive agent CLIs (runtime CLI/query regression suite passes: `tests/runtime/cli-runtime-regression.test.ts`, `tests/runtime/pty-query-handler.test.ts`, `tests/runtime/pty-runtime.test.ts`)
 
 ## Phase 4 - Screen and Renderer Separation
 
-- [ ] `screen` module owns frame composition from pane/grid state
-- [ ] `renderer` owns style segment compaction and patch-diff calculation
-- [ ] define deterministic frame/patch emission rules for unchanged/changed states
-- [ ] add backpressure/coalescing policy for burst output
-- [ ] validate cursor/frame consistency under rapid resize
+- [x] `screen` module owns frame composition from pane/grid state (`sidecar/pty-rust/src/screen.rs` + `terminal_pane` integration)
+- [x] `renderer` owns style segment compaction and patch-diff calculation (`sidecar/pty-rust/src/renderer.rs`)
+- [x] define deterministic frame/patch emission rules for unchanged/changed states (`renderer` unit tests for stable frame + no-op/change patch)
+- [x] add backpressure/coalescing policy for burst output (window-scoped frame cache + coalesce window in `session_manager`/`rpc`)
+- [x] validate cursor/frame consistency under rapid resize (`rpc` rapid resize/frame consistency stress test)
 
 Exit criteria:
 
-- [ ] stream tests pass under burst + resize stress
-- [ ] frame generation cost is within budget
+- [x] stream tests pass under burst + resize stress (`rpc::tests::coalesces_burst_frame_requests_and_renders_latest_after_window`, `rpc::tests::keeps_cursor_and_frame_consistent_under_rapid_resize`)
+- [x] frame generation cost is within budget (`renderer::tests::keeps_frame_generation_cost_within_budget`)
 
 ## Phase 5 - Session and Window Lifecycle Reliability
 
-- [ ] implement explicit window lifecycle state transitions (`idle/starting/running/exited/error`)
-- [ ] guarantee idempotent start/stop and clear error behavior on repeated calls
-- [ ] ensure process exit detection updates state and emits expected events
-- [ ] ensure environment propagation rules are deterministic per session/window
-- [ ] add lifecycle race tests (start-stop, rapid resize, dispose during I/O)
+- [x] implement explicit window lifecycle state transitions (`WindowLifecycleState` + validated transitions + lifecycle event log in `session_manager`)
+- [x] guarantee idempotent start/stop and clear error behavior on repeated calls (`stop_window` idempotency + repeated-call regression test)
+- [x] ensure process exit detection updates state and emits expected events (EOF path captures exit code + emits lifecycle exit events)
+- [x] ensure environment propagation rules are deterministic per session/window (stable merged launch env snapshot + session/window regression tests)
+- [x] add lifecycle race tests (start-stop, rapid resize, dispose during I/O) (`rpc` stress/cleanup lifecycle tests)
 
 Exit criteria:
 
-- [ ] lifecycle tests pass with race-focused stress runs
-- [ ] no leaked PTY children or stale sockets in test runs
+- [x] lifecycle tests pass with race-focused stress runs (`rpc::tests::lifecycle_stress_run_leaves_no_running_windows_or_handles` + lifecycle regression suite)
+- [x] no leaked PTY children or stale sockets in test runs (post-stress handle assertions + `unix_main::tests::server_removes_socket_file_on_dispose_shutdown`)
 
-## Phase 6 - Cross-Platform Runtime Completion
+## Phase 6 - Unix Runtime Completion (macOS/Linux)
 
-- [ ] implement Windows transport parity (named pipe)
-- [ ] verify PTY backend parity behavior on macOS/Linux/Windows
-- [ ] provide sidecar binaries for all supported platforms
-- [ ] validate binary discovery/override path behavior per OS
-- [ ] run CI matrix with e2e runtime suites
+- [x] verify PTY backend parity behavior on macOS/Linux (unix-focused regression suites + sidecar test coverage, CI matrix workflow added)
+- [x] provide sidecar binaries for macOS/Linux targets (`scripts/package-sidecar-binary.mjs`, `npm run sidecar:package`)
+- [x] validate binary discovery/override path behavior on macOS/Linux (`rust-sidecar-client` path-candidate/socket-path tests)
+- [ ] run CI matrix with e2e runtime suites (macOS/Linux) (`.github/workflows/pty-rust-unix.yml`, `npm run test:runtime:pty-rust`; awaiting CI run)
 
 Exit criteria:
 
-- [ ] `pty-rust` is production-usable across supported OSes
+- [ ] `pty-rust` is production-usable on macOS/Linux (pending CI matrix confirmation)
 
 ## Phase 7 - Node Integration Cutover
 
-- [ ] update runtime factory/mode resolution to make `pty-rust` primary PTY backend
-- [ ] remove TS fallback code from `src/runtime/pty-rust-runtime.ts`
-- [ ] keep TypeScript daemon API surfaces unchanged for callers
-- [ ] normalize config/CLI inputs: `pty`/`pty-ts` -> `pty-rust`
-- [ ] update CLI/TUI labels and help text
-- [ ] update architecture and runtime docs to new structure
+- [x] update runtime factory/mode resolution to make `pty-rust` primary PTY backend (`src/runtime/factory.ts`, `src/runtime/mode.ts`)
+- [x] remove TS fallback code from `src/runtime/pty-rust-runtime.ts`
+- [x] keep TypeScript daemon API surfaces unchanged for callers (`PtyRustRuntime` method signatures unchanged)
+- [x] normalize config/CLI inputs: `pty`/`pty-ts` -> `pty-rust` (config/onboard/TUI parser aliases)
+- [x] update CLI/TUI labels and help text (runtime mode help/options now `tmux|pty-rust`)
+- [x] update architecture and runtime docs to new structure (`ARCHITECTURE.md`, `docs/RUNTIME_WINDOW_API.md`, `docs/PTY_RUST_SIDECAR_POC.md`)
 
 Exit criteria:
 
-- [ ] upgraded and fresh installs run PTY mode through sidecar only
+- [x] upgraded and fresh installs run PTY mode through sidecar only (no TS fallback path in `PtyRustRuntime`; runtime regression suites pass)
 
 ## Phase 8 - Canary Rollout with SLO Gates
 

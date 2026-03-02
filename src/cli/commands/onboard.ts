@@ -88,14 +88,12 @@ async function chooseRuntimeMode(
 
   console.log(chalk.white('\nChoose runtime mode'));
   console.log(chalk.gray('   1. tmux (default)'));
-  console.log(chalk.gray('   2. pty-ts'));
-  console.log(chalk.gray('   3. pty-rust (experimental PoC)'));
+  console.log(chalk.gray('   2. pty-rust'));
 
   while (true) {
-    const answer = await prompt(chalk.white('\nSelect runtime mode [1-3] (Enter = default): '));
+    const answer = await prompt(chalk.white('\nSelect runtime mode [1-2] (Enter = default): '));
     if (!answer || answer === '1') return 'tmux';
-    if (answer === '2') return 'pty-ts';
-    if (answer === '3') return 'pty-rust';
+    if (answer === '2') return 'pty-rust';
     console.log(chalk.yellow('Please enter a valid number.'));
   }
 }

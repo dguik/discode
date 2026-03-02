@@ -22,7 +22,7 @@ import { handleTuiCommand } from './tui-command-handler.js';
 import { attachCommand } from './attach.js';
 import { stopCommand } from './stop.js';
 
-type RuntimeBackendStatus = 'sidecar' | 'ts-fallback';
+type RuntimeBackendStatus = 'sidecar';
 
 function readFileTailUtf8(filePath: string, maxBytes: number = 65536): string {
   const stats = statSync(filePath);
@@ -48,8 +48,8 @@ function detectPtyRustBackendStatus(logText: string): RuntimeBackendStatus | und
   const lines = logText.replace(/\r/g, '').split('\n');
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
-    if (line.includes('using TS fallback implementation')) return 'ts-fallback';
     if (line.includes('pty-rust mode enabled (PoC); sidecar connected')) return 'sidecar';
+    if (line.includes('pty-rust mode enabled; sidecar connected')) return 'sidecar';
   }
   return undefined;
 }

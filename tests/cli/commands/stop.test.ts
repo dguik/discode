@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => {
     discord: { token: 'token' },
     tmux: { sessionPrefix: '', sharedSessionName: 'bridge' },
     hookServerPort: 18470,
-    runtimeMode: 'pty-ts' as string,
+    runtimeMode: 'pty-rust' as string,
   };
 
   const getConfigValue = vi.fn().mockReturnValue(undefined);
@@ -134,7 +134,7 @@ describe('stopCommand — keepChannelOnStop config (pty single instance)', () =>
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mocks.config.runtimeMode = 'pty-ts';
+    mocks.config.runtimeMode = 'pty-rust';
     mocks.deleteChannels.mockResolvedValue([]);
     mocks.removeInstanceFromProjectState.mockReturnValue({ removedProject: true });
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -232,7 +232,7 @@ describe('stopCommand — keepChannelOnStop config (pty bulk project stop)', () 
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mocks.config.runtimeMode = 'pty-ts';
+    mocks.config.runtimeMode = 'pty-rust';
     mocks.removeProjectState.mockReturnValue(undefined);
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -364,7 +364,7 @@ describe('stopCommand — container sync warning', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mocks.config.runtimeMode = 'pty-ts';
+    mocks.config.runtimeMode = 'pty-rust';
     mocks.removeInstanceFromProjectState.mockReturnValue({ removedProject: true });
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

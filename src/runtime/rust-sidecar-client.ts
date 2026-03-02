@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readSync, writeSync } from 'fs';
 import { join } from 'path';
-import { homedir, tmpdir } from 'os';
+import { arch as osArch, homedir, platform as osPlatform, tmpdir } from 'os';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import type { RuntimeWindowSnapshot } from './pty-runtime.js';
 import type { TerminalStyledFrame } from './vt-screen.js';
@@ -590,12 +590,14 @@ function formatSidecarRpcError(
 }
 
 function resolveSidecarBinaryPath(explicitPath?: string): string | null {
-  const candidates = [
+  const candidates = getSidecarBinaryCandidates({
     explicitPath,
-    process.env.DISCODE_PTY_RUST_SIDECAR_BIN,
-    join(process.cwd(), 'sidecar', 'pty-rust', 'target', 'release', 'discode-pty-sidecar'),
-    join(homedir(), '.discode', 'bin', 'discode-pty-sidecar'),
-  ].filter(Boolean) as string[];
+    envPath: process.env.DISCODE_PTY_RUST_SIDECAR_BIN,
+    cwd: process.cwd(),
+    homeDir: homedir(),
+    platform: osPlatform(),
+    arch: osArch(),
+  });
 
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
@@ -612,8 +614,57 @@ function toDate(value: number | undefined): Date | undefined {
 }
 
 export function getDefaultRustSidecarSocketPath(): string {
-  if (process.platform === 'win32') {
+  return getDefaultRustSidecarSocketPathForPlatform(process.platform, process.pid, tmpdir());
+}
+
+export function getDefaultRustSidecarSocketPathForPlatform(
+  platform: NodeJS.Platform,
+  pid: number,
+  tmpPath: string,
+): string {
+  if (platform === 'win32') {
     return '\\\\.\\pipe\\discode-pty-rust';
   }
-  return join(tmpdir(), `discode-pty-rust-${process.pid}.sock`);
+  return join(tmpPath, `discode-pty-rust-${pid}.sock`);
+}
+
+type SidecarBinaryCandidateOptions = {
+  explicitPath?: string;
+  envPath?: string;
+  cwd: string;
+  homeDir: string;
+  platform: NodeJS.Platform;
+  arch: string;
+};
+
+export function getSidecarBinaryCandidates(options: SidecarBinaryCandidateOptions): string[] {
+  const binaryName = options.platform === 'win32' ? 'discode-pty-sidecar.exe' : 'discode-pty-sidecar';
+  const osTag = mapPlatformTag(options.platform);
+  const archTag = mapArchTag(options.arch);
+  const platformTag = osTag && archTag ? `${osTag}-${archTag}` : null;
+
+  return [
+    options.explicitPath,
+    options.envPath,
+    join(options.cwd, 'sidecar', 'pty-rust', 'target', 'release', binaryName),
+    platformTag
+      ? join(options.cwd, 'dist', 'release', 'sidecar', `discode-pty-sidecar-${platformTag}`, 'bin', binaryName)
+      : undefined,
+    join(options.homeDir, '.discode', 'bin', binaryName),
+    platformTag ? join(options.homeDir, '.discode', 'bin', 'sidecar', platformTag, binaryName) : undefined,
+  ].filter(Boolean) as string[];
+}
+
+function mapPlatformTag(platform: NodeJS.Platform): 'darwin' | 'linux' | null {
+  if (platform === 'darwin' || platform === 'linux') {
+    return platform;
+  }
+  return null;
+}
+
+function mapArchTag(arch: string): 'x64' | 'arm64' | null {
+  if (arch === 'x64' || arch === 'arm64') {
+    return arch;
+  }
+  return null;
 }

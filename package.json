@@ -31,7 +31,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:runtime:pty-rust": "vitest run tests/runtime/rust-sidecar-client.test.ts tests/runtime/pty-rust-runtime.test.ts tests/runtime/cli-runtime-regression.test.ts tests/runtime/pty-query-handler.test.ts tests/runtime/pty-runtime.test.ts",
     "sidecar:build": "cargo build --release --manifest-path sidecar/pty-rust/Cargo.toml",
+    "sidecar:package": "npm run sidecar:build && node scripts/package-sidecar-binary.mjs",
     "sidecar:bench": "node scripts/bench-sidecar-latency.mjs"
   },
   "keywords": [

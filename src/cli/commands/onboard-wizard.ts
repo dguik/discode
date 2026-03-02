@@ -119,7 +119,7 @@ export async function onboardWizardCommand(options: OnboardWizardCliOptions): Pr
   const initialRuntimeMode =
     parseRuntimeModeInput(options.runtimeMode)
     || parseRuntimeModeInput(storedRuntimeMode)
-    || 'pty-ts';
+    || 'pty-rust';
 
   const installedAgents = agentRegistry
     .getAll()

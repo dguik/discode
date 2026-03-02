@@ -82,7 +82,7 @@ Out of scope until replacement is complete:
 |---|---|---|---|
 | VT fidelity | Incorrect cursor/screen state on real CLIs | Regression fixtures from real transcripts, parser state machine hardening | Phase 3 fixture pass rate target |
 | Stream latency | Slow frame updates due to transport/process model | Persistent RPC channel, request ids/timeouts, frame coalescing | Phase 2 tail latency improvement |
-| Platform parity | Linux/macOS/Windows behavior divergence | OS-specific transport adapters + CI matrix e2e | Phase 6 cross-platform gate |
+| Platform parity | Linux/macOS behavior divergence | Unix transport consistency + CI matrix e2e (macOS/Linux) | Phase 6 unix-platform gate |
 | Lifecycle races | Start/stop/resize/dispose races causing leaks/stale state | Explicit lifecycle state machine + race-focused stress tests | Phase 5 leak/race gate |
 
 ## 6) Phase-0 Deliverable

@@ -2,7 +2,9 @@ use crate::pty_bus::{
     dispose_window, resize_window, spawn_window_process, stop_window, write_input,
 };
 use crate::session_manager::{
-    idle_window_state, lock_state, lock_window, window_key, with_window, SharedSidecarState,
+    idle_window_state, lock_state, lock_window, mark_output_mutation, should_coalesce_frame,
+    transition_window_state, window_key, with_window, FrameRenderCache, SharedSidecarState,
+    WindowLifecycleState,
 };
 use crate::vt_lite::build_styled_frame;
 use serde::{Deserialize, Serialize};
@@ -272,7 +274,28 @@ pub fn handle_request(
             let frame = with_window(state, &session_name, &window_name, |window| {
                 let cols = requested_cols.unwrap_or(window.snapshot.cols);
                 let rows = requested_rows.unwrap_or(window.snapshot.rows);
-                Ok(build_styled_frame(&window.buffer, cols, rows))
+                let now_ms = now_unix_millis();
+                if let Some(cache) = &window.frame_cache {
+                    if cache.cols == cols
+                        && cache.rows == rows
+                        && cache.source_revision == window.output_revision
+                    {
+                        return Ok(cache.frame.clone());
+                    }
+                    if should_coalesce_frame(cache, cols, rows, window.output_revision, now_ms) {
+                        return Ok(cache.frame.clone());
+                    }
+                }
+
+                let frame = build_styled_frame(&window.buffer, cols, rows);
+                window.frame_cache = Some(FrameRenderCache {
+                    cols,
+                    rows,
+                    source_revision: window.output_revision,
+                    rendered_at_unix_ms: now_ms,
+                    frame: frame.clone(),
+                });
+                Ok(frame)
             })
             .map_err(map_runtime_error)?;
             Ok(frame)
@@ -354,20 +377,38 @@ fn start_window(
             .clone()
     };
 
-    {
+    let lifecycle_generation = {
         let mut w = lock_window(&window);
         if w.child.is_some() && w.snapshot.status == "running" {
             return Ok(());
         }
-        w.snapshot.status = "starting".to_string();
+        transition_window_state(&mut w, WindowLifecycleState::Starting, "start-request")?;
         w.snapshot.started_at = Some(now_unix_seconds());
         w.snapshot.exited_at = None;
         w.snapshot.exit_code = None;
         w.snapshot.signal = None;
+        w.snapshot.pid = None;
         w.buffer.clear();
-    }
+        w.query_carry.clear();
+        w.private_modes.clear();
+        w.launch_env.clear();
+        w.frame_cache = None;
+        w.lifecycle_generation = w.lifecycle_generation.saturating_add(1);
+        mark_output_mutation(&mut w);
+        w.lifecycle_generation
+    };
 
-    spawn_window_process(state, &window, &session_name, command)?;
+    if let Err(err) =
+        spawn_window_process(state, &window, &session_name, lifecycle_generation, command)
+    {
+        let mut w = lock_window(&window);
+        let _ = transition_window_state(&mut w, WindowLifecycleState::Error, "spawn-failed");
+        w.snapshot.exited_at = Some(now_unix_seconds());
+        w.buffer
+            .push_str(&format!("[runtime] process error: {}\n", err));
+        mark_output_mutation(&mut w);
+        return Err(err);
+    }
 
     Ok(())
 }
@@ -424,6 +465,51 @@ mod tests {
             &mut should_shutdown,
         )
         .unwrap_or_else(|err| panic!("{method} failed: {err}"))
+    }
+
+    fn line_text(frame: &Value, row: usize) -> String {
+        frame["lines"][row]["segments"]
+            .as_array()
+            .map(|segments| {
+                segments
+                    .iter()
+                    .filter_map(|seg| seg["text"].as_str())
+                    .collect::<String>()
+            })
+            .unwrap_or_default()
+    }
+
+    fn wait_for_window_status(
+        state: &SharedSidecarState,
+        session_name: &str,
+        window_name: &str,
+        expected_status: &str,
+    ) -> Value {
+        for _ in 0..80 {
+            let listed = call(
+                state,
+                "list_windows",
+                json!({ "sessionName": session_name }),
+            );
+            let windows = listed["windows"]
+                .as_array()
+                .expect("windows should be array");
+            let maybe = windows
+                .iter()
+                .find(|item| item["windowName"].as_str() == Some(window_name))
+                .cloned();
+            if let Some(window) = maybe {
+                if window["status"].as_str() == Some(expected_status) {
+                    return window;
+                }
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+
+        panic!(
+            "window {}:{} did not reach status '{}'",
+            session_name, window_name, expected_status
+        );
     }
 
     #[test]
@@ -541,5 +627,471 @@ mod tests {
             json!({ "sessionName": "proj-b", "windowName": "win-b" }),
         );
         assert_eq!(stopped["stopped"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn coalesces_burst_frame_requests_and_renders_latest_after_window() {
+        let state = new_shared_state();
+        let _cleanup = Cleanup(state.clone());
+
+        call(
+            &state,
+            "get_or_create_session",
+            json!({ "projectName": "proj-c", "firstWindowName": "win-c" }),
+        );
+
+        with_window(&state, "proj-c", "win-c", |window| {
+            window.buffer = "A".to_string();
+            window.output_revision = window.output_revision.saturating_add(1);
+            window.frame_cache = None;
+            Ok(())
+        })
+        .expect("window should exist");
+
+        let frame_a = call(
+            &state,
+            "get_window_frame",
+            json!({ "sessionName": "proj-c", "windowName": "win-c", "cols": 20, "rows": 6 }),
+        );
+        assert!(line_text(&frame_a, 0).starts_with('A'));
+
+        with_window(&state, "proj-c", "win-c", |window| {
+            window.buffer.push('B');
+            window.output_revision = window.output_revision.saturating_add(1);
+            if let Some(cache) = window.frame_cache.as_mut() {
+                cache.rendered_at_unix_ms = u64::MAX;
+            }
+            Ok(())
+        })
+        .expect("window should exist");
+
+        let frame_coalesced = call(
+            &state,
+            "get_window_frame",
+            json!({ "sessionName": "proj-c", "windowName": "win-c", "cols": 20, "rows": 6 }),
+        );
+        assert_eq!(line_text(&frame_coalesced, 0), line_text(&frame_a, 0));
+
+        with_window(&state, "proj-c", "win-c", |window| {
+            if let Some(cache) = window.frame_cache.as_mut() {
+                cache.rendered_at_unix_ms = 0;
+            }
+            Ok(())
+        })
+        .expect("window should exist");
+
+        let frame_latest = call(
+            &state,
+            "get_window_frame",
+            json!({ "sessionName": "proj-c", "windowName": "win-c", "cols": 20, "rows": 6 }),
+        );
+        assert!(line_text(&frame_latest, 0).starts_with("AB"));
+    }
+
+    #[test]
+    fn keeps_cursor_and_frame_consistent_under_rapid_resize() {
+        let state = new_shared_state();
+        let _cleanup = Cleanup(state.clone());
+
+        call(
+            &state,
+            "get_or_create_session",
+            json!({ "projectName": "proj-d", "firstWindowName": "win-d" }),
+        );
+
+        with_window(&state, "proj-d", "win-d", |window| {
+            window.buffer = "ABCDEFGHIJ0123456789\nLINE-2\nLINE-3".to_string();
+            window.output_revision = window.output_revision.saturating_add(1);
+            Ok(())
+        })
+        .expect("window should exist");
+
+        let dims = [(80, 24), (100, 30), (120, 40), (60, 20), (90, 28), (70, 18)];
+
+        for (cols, rows) in dims {
+            call(
+                &state,
+                "resize_window",
+                json!({
+                    "sessionName": "proj-d",
+                    "windowName": "win-d",
+                    "cols": cols,
+                    "rows": rows
+                }),
+            );
+
+            let frame = call(
+                &state,
+                "get_window_frame",
+                json!({
+                    "sessionName": "proj-d",
+                    "windowName": "win-d",
+                    "cols": cols,
+                    "rows": rows
+                }),
+            );
+
+            assert_eq!(frame["cols"].as_u64(), Some(cols));
+            assert_eq!(frame["rows"].as_u64(), Some(rows));
+            assert!(frame["cursorRow"].as_u64().unwrap_or(0) < rows);
+            assert!(frame["cursorCol"].as_u64().unwrap_or(0) < cols);
+        }
+    }
+
+    #[test]
+    fn stop_window_is_idempotent_on_repeated_calls() {
+        let state = new_shared_state();
+        let _cleanup = Cleanup(state.clone());
+
+        call(
+            &state,
+            "get_or_create_session",
+            json!({ "projectName": "proj-e", "firstWindowName": "win-e" }),
+        );
+        call(
+            &state,
+            "start_window",
+            json!({
+                "sessionName": "proj-e",
+                "windowName": "win-e",
+                "command": "cat"
+            }),
+        );
+
+        let stopped_once = call(
+            &state,
+            "stop_window",
+            json!({ "sessionName": "proj-e", "windowName": "win-e" }),
+        );
+        assert_eq!(stopped_once["stopped"].as_bool(), Some(true));
+
+        let stopped_twice = call(
+            &state,
+            "stop_window",
+            json!({ "sessionName": "proj-e", "windowName": "win-e" }),
+        );
+        assert_eq!(stopped_twice["stopped"].as_bool(), Some(true));
+
+        let listed = call(&state, "list_windows", json!({ "sessionName": "proj-e" }));
+        let windows = listed["windows"]
+            .as_array()
+            .expect("windows should be array");
+        assert_eq!(windows[0]["status"].as_str(), Some("exited"));
+    }
+
+    #[test]
+    fn dispose_during_io_clears_runtime_handles() {
+        let state = new_shared_state();
+
+        call(
+            &state,
+            "get_or_create_session",
+            json!({ "projectName": "proj-f", "firstWindowName": "win-f" }),
+        );
+        call(
+            &state,
+            "start_window",
+            json!({
+                "sessionName": "proj-f",
+                "windowName": "win-f",
+                "command": "cat"
+            }),
+        );
+        call(
+            &state,
+            "type_keys",
+            json!({
+                "sessionName": "proj-f",
+                "windowName": "win-f",
+                "keys": "dispose-check"
+            }),
+        );
+
+        let mut should_shutdown = false;
+        let disposed = handle_request(
+            &state,
+            RpcRequest {
+                id: None,
+                method: "dispose".to_string(),
+                params: json!({}),
+                timeout_ms: None,
+            },
+            &mut should_shutdown,
+        )
+        .unwrap_or_else(|err| panic!("dispose should succeed: {}", err));
+        assert_eq!(disposed["ok"].as_bool(), Some(true));
+        assert!(should_shutdown);
+
+        with_window(&state, "proj-f", "win-f", |window| {
+            assert!(window.child.is_none());
+            assert!(window.master.is_none());
+            assert!(window.writer.is_none());
+            assert_eq!(window.snapshot.status, "exited");
+            Ok(())
+        })
+        .expect("window should remain addressable for verification");
+    }
+
+    #[test]
+    fn enforces_explicit_lifecycle_transitions_across_restart() {
+        let state = new_shared_state();
+        let _cleanup = Cleanup(state.clone());
+
+        call(
+            &state,
+            "get_or_create_session",
+            json!({ "projectName": "proj-g", "firstWindowName": "win-g" }),
+        );
+
+        call(
+            &state,
+            "start_window",
+            json!({
+                "sessionName": "proj-g",
+                "windowName": "win-g",
+                "command": "cat"
+            }),
+        );
+        let _running_first = wait_for_window_status(&state, "proj-g", "win-g", "running");
+
+        call(
+            &state,
+            "stop_window",
+            json!({ "sessionName": "proj-g", "windowName": "win-g" }),
+        );
+        let _exited = wait_for_window_status(&state, "proj-g", "win-g", "exited");
+
+        call(
+            &state,
+            "start_window",
+            json!({
+                "sessionName": "proj-g",
+                "windowName": "win-g",
+                "command": "cat"
+            }),
+        );
+        let _running_second = wait_for_window_status(&state, "proj-g", "win-g", "running");
+
+        with_window(&state, "proj-g", "win-g", |window| {
+            let events = &window.lifecycle_events;
+            assert!(events.iter().all(|ev| ev.at_unix_ms > 0));
+            assert!(
+                events
+                    .iter()
+                    .any(|ev| ev.from == "idle" && ev.to == "starting"),
+                "expected idle -> starting lifecycle event"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|ev| ev.from == "starting" && ev.to == "running"),
+                "expected starting -> running lifecycle event"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|ev| ev.from == "running" && ev.to == "exited"),
+                "expected running -> exited lifecycle event"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|ev| ev.from == "exited" && ev.to == "starting"),
+                "expected exited -> starting lifecycle event"
+            );
+            Ok(())
+        })
+        .expect("window should exist for lifecycle verification");
+    }
+
+    #[test]
+    fn captures_process_exit_code_and_exit_event_for_short_lived_process() {
+        let state = new_shared_state();
+        let _cleanup = Cleanup(state.clone());
+
+        call(
+            &state,
+            "get_or_create_session",
+            json!({ "projectName": "proj-h", "firstWindowName": "win-h" }),
+        );
+        call(
+            &state,
+            "start_window",
+            json!({
+                "sessionName": "proj-h",
+                "windowName": "win-h",
+                "command": "exit 7"
+            }),
+        );
+
+        let exited = wait_for_window_status(&state, "proj-h", "win-h", "exited");
+        assert_eq!(exited["exitCode"].as_i64(), Some(7));
+        assert!(exited["exitedAt"].as_i64().unwrap_or(0) > 0);
+
+        with_window(&state, "proj-h", "win-h", |window| {
+            assert!(
+                window
+                    .lifecycle_events
+                    .iter()
+                    .any(|ev| ev.to == "exited" && ev.reason == "process-exit"),
+                "expected process-exit lifecycle event"
+            );
+            Ok(())
+        })
+        .expect("window should exist for exit verification");
+    }
+
+    #[test]
+    fn keeps_environment_propagation_deterministic_per_window_start() {
+        let state = new_shared_state();
+        let _cleanup = Cleanup(state.clone());
+
+        call(
+            &state,
+            "get_or_create_session",
+            json!({ "projectName": "proj-i", "firstWindowName": "win-i-1" }),
+        );
+        call(
+            &state,
+            "set_session_env",
+            json!({ "sessionName": "proj-i", "key": "CUSTOM_TOKEN", "value": "alpha" }),
+        );
+        call(
+            &state,
+            "set_session_env",
+            json!({ "sessionName": "proj-i", "key": "COLUMNS", "value": "999" }),
+        );
+
+        call(
+            &state,
+            "start_window",
+            json!({
+                "sessionName": "proj-i",
+                "windowName": "win-i-1",
+                "command": "cat"
+            }),
+        );
+        let _running = wait_for_window_status(&state, "proj-i", "win-i-1", "running");
+
+        with_window(&state, "proj-i", "win-i-1", |window| {
+            assert_eq!(
+                window.launch_env.get("CUSTOM_TOKEN").map(|v| v.as_str()),
+                Some("alpha")
+            );
+            assert_eq!(
+                window.launch_env.get("COLUMNS").map(|v| v.as_str()),
+                Some("140")
+            );
+            Ok(())
+        })
+        .expect("first window should exist");
+
+        call(
+            &state,
+            "set_session_env",
+            json!({ "sessionName": "proj-i", "key": "CUSTOM_TOKEN", "value": "beta" }),
+        );
+
+        with_window(&state, "proj-i", "win-i-1", |window| {
+            assert_eq!(
+                window.launch_env.get("CUSTOM_TOKEN").map(|v| v.as_str()),
+                Some("alpha")
+            );
+            Ok(())
+        })
+        .expect("first window should preserve initial env snapshot");
+
+        call(
+            &state,
+            "start_window",
+            json!({
+                "sessionName": "proj-i",
+                "windowName": "win-i-2",
+                "command": "cat"
+            }),
+        );
+        let _running_second = wait_for_window_status(&state, "proj-i", "win-i-2", "running");
+
+        with_window(&state, "proj-i", "win-i-2", |window| {
+            assert_eq!(
+                window.launch_env.get("CUSTOM_TOKEN").map(|v| v.as_str()),
+                Some("beta")
+            );
+            assert_eq!(
+                window.launch_env.get("COLUMNS").map(|v| v.as_str()),
+                Some("140")
+            );
+            Ok(())
+        })
+        .expect("second window should receive updated session env snapshot");
+    }
+
+    #[test]
+    fn lifecycle_stress_run_leaves_no_running_windows_or_handles() {
+        let state = new_shared_state();
+        let _cleanup = Cleanup(state.clone());
+
+        call(
+            &state,
+            "get_or_create_session",
+            json!({ "projectName": "proj-j", "firstWindowName": "win-j" }),
+        );
+
+        for cycle in 0..8 {
+            call(
+                &state,
+                "start_window",
+                json!({
+                    "sessionName": "proj-j",
+                    "windowName": "win-j",
+                    "command": "cat"
+                }),
+            );
+            let _running = wait_for_window_status(&state, "proj-j", "win-j", "running");
+
+            call(
+                &state,
+                "type_keys",
+                json!({
+                    "sessionName": "proj-j",
+                    "windowName": "win-j",
+                    "keys": format!("cycle-{cycle}")
+                }),
+            );
+
+            let cols = 80 + (cycle as u64 * 2);
+            let rows = 24 + (cycle as u64 % 5);
+            call(
+                &state,
+                "resize_window",
+                json!({
+                    "sessionName": "proj-j",
+                    "windowName": "win-j",
+                    "cols": cols,
+                    "rows": rows
+                }),
+            );
+
+            call(
+                &state,
+                "stop_window",
+                json!({ "sessionName": "proj-j", "windowName": "win-j" }),
+            );
+            let _exited = wait_for_window_status(&state, "proj-j", "win-j", "exited");
+        }
+
+        let health = call(&state, "health", json!({}));
+        assert_eq!(health["runningWindows"].as_u64(), Some(0));
+
+        let guard = lock_state(&state);
+        for window in guard.windows.values() {
+            let window = window
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert_ne!(window.snapshot.status, "running");
+            assert!(window.child.is_none());
+            assert!(window.master.is_none());
+            assert!(window.writer.is_none());
+        }
     }
 }

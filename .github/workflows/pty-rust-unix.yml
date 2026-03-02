@@ -1,0 +1,58 @@
+name: pty-rust-unix
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/pty-rust-unix.yml'
+      - 'sidecar/pty-rust/**'
+      - 'src/runtime/rust-sidecar-client.ts'
+      - 'tests/runtime/**'
+      - 'scripts/package-sidecar-binary.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/pty-rust-unix.yml'
+      - 'sidecar/pty-rust/**'
+      - 'src/runtime/rust-sidecar-client.ts'
+      - 'tests/runtime/**'
+      - 'scripts/package-sidecar-binary.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  test-unix-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run sidecar Rust tests
+        run: cargo test --manifest-path sidecar/pty-rust/Cargo.toml
+
+      - name: Package host sidecar binary
+        run: npm run sidecar:package
+
+      - name: Run runtime regression suite
+        run: npm run test:runtime:pty-rust

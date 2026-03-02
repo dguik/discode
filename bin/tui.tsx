@@ -43,12 +43,11 @@ const ENABLE_RUNTIME_CURSOR_OVERLAY = process.env.DISCODE_TUI_RUNTIME_CURSOR !==
 type TuiInput = {
   currentSession?: string;
   currentWindow?: string;
-  runtimeMode?: 'tmux' | 'pty-ts' | 'pty-rust';
+  runtimeMode?: 'tmux' | 'pty-rust';
   getRuntimeBackendStatus?: () =>
     | 'sidecar'
-    | 'ts-fallback'
     | undefined
-    | Promise<'sidecar' | 'ts-fallback' | undefined>;
+    | Promise<'sidecar' | undefined>;
   initialCommand?: string;
   onCommand: (command: string, append: (line: string) => void) => Promise<boolean | void>;
   onStopProject: (project: string) => Promise<void>;
@@ -235,7 +234,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [configOpen, setConfigOpen] = createSignal(false);
   const [configSelected, setConfigSelected] = createSignal(0);
   const [configKeepChannel, setConfigKeepChannel] = createSignal<'on' | 'off'>('off');
-  const [configRuntimeMode, setConfigRuntimeMode] = createSignal<'tmux' | 'pty-ts' | 'pty-rust'>('tmux');
+  const [configRuntimeMode, setConfigRuntimeMode] = createSignal<'tmux' | 'pty-rust'>('tmux');
   const [configDefaultAgent, setConfigDefaultAgent] = createSignal('(auto)');
   const [configDefaultChannel, setConfigDefaultChannel] = createSignal('(auto)');
   const [configAgentOptions, setConfigAgentOptions] = createSignal<string[]>([]);
@@ -257,7 +256,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [cursorBlinkOn, setCursorBlinkOn] = createSignal(true);
   const [prefixPending, setPrefixPending] = createSignal(false);
   const [runtimeInputMode, setRuntimeInputMode] = createSignal(true);
-  const [runtimeBackendStatus, setRuntimeBackendStatus] = createSignal<'sidecar' | 'ts-fallback' | undefined>(undefined);
+  const [runtimeBackendStatus, setRuntimeBackendStatus] = createSignal<'sidecar' | undefined>(undefined);
   const [runtimeStatusLine, setRuntimeStatusLine] = createSignal('transport: stream');
   const [commandStatusLine, setCommandStatusLine] = createSignal('status: ready');
   const [clipboardToast, setClipboardToast] = createSignal<string | undefined>(undefined);
@@ -279,7 +278,6 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     const backend = runtimeBackendStatus();
     if (mode !== 'pty-rust') return mode;
     if (backend === 'sidecar') return 'pty-rust (sidecar)';
-    if (backend === 'ts-fallback') return 'pty-rust (ts fallback)';
     return 'pty-rust';
   });
   const logsBodyHeight = createMemo(() => Math.max(8, Math.min(Math.floor(dims().height * 0.55), dims().height - 12)));
@@ -536,7 +534,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       }
 
       const runtimeMode = parseValueLine(summaryLines, 'runtimeMode');
-      if (runtimeMode === 'tmux' || runtimeMode === 'pty-ts' || runtimeMode === 'pty-rust') {
+      if (runtimeMode === 'tmux' || runtimeMode === 'pty-rust') {
         setConfigRuntimeMode(runtimeMode);
       }
 
@@ -633,10 +631,6 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     items.push({
       command: '/config runtimeMode tmux',
       label: `runtimeMode -> tmux${configRuntimeMode() === 'tmux' ? ' (current)' : ''}`,
-    });
-    items.push({
-      command: '/config runtimeMode pty-ts',
-      label: `runtimeMode -> pty-ts${configRuntimeMode() === 'pty-ts' ? ' (current)' : ''}`,
     });
     items.push({
       command: '/config runtimeMode pty-rust',

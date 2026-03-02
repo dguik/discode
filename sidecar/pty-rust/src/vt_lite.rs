@@ -1,8 +1,9 @@
-pub use crate::terminal_pane::{build_styled_frame, TerminalPane};
+pub use crate::terminal_pane::build_styled_frame;
 
 #[cfg(test)]
 mod tests {
-    use super::{build_styled_frame, TerminalPane};
+    use super::build_styled_frame;
+    use crate::terminal_pane::TerminalPane;
     use serde_json::Value;
 
     fn line_text(frame: &Value, row: usize) -> String {
@@ -91,6 +92,42 @@ mod tests {
     }
 
     #[test]
+    fn supports_split_scs_sequence_across_feeds() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("\x1b(");
+        pane.feed("BOK");
+
+        let frame = pane.frame();
+        let first = line_text(&frame, 0);
+        assert!(first.starts_with("OK"));
+        assert!(!first.contains("BOK"));
+    }
+
+    #[test]
+    fn supports_split_dcs_sequence_across_feeds() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("\x1bPignored");
+        pane.feed("-payload\x1b\\done");
+
+        let frame = pane.frame();
+        let first = line_text(&frame, 0);
+        assert!(first.starts_with("done"));
+        assert!(!first.contains("ignored"));
+    }
+
+    #[test]
+    fn supports_split_apc_sequence_across_feeds() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("\x1b_kitty");
+        pane.feed("-query\x1b\\ok");
+
+        let frame = pane.frame();
+        let first = line_text(&frame, 0);
+        assert!(first.starts_with("ok"));
+        assert!(!first.contains("kitty"));
+    }
+
+    #[test]
     fn wraps_at_last_column_and_continues_on_next_line() {
         let frame = build_styled_frame("12345678901234567890X", 20, 6);
         assert_eq!(line_text(&frame, 0), "12345678901234567890");
@@ -145,5 +182,73 @@ mod tests {
         assert_eq!(line_text(&scrolled_down, 1), "");
         assert!(line_text(&scrolled_down, 2).starts_with("b"));
         assert!(line_text(&scrolled_down, 3).starts_with("c"));
+    }
+
+    #[test]
+    fn tracks_cursor_visibility_through_alt_screen_transitions() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("\x1b[?25l");
+        assert_eq!(pane.frame()["cursorVisible"].as_bool(), Some(false));
+
+        pane.feed("\x1b[?1049h");
+        assert_eq!(pane.frame()["cursorVisible"].as_bool(), Some(true));
+
+        pane.feed("\x1b[?1049l");
+        assert_eq!(pane.frame()["cursorVisible"].as_bool(), Some(false));
+    }
+
+    #[test]
+    fn supports_alt_screen_modes_47_and_1047() {
+        let frame_47 = build_styled_frame("primary\x1b[?47halt\x1b[?47l", 20, 6);
+        let joined_47 = (0..6)
+            .map(|idx| line_text(&frame_47, idx))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined_47.contains("primary"));
+        assert!(!joined_47.contains("alt"));
+
+        let frame_1047 = build_styled_frame("primary\x1b[?1047halt\x1b[?1047l", 20, 6);
+        let joined_1047 = (0..6)
+            .map(|idx| line_text(&frame_1047, idx))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined_1047.contains("primary"));
+        assert!(!joined_1047.contains("alt"));
+    }
+
+    #[test]
+    fn tracks_wide_characters_without_cursor_corruption() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("한글A");
+
+        let frame = pane.frame();
+        assert_eq!(frame["cursorRow"].as_u64(), Some(0));
+        assert_eq!(frame["cursorCol"].as_u64(), Some(5));
+        assert!(line_text(&frame, 0).contains("한글A"));
+    }
+
+    #[test]
+    fn keeps_combining_mark_on_last_cell_before_wrap() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("ABCDEFGHIJ0123456789");
+        pane.feed("\u{0301}");
+        pane.feed("X");
+
+        let frame = pane.frame();
+        assert_eq!(frame["cursorRow"].as_u64(), Some(1));
+        assert_eq!(frame["cursorCol"].as_u64(), Some(1));
+        assert!(line_text(&frame, 0).contains("9\u{0301}"));
+        assert!(line_text(&frame, 1).starts_with('X'));
+    }
+
+    #[test]
+    fn treats_zwj_emoji_cluster_as_single_glyph_cell_cluster() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("👨\u{200d}💻A");
+
+        let frame = pane.frame();
+        assert_eq!(frame["cursorRow"].as_u64(), Some(0));
+        assert_eq!(frame["cursorCol"].as_u64(), Some(3));
+        assert!(line_text(&frame, 0).contains("👨\u{200d}💻A"));
     }
 }

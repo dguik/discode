@@ -12,7 +12,7 @@ export function handleConfigShow(append: (line: string) => void, deps: TuiComman
   append('Usage: /config keepChannel [on|off|toggle]');
   append('Usage: /config defaultAgent [agent|auto]');
   append('Usage: /config defaultChannel [channelId|auto]');
-  append('Usage: /config runtimeMode [tmux|pty|toggle]');
+  append('Usage: /config runtimeMode [tmux|pty-rust|toggle]');
   return 'handled';
 }
 
@@ -110,20 +110,20 @@ function handleConfigRuntimeMode(parts: string[], append: (line: string) => void
 
   if (!value) {
     append(`runtimeMode: ${currentMode}`);
-    append('Use: /config runtimeMode [tmux|pty|toggle]');
+    append('Use: /config runtimeMode [tmux|pty-rust|toggle]');
     return 'handled';
   }
 
   let nextMode: RuntimeMode;
   if (value === 'toggle') {
-    nextMode = currentMode === 'tmux' ? 'pty-ts' : 'tmux';
-  } else if (value === 'tmux' || value === 'pty-ts' || value === 'pty-rust') {
+    nextMode = currentMode === 'tmux' ? 'pty-rust' : 'tmux';
+  } else if (value === 'tmux' || value === 'pty-rust') {
     nextMode = value;
-  } else if (value === 'pty') {
-    nextMode = 'pty-ts';
+  } else if (value === 'pty' || value === 'pty-ts') {
+    nextMode = 'pty-rust';
   } else {
     append(`⚠️ Unknown runtime mode: ${parts[2]}`);
-    append('Use tmux, pty-ts, pty-rust, or toggle');
+    append('Use tmux, pty-rust, or toggle');
     return 'handled';
   }
 

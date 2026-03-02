@@ -10,7 +10,7 @@ pub struct CellStyle {
     pub inverse: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Cell {
     pub text: String,
     pub style: CellStyle,
@@ -104,5 +104,21 @@ pub fn char_display_width(ch: char) -> usize {
     {
         return 0;
     }
+
+    if (0x1100..=0x115f).contains(&cp)
+        || (0x2329..=0x232a).contains(&cp)
+        || (0x2e80..=0xa4cf).contains(&cp)
+        || (0xac00..=0xd7a3).contains(&cp)
+        || (0xf900..=0xfaff).contains(&cp)
+        || (0xfe10..=0xfe19).contains(&cp)
+        || (0xfe30..=0xfe6f).contains(&cp)
+        || (0xff00..=0xff60).contains(&cp)
+        || (0xffe0..=0xffe6).contains(&cp)
+        || (0x1f300..=0x1faff).contains(&cp)
+        || (0x20000..=0x3fffd).contains(&cp)
+    {
+        return 2;
+    }
+
     1
 }
