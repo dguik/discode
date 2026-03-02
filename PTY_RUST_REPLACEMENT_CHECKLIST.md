@@ -65,7 +65,7 @@ Exit criteria:
 ## Phase 3 - Terminal Engine Fidelity (Zellij-like terminal pane behavior)
 
 - [ ] implement robust parser state machine for split/incomplete sequences
-- [ ] harden cursor movement, wrapping, scroll region, save/restore, reverse index
+- [x] harden cursor movement, wrapping, scroll region, save/restore, reverse index (covered in `sidecar/pty-rust/src/vt_lite.rs` regression tests)
 - [ ] harden alt-screen enter/leave transitions and cursor visibility behavior
 - [ ] implement wide/combining char width correctness in grid writes
 - [ ] define and implement query-response policy for supported terminal queries

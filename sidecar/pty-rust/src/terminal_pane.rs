@@ -242,6 +242,18 @@ impl VtLite {
                 self.wrap_pending = false;
                 self.cursor_col = self.cursor_col.saturating_sub(n);
             }
+            'E' => {
+                let n = param_or(&params, 0, 1).max(1) as usize;
+                self.wrap_pending = false;
+                self.cursor_row = (self.cursor_row + n).min(self.rows.saturating_sub(1));
+                self.cursor_col = 0;
+            }
+            'F' => {
+                let n = param_or(&params, 0, 1).max(1) as usize;
+                self.wrap_pending = false;
+                self.cursor_row = self.cursor_row.saturating_sub(n);
+                self.cursor_col = 0;
+            }
             'G' => {
                 let col = param_or(&params, 0, 1).max(1) as usize;
                 self.wrap_pending = false;
@@ -266,6 +278,26 @@ impl VtLite {
             'K' => {
                 self.wrap_pending = false;
                 self.erase_line(param_or(&params, 0, 0));
+            }
+            'L' => {
+                let n = param_or(&params, 0, 1).max(1) as usize;
+                self.wrap_pending = false;
+                self.insert_lines(n);
+            }
+            'M' => {
+                let n = param_or(&params, 0, 1).max(1) as usize;
+                self.wrap_pending = false;
+                self.delete_lines(n);
+            }
+            'S' => {
+                let n = param_or(&params, 0, 1).max(1) as usize;
+                self.wrap_pending = false;
+                self.scroll_region_up(self.scroll_top, self.scroll_bottom, n);
+            }
+            'T' => {
+                let n = param_or(&params, 0, 1).max(1) as usize;
+                self.wrap_pending = false;
+                self.scroll_region_down(self.scroll_top, self.scroll_bottom, n);
             }
             'm' => {
                 self.apply_sgr(&params);
@@ -428,7 +460,11 @@ impl VtLite {
     }
 
     fn scroll_region_up(&mut self, top: usize, bottom: usize, count: usize) {
-        if top >= bottom || bottom >= self.rows {
+        if top > bottom || bottom >= self.rows {
+            return;
+        }
+        if top == bottom {
+            self.lines[top] = make_row(self.cols);
             return;
         }
         let n = count.max(1).min(bottom - top + 1);
@@ -439,13 +475,43 @@ impl VtLite {
     }
 
     fn scroll_region_down(&mut self, top: usize, bottom: usize, count: usize) {
-        if top >= bottom || bottom >= self.rows {
+        if top > bottom || bottom >= self.rows {
+            return;
+        }
+        if top == bottom {
+            self.lines[top] = make_row(self.cols);
             return;
         }
         let n = count.max(1).min(bottom - top + 1);
         for _ in 0..n {
             self.lines.remove(bottom);
             self.lines.insert(top, make_row(self.cols));
+        }
+    }
+
+    fn insert_lines(&mut self, count: usize) {
+        if self.cursor_row < self.scroll_top || self.cursor_row > self.scroll_bottom {
+            return;
+        }
+        let n = count
+            .max(1)
+            .min(self.scroll_bottom.saturating_sub(self.cursor_row) + 1);
+        for _ in 0..n {
+            self.lines.remove(self.scroll_bottom);
+            self.lines.insert(self.cursor_row, make_row(self.cols));
+        }
+    }
+
+    fn delete_lines(&mut self, count: usize) {
+        if self.cursor_row < self.scroll_top || self.cursor_row > self.scroll_bottom {
+            return;
+        }
+        let n = count
+            .max(1)
+            .min(self.scroll_bottom.saturating_sub(self.cursor_row) + 1);
+        for _ in 0..n {
+            self.lines.remove(self.cursor_row);
+            self.lines.insert(self.scroll_bottom, make_row(self.cols));
         }
     }
 
