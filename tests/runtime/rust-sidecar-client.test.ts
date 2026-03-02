@@ -53,6 +53,16 @@ if (args[0] === 'server') {
     cursorCol: 4,
     cursorVisible: true,
   };
+  else if (method === 'health') result = {
+    status: 'ok',
+    version: 1,
+    pid: 999,
+    startedAtUnixMs: 1710000000000,
+    uptimeMs: 123,
+    sessions: 1,
+    windows: 1,
+    runningWindows: 1,
+  };
   else if (method === 'stop_window') result = { stopped: true };
   else result = { ok: true };
 
@@ -103,6 +113,7 @@ if (args[0] === 'server') {
     expect(client.isAvailable()).toBe(true);
     expect(client.getOrCreateSession('bridge', 'demo')).toBe('bridge');
     expect(client.windowExists('bridge', 'demo')).toBe(true);
+    expect(client.health().status).toBe('ok');
     expect(client.listWindows()).toHaveLength(1);
     expect(client.getWindowBuffer('bridge', 'demo')).toContain('sidecar');
     expect(client.getWindowFrame('bridge', 'demo')?.cols).toBe(80);

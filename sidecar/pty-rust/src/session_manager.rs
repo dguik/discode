@@ -2,6 +2,7 @@ use portable_pty::{Child, MasterPty};
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_COLS: u16 = 140;
 const DEFAULT_ROWS: u16 = 40;
@@ -65,6 +66,7 @@ pub struct SidecarState {
     pub sessions: SessionRegistry,
     pub windows: WindowRegistry,
     pub max_buffer_bytes: usize,
+    pub started_at_unix_ms: u64,
 }
 
 impl SidecarState {
@@ -73,8 +75,16 @@ impl SidecarState {
             sessions: HashMap::new(),
             windows: HashMap::new(),
             max_buffer_bytes: DEFAULT_MAX_BUFFER_BYTES,
+            started_at_unix_ms: now_unix_millis(),
         }
     }
+}
+
+fn now_unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
 }
 
 pub type SharedSidecarState = Arc<Mutex<SidecarState>>;

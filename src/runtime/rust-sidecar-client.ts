@@ -18,6 +18,17 @@ type SidecarOptions = {
   startupTimeoutMs?: number;
 };
 
+export type SidecarHealthSnapshot = {
+  status: string;
+  version: number;
+  pid: number;
+  startedAtUnixMs: number;
+  uptimeMs: number;
+  sessions: number;
+  windows: number;
+  runningWindows: number;
+};
+
 export class RustSidecarClient {
   private binaryPath: string | null;
   private socketPath: string;
@@ -41,6 +52,10 @@ export class RustSidecarClient {
 
   isAvailable(): boolean {
     return this.available;
+  }
+
+  health(): SidecarHealthSnapshot {
+    return this.request<SidecarHealthSnapshot>('health', {});
   }
 
   getOrCreateSession(projectName: string, firstWindowName?: string): string {
@@ -132,9 +147,15 @@ export class RustSidecarClient {
 
     this.stopClientBridge();
 
-    if (this.serverProcess && !this.serverProcess.killed) {
-      this.serverProcess.kill('SIGTERM');
+    if (this.serverProcess && !this.isProcessExited(this.serverProcess)) {
+      if (!this.waitForProcessExit(this.serverProcess, 300)) {
+        this.serverProcess.kill('SIGTERM');
+        if (!this.waitForProcessExit(this.serverProcess, 300)) {
+          this.serverProcess.kill('SIGKILL');
+        }
+      }
     }
+    this.serverProcess = undefined;
 
     this.available = false;
   }
@@ -144,7 +165,7 @@ export class RustSidecarClient {
 
     if (this.startClientBridge()) {
       try {
-        this.request('hello', {}, true);
+        this.probeBridgeReady();
         return true;
       } catch {
         this.stopClientBridge();
@@ -152,7 +173,7 @@ export class RustSidecarClient {
     }
 
     try {
-      this.requestViaCommand('hello', {});
+      this.probeCommandReady();
       return true;
     } catch {
       // try server spawn next
@@ -180,7 +201,7 @@ export class RustSidecarClient {
     while (Date.now() - start < this.startupTimeoutMs) {
       if (!this.startClientBridge()) {
         try {
-          this.requestViaCommand('hello', {});
+          this.probeCommandReady();
           return true;
         } catch {
           continue;
@@ -188,7 +209,7 @@ export class RustSidecarClient {
       }
 
       try {
-        this.request('hello', {}, true);
+        this.probeBridgeReady();
         return true;
       } catch {
         this.stopClientBridge();
@@ -243,6 +264,22 @@ export class RustSidecarClient {
     this.clientStdinFd = undefined;
     this.clientStdoutFd = undefined;
     this.clientReadBuffer = Buffer.alloc(0);
+  }
+
+  private probeBridgeReady(): void {
+    try {
+      this.request('health', {}, true);
+    } catch {
+      this.request('hello', {}, true);
+    }
+  }
+
+  private probeCommandReady(): void {
+    try {
+      this.requestViaCommand('health', {});
+    } catch {
+      this.requestViaCommand('hello', {});
+    }
   }
 
   private request<T = unknown>(method: string, params?: Record<string, unknown>, ignoreAvailable = false): T {
@@ -372,6 +409,21 @@ export class RustSidecarClient {
     if (!Number.isInteger(responseId) || responseId !== requestId) {
       throw new Error(`sidecar response id mismatch for ${method}: expected=${requestId}, received=${String(responseId)}`);
     }
+  }
+
+  private isProcessExited(process: ChildProcess): boolean {
+    return process.exitCode !== null || process.signalCode !== null;
+  }
+
+  private waitForProcessExit(process: ChildProcess, timeoutMs: number): boolean {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.isProcessExited(process)) {
+        return true;
+      }
+      sleepSync(10);
+    }
+    return this.isProcessExited(process);
   }
 
   private readClientLine(): string {

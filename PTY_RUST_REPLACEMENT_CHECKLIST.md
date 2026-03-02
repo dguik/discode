@@ -53,8 +53,8 @@ Exit criteria:
 
 - [x] replace request-per-process client pattern with persistent RPC connection model (persistent `client` bridge + line-delimited RPC over single socket connection)
 - [x] introduce request ids, timeouts, and explicit error codes
-- [ ] implement sidecar heartbeat/health method
-- [ ] add controlled shutdown and socket/pipe cleanup guarantees
+- [x] implement sidecar heartbeat/health method
+- [x] add controlled shutdown and socket/pipe cleanup guarantees
 - [ ] add observability: per-method latency/error counters and sidecar startup metrics
 
 Exit criteria:

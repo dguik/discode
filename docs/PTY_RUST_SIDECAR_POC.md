@@ -18,6 +18,7 @@ This document describes the Phase 4 PoC shape for `runtimeMode=pty-rust`.
 ## Supported PoC methods
 
 - `hello`
+- `health`
 - `get_or_create_session`
 - `set_session_env`
 - `window_exists`

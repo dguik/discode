@@ -95,6 +95,31 @@ pub fn handle_request(
 ) -> Result<Value, RpcError> {
     match req.method.as_str() {
         "hello" => Ok(json!({ "version": 1 })),
+        "health" => {
+            let guard = lock_state(state);
+            let running_windows = guard
+                .windows
+                .values()
+                .filter(|window| {
+                    window
+                        .lock()
+                        .ok()
+                        .map(|w| w.snapshot.status == "running")
+                        .unwrap_or(false)
+                })
+                .count();
+            let now_unix_ms = now_unix_millis();
+            Ok(json!({
+                "status": "ok",
+                "version": 1,
+                "pid": std::process::id(),
+                "startedAtUnixMs": guard.started_at_unix_ms,
+                "uptimeMs": now_unix_ms.saturating_sub(guard.started_at_unix_ms),
+                "sessions": guard.sessions.len(),
+                "windows": guard.windows.len(),
+                "runningWindows": running_windows,
+            }))
+        }
         "get_or_create_session" => {
             let project_name = get_str(&req.params, "projectName")?;
             let first_window_name = get_opt_str(&req.params, "firstWindowName");
@@ -326,6 +351,13 @@ fn now_unix_seconds() -> i64 {
         .unwrap_or_default()
 }
 
+fn now_unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +423,12 @@ mod tests {
             .expect("windows should be array");
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0]["status"].as_str(), Some("idle"));
+
+        let health = call(&state, "health", json!({}));
+        assert_eq!(health["status"].as_str(), Some("ok"));
+        assert_eq!(health["version"].as_u64(), Some(1));
+        assert_eq!(health["sessions"].as_u64(), Some(1));
+        assert_eq!(health["windows"].as_u64(), Some(1));
     }
 
     #[test]
