@@ -18,14 +18,35 @@ struct VtLite {
     wrap_pending: bool,
     cursor_visible: bool,
     saved_primary: Option<SavedScreen>,
+    pending_escape: String,
+}
+
+pub struct TerminalPane {
+    vt: VtLite,
 }
 
 pub fn build_styled_frame(buffer: &str, cols: u16, rows: u16) -> Value {
-    let safe_cols = cols.clamp(20, 300) as usize;
-    let safe_rows = rows.clamp(6, 200) as usize;
-    let mut vt = VtLite::new(safe_cols, safe_rows);
-    vt.feed(buffer);
-    vt.into_frame()
+    let mut pane = TerminalPane::new(cols, rows);
+    pane.feed(buffer);
+    pane.frame()
+}
+
+impl TerminalPane {
+    pub fn new(cols: u16, rows: u16) -> Self {
+        let safe_cols = cols.clamp(20, 300) as usize;
+        let safe_rows = rows.clamp(6, 200) as usize;
+        Self {
+            vt: VtLite::new(safe_cols, safe_rows),
+        }
+    }
+
+    pub fn feed(&mut self, input: &str) {
+        self.vt.feed(input);
+    }
+
+    pub fn frame(&self) -> Value {
+        self.vt.into_frame()
+    }
 }
 
 impl VtLite {
@@ -44,17 +65,26 @@ impl VtLite {
             wrap_pending: false,
             cursor_visible: true,
             saved_primary: None,
+            pending_escape: String::new(),
         }
     }
 
     fn feed(&mut self, input: &str) {
-        let chars = input.chars().collect::<Vec<_>>();
+        let mut merged = String::new();
+        if !self.pending_escape.is_empty() {
+            merged.push_str(&self.pending_escape);
+            self.pending_escape.clear();
+        }
+        merged.push_str(input);
+
+        let chars = merged.chars().collect::<Vec<_>>();
         let mut i = 0usize;
 
         while i < chars.len() {
             let ch = chars[i];
             if ch == '\x1b' {
                 if i + 1 >= chars.len() {
+                    self.pending_escape = chars[i..].iter().collect::<String>();
                     break;
                 }
                 let next = chars[i + 1];
@@ -69,6 +99,7 @@ impl VtLite {
                         j += 1;
                     }
                     if j >= chars.len() {
+                        self.pending_escape = chars[i..].iter().collect::<String>();
                         break;
                     }
 
@@ -96,6 +127,7 @@ impl VtLite {
                         j += 1;
                     }
                     if !terminated {
+                        self.pending_escape = chars[i..].iter().collect::<String>();
                         break;
                     }
                     i = j;
@@ -531,7 +563,7 @@ impl VtLite {
         self.saved_primary = None;
     }
 
-    fn into_frame(self) -> Value {
+    fn into_frame(&self) -> Value {
         let mut line_values = Vec::with_capacity(self.rows);
 
         for row in &self.lines {

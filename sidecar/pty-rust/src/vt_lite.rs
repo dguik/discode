@@ -1,8 +1,8 @@
-pub use crate::terminal_pane::build_styled_frame;
+pub use crate::terminal_pane::{build_styled_frame, TerminalPane};
 
 #[cfg(test)]
 mod tests {
-    use super::build_styled_frame;
+    use super::{build_styled_frame, TerminalPane};
     use serde_json::Value;
 
     fn line_text(frame: &Value, row: usize) -> String {
@@ -57,5 +57,36 @@ mod tests {
             red.and_then(|seg| seg.get("fg")).and_then(|v| v.as_str()),
             Some("#cd3131")
         );
+    }
+
+    #[test]
+    fn supports_split_csi_sequence_across_feeds() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("\x1b[31");
+        pane.feed("mred");
+
+        let frame = pane.frame();
+        let red = frame["lines"][0]["segments"]
+            .as_array()
+            .and_then(|segments| {
+                segments
+                    .iter()
+                    .find(|seg| seg["text"].as_str().unwrap_or("").contains("red"))
+            });
+        assert_eq!(
+            red.and_then(|seg| seg.get("fg")).and_then(|v| v.as_str()),
+            Some("#cd3131")
+        );
+    }
+
+    #[test]
+    fn supports_split_osc_sequence_across_feeds() {
+        let mut pane = TerminalPane::new(20, 6);
+        pane.feed("\x1b]0;window title");
+        pane.feed("\u{0007}done");
+
+        let frame = pane.frame();
+        let first = line_text(&frame, 0);
+        assert!(first.starts_with("done"));
     }
 }
