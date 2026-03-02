@@ -31,7 +31,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "sidecar:build": "cargo build --release --manifest-path sidecar/pty-rust/Cargo.toml"
+    "sidecar:build": "cargo build --release --manifest-path sidecar/pty-rust/Cargo.toml",
+    "sidecar:bench": "node scripts/bench-sidecar-latency.mjs"
   },
   "keywords": [
     "discord",

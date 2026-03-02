@@ -60,7 +60,7 @@ Exit criteria:
 Exit criteria:
 
 - [x] no per-request `spawnSync` in steady state path (persistent bridge path; one-shot request fallback retained for compatibility)
-- [ ] request tail latency improves versus PoC baseline
+- [x] request tail latency improves versus PoC baseline (`npm run sidecar:bench`; latest report in `docs/PTY_RUST_PHASE2_LATENCY.md`)
 
 ## Phase 3 - Terminal Engine Fidelity (Zellij-like terminal pane behavior)
 
