@@ -33,7 +33,7 @@ mod unix_main {
     use crate::rpc::{
         handle_request, invalid_request, request_timeout, RpcError, RpcRequest, RpcResponse,
     };
-    use crate::session_manager::new_shared_state;
+    use crate::session_manager::{new_shared_state, record_rpc_observation};
     use serde_json::{json, Value};
     use std::fs;
     use std::io::{BufRead, BufReader, Read, Write};
@@ -251,6 +251,15 @@ mod unix_main {
                     };
                 }
             }
+
+            let observed_latency_ms =
+                started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            record_rpc_observation(
+                state,
+                &method_name,
+                observed_latency_ms,
+                response.error.as_ref().map(|error| error.code.as_str()),
+            );
 
             write_response(stream, &response)?;
             if should_shutdown {

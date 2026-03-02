@@ -55,7 +55,7 @@ Exit criteria:
 - [x] introduce request ids, timeouts, and explicit error codes
 - [x] implement sidecar heartbeat/health method
 - [x] add controlled shutdown and socket/pipe cleanup guarantees
-- [ ] add observability: per-method latency/error counters and sidecar startup metrics
+- [x] add observability: per-method latency/error counters and sidecar startup metrics
 
 Exit criteria:
 

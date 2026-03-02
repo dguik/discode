@@ -27,6 +27,25 @@ export type SidecarHealthSnapshot = {
   sessions: number;
   windows: number;
   runningWindows: number;
+  rpc?: {
+    requestsTotal: number;
+    errorsTotal: number;
+    methods: Record<string, {
+      requests: number;
+      errors: number;
+      lastLatencyMs: number;
+      avgLatencyMs: number;
+      maxLatencyMs: number;
+      lastErrorCode: string | null;
+    }>;
+  };
+};
+
+export type SidecarStartupMetrics = {
+  strategy: 'bridge-existing' | 'request-existing' | 'spawned-server' | 'unavailable';
+  durationMs: number;
+  attempts: number;
+  reason?: string;
 };
 
 export class RustSidecarClient {
@@ -41,6 +60,11 @@ export class RustSidecarClient {
   private requestTimeoutMs = 1500;
   private nextRequestId = 1;
   private available = false;
+  private startupMetrics: SidecarStartupMetrics = {
+    strategy: 'unavailable',
+    durationMs: 0,
+    attempts: 0,
+  };
 
   constructor(options?: SidecarOptions) {
     this.binaryPath = resolveSidecarBinaryPath(options?.binaryPath);
@@ -56,6 +80,10 @@ export class RustSidecarClient {
 
   health(): SidecarHealthSnapshot {
     return this.request<SidecarHealthSnapshot>('health', {});
+  }
+
+  getStartupMetrics(): SidecarStartupMetrics {
+    return { ...this.startupMetrics };
   }
 
   getOrCreateSession(projectName: string, firstWindowName?: string): string {
@@ -161,11 +189,17 @@ export class RustSidecarClient {
   }
 
   private tryConnectOrStart(): boolean {
-    if (!this.binaryPath) return false;
+    const startedAt = Date.now();
+    this.startupMetrics.attempts = 0;
+    if (!this.binaryPath) {
+      this.markStartupFailure(startedAt, 'binary not found');
+      return false;
+    }
 
     if (this.startClientBridge()) {
       try {
         this.probeBridgeReady();
+        this.markStartupSuccess('bridge-existing', startedAt);
         return true;
       } catch {
         this.stopClientBridge();
@@ -174,6 +208,7 @@ export class RustSidecarClient {
 
     try {
       this.probeCommandReady();
+      this.markStartupSuccess('request-existing', startedAt);
       return true;
     } catch {
       // try server spawn next
@@ -210,6 +245,7 @@ export class RustSidecarClient {
 
       try {
         this.probeBridgeReady();
+        this.markStartupSuccess('spawned-server', startedAt);
         return true;
       } catch {
         this.stopClientBridge();
@@ -219,6 +255,8 @@ export class RustSidecarClient {
     if (this.serverProcess && !this.serverProcess.killed) {
       this.serverProcess.kill('SIGTERM');
     }
+
+    this.markStartupFailure(startedAt, 'startup timeout');
 
     return false;
   }
@@ -267,6 +305,7 @@ export class RustSidecarClient {
   }
 
   private probeBridgeReady(): void {
+    this.startupMetrics.attempts += 1;
     try {
       this.request('health', {}, true);
     } catch {
@@ -275,11 +314,29 @@ export class RustSidecarClient {
   }
 
   private probeCommandReady(): void {
+    this.startupMetrics.attempts += 1;
     try {
       this.requestViaCommand('health', {});
     } catch {
       this.requestViaCommand('hello', {});
     }
+  }
+
+  private markStartupSuccess(strategy: SidecarStartupMetrics['strategy'], startedAt: number): void {
+    this.startupMetrics = {
+      strategy,
+      attempts: this.startupMetrics.attempts,
+      durationMs: Math.max(0, Date.now() - startedAt),
+    };
+  }
+
+  private markStartupFailure(startedAt: number, reason: string): void {
+    this.startupMetrics = {
+      strategy: 'unavailable',
+      attempts: this.startupMetrics.attempts,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      reason,
+    };
   }
 
   private request<T = unknown>(method: string, params?: Record<string, unknown>, ignoreAvailable = false): T {

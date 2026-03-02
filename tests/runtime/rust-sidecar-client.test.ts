@@ -62,6 +62,20 @@ if (args[0] === 'server') {
     sessions: 1,
     windows: 1,
     runningWindows: 1,
+    rpc: {
+      requestsTotal: 7,
+      errorsTotal: 0,
+      methods: {
+        health: {
+          requests: 2,
+          errors: 0,
+          lastLatencyMs: 1,
+          avgLatencyMs: 1,
+          maxLatencyMs: 1,
+          lastErrorCode: null,
+        },
+      },
+    },
   };
   else if (method === 'stop_window') result = { stopped: true };
   else result = { ok: true };
@@ -111,9 +125,11 @@ if (args[0] === 'server') {
     });
 
     expect(client.isAvailable()).toBe(true);
+    expect(client.getStartupMetrics().strategy).not.toBe('unavailable');
     expect(client.getOrCreateSession('bridge', 'demo')).toBe('bridge');
     expect(client.windowExists('bridge', 'demo')).toBe(true);
     expect(client.health().status).toBe('ok');
+    expect(client.health().rpc?.requestsTotal).toBeGreaterThan(0);
     expect(client.listWindows()).toHaveLength(1);
     expect(client.getWindowBuffer('bridge', 'demo')).toContain('sidecar');
     expect(client.getWindowFrame('bridge', 'demo')?.cols).toBe(80);

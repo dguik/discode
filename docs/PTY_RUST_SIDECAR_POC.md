@@ -36,6 +36,8 @@ This document describes the Phase 4 PoC shape for `runtimeMode=pty-rust`.
 
 - If sidecar startup or request fails, runtime switches to TS `PtyRuntime` fallback.
 - Fallback keeps existing daemon behavior stable while sidecar iteration continues.
+- `health` now reports RPC observability counters (`requestsTotal`, `errorsTotal`, per-method latency/error metrics).
+- `RustSidecarClient#getStartupMetrics()` exposes sidecar startup strategy, duration, and probe attempts.
 
 ## Current rendering scope (Phase 4 continuation)
 

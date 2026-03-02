@@ -109,6 +109,29 @@ pub fn handle_request(
                 })
                 .count();
             let now_unix_ms = now_unix_millis();
+            let method_metrics = guard
+                .rpc_observability
+                .methods
+                .iter()
+                .map(|(method, metrics)| {
+                    let avg_latency_ms = if metrics.requests > 0 {
+                        metrics.total_latency_ms / metrics.requests
+                    } else {
+                        0
+                    };
+                    (
+                        method.clone(),
+                        json!({
+                            "requests": metrics.requests,
+                            "errors": metrics.errors,
+                            "lastLatencyMs": metrics.last_latency_ms,
+                            "avgLatencyMs": avg_latency_ms,
+                            "maxLatencyMs": metrics.max_latency_ms,
+                            "lastErrorCode": metrics.last_error_code,
+                        }),
+                    )
+                })
+                .collect::<serde_json::Map<String, Value>>();
             Ok(json!({
                 "status": "ok",
                 "version": 1,
@@ -118,6 +141,11 @@ pub fn handle_request(
                 "sessions": guard.sessions.len(),
                 "windows": guard.windows.len(),
                 "runningWindows": running_windows,
+                "rpc": {
+                    "requestsTotal": guard.rpc_observability.requests_total,
+                    "errorsTotal": guard.rpc_observability.errors_total,
+                    "methods": method_metrics,
+                },
             }))
         }
         "get_or_create_session" => {
@@ -429,6 +457,8 @@ mod tests {
         assert_eq!(health["version"].as_u64(), Some(1));
         assert_eq!(health["sessions"].as_u64(), Some(1));
         assert_eq!(health["windows"].as_u64(), Some(1));
+        assert_eq!(health["rpc"]["requestsTotal"].as_u64(), Some(0));
+        assert_eq!(health["rpc"]["errorsTotal"].as_u64(), Some(0));
     }
 
     #[test]
