@@ -46,6 +46,7 @@ export class BridgeMessageRouter {
           '',
           '*Commands:*',
           '`help` — Show this message',
+          '`cancel` — Cancel the current operation (sends ESC)',
           '',
           '_Tip: The agent sees your message as keyboard input in its terminal session._',
         ].join('\n');
@@ -73,6 +74,20 @@ export class BridgeMessageRouter {
       const resolvedAgentType = mappedInstance.agentType;
       const instanceKey = mappedInstance.instanceId;
       const windowName = mappedInstance.tmuxWindow || instanceKey;
+
+      // Cancel command — abort SDK runner or send ESC to tmux
+      if (content.trim().toLowerCase() === 'cancel') {
+        if (mappedInstance.runtimeType === 'sdk') {
+          const runner = this.deps.getSdkRunner?.(projectName, instanceKey);
+          if (runner) {
+            runner.abort();
+          }
+        } else {
+          this.deps.runtime.sendEscapeToWindow?.(normalizedProject.tmuxSession, windowName, resolvedAgentType);
+        }
+        await messaging.sendToChannel(channelId, '⏹️ Cancel signal sent');
+        return;
+      }
 
       // Process file attachments (isolated in message-file-handler.ts)
       let enrichedContent = content;

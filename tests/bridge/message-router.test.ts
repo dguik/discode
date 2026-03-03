@@ -45,6 +45,7 @@ function createMockDeps(): BridgeMessageRouterDeps {
     runtime: {
       typeKeysToWindow: vi.fn(),
       sendEnterToWindow: vi.fn(),
+      sendEscapeToWindow: vi.fn(),
       getWindowBuffer: vi.fn().mockReturnValue(''),
     } as any,
     stateManager: {
@@ -208,6 +209,36 @@ describe('BridgeMessageRouter', () => {
     await messageHandler('claude', 'help', 'proj', 'ch-1', 'msg-1', undefined, undefined);
     expect(deps.messaging.sendToChannel).toHaveBeenCalledWith('ch-1', expect.stringContaining('Discode'));
     expect(deps.runtime.typeKeysToWindow).not.toHaveBeenCalled();
+  });
+
+  // ── Cancel command ──────────────────────────────────────────────
+
+  it('sends Escape to tmux window on cancel command', async () => {
+    await messageHandler('claude', 'cancel', 'proj', 'ch-1', 'msg-1', undefined, undefined);
+    expect(deps.runtime.sendEscapeToWindow).toHaveBeenCalledWith('test-session', 'claude', 'claude');
+    expect(deps.messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '⏹️ Cancel signal sent');
+    expect(deps.runtime.typeKeysToWindow).not.toHaveBeenCalled();
+  });
+
+  it('aborts SDK runner on cancel command', async () => {
+    (findProjectInstanceByChannel as any).mockReturnValue({
+      agentType: 'claude',
+      instanceId: 'claude',
+      tmuxWindow: 'claude',
+      runtimeType: 'sdk',
+    });
+    const mockRunner = { abort: vi.fn(), submitMessage: vi.fn() };
+    deps.getSdkRunner = vi.fn().mockReturnValue(mockRunner);
+
+    await messageHandler('claude', 'cancel', 'proj', 'ch-1', 'msg-1', undefined, undefined);
+    expect(mockRunner.abort).toHaveBeenCalled();
+    expect(deps.messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '⏹️ Cancel signal sent');
+  });
+
+  it('cancel command is case-insensitive', async () => {
+    await messageHandler('claude', '  Cancel  ', 'proj', 'ch-1', 'msg-1', undefined, undefined);
+    expect(deps.runtime.sendEscapeToWindow).toHaveBeenCalled();
+    expect(deps.messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '⏹️ Cancel signal sent');
   });
 
   // ── SDK runner path ────────────────────────────────────────────
