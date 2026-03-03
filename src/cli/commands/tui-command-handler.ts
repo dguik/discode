@@ -36,7 +36,7 @@ export async function handleTuiCommand(
   }
 
   if (command === '/help') {
-    append('Commands: /new [name] [agent] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty-rust|toggle]], /help, /exit');
+    append('Commands: /new [name] [agent] [--path dir] [--instance id] [--attach], /onboard [options], /list, /projects, /config [keepChannel [on|off|toggle] | defaultAgent [agent|auto] | defaultChannel [channelId|auto] | runtimeMode [tmux|pty-rust|toggle]], /help, /exit');
     append('Onboard options: --platform [discord|slack], --runtime-mode [tmux|pty-rust], --token, --slack-bot-token, --slack-app-token, --default-agent [name|auto], --telemetry [on|off], --opencode-permission [allow|default]');
     return 'handled';
   }
@@ -222,7 +222,7 @@ async function handleNew(command: string, append: (line: string) => void, deps: 
     }
 
     const parsed = parseNewCommand(command);
-    const cwdName = basename(process.cwd());
+    const cwdName = basename(parsed.projectPath || process.cwd()) || 'project';
     const projectName = parsed.projectName && parsed.projectName.trim().length > 0
       ? parsed.projectName.trim()
       : deps.nextProjectName(cwdName);
@@ -241,6 +241,7 @@ async function handleNew(command: string, append: (line: string) => void, deps: 
       name: projectName,
       instance: parsed.instanceId,
       attach: parsed.attach,
+      cwd: parsed.projectPath,
       tmuxSharedSessionName: deps.options.tmuxSharedSessionName,
     });
     append(`✅ Session created: ${projectName}`);

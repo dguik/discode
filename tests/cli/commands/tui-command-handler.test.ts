@@ -156,6 +156,14 @@ describe('handleTuiCommand', () => {
     expect(lines.some((l) => l.includes('Session created'))).toBe(true);
   });
 
+  it('/new --path passes cwd override', async () => {
+    const deps = createMockDeps();
+    await handleTuiCommand('/new --path "/tmp/work dir"', append, deps);
+    expect(mockNewCommand).toHaveBeenCalledWith('claude', expect.objectContaining({
+      cwd: '/tmp/work dir',
+    }));
+  });
+
   it('/onboard --help shows usage', async () => {
     const deps = createMockDeps();
     await handleTuiCommand('/onboard --help', append, deps);

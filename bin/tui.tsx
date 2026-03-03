@@ -3,8 +3,8 @@
 
 import { InputRenderable, RGBA, TextAttributes, TextareaRenderable } from '@opentui/core';
 import { render, useKeyboard, usePaste, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/solid';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { readdirSync, readFileSync, statSync } from 'fs';
+import { basename, dirname, join, resolve } from 'path';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { copyTextToClipboard, readTextFromClipboard } from '../src/cli/common/clipboard.js';
 import type { TerminalSegment, TerminalStyledLine } from '../src/runtime/vt-screen.js';
@@ -147,6 +147,44 @@ type StyledCell = {
   underline?: boolean;
 };
 
+type FolderExplorerEntry = {
+  kind: 'current' | 'parent' | 'directory';
+  path: string;
+  label: string;
+};
+
+function listFolderExplorerEntries(basePath: string): FolderExplorerEntry[] {
+  const resolvedBase = resolve(basePath);
+  const entries: FolderExplorerEntry[] = [];
+
+  const displayName = basename(resolvedBase) || resolvedBase;
+  entries.push({ kind: 'current', path: resolvedBase, label: `[.] ${displayName}` });
+
+  const parent = dirname(resolvedBase);
+  if (parent !== resolvedBase) {
+    entries.push({ kind: 'parent', path: parent, label: '[..] parent folder' });
+  }
+
+  const childDirectories = readdirSync(resolvedBase, { withFileTypes: true })
+    .filter((entry) => {
+      if (entry.isDirectory()) return true;
+      if (!entry.isSymbolicLink()) return false;
+      try {
+        return statSync(join(resolvedBase, entry.name)).isDirectory();
+      } catch {
+        return false;
+      }
+    })
+    .map((entry) => ({
+      kind: 'directory' as const,
+      path: resolve(resolvedBase, entry.name),
+      label: `[d] ${entry.name}`,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return [...entries, ...childDirectories];
+}
+
 function toStyledCells(line: TerminalStyledLine): StyledCell[] {
   const cells: StyledCell[] = [];
   for (const segment of line.segments) {
@@ -229,6 +267,11 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const [paletteSelected, setPaletteSelected] = createSignal(0);
   const [newOpen, setNewOpen] = createSignal(false);
   const [newSelected, setNewSelected] = createSignal(0);
+  const [newPath, setNewPath] = createSignal(resolve(process.cwd()));
+  const [newEntries, setNewEntries] = createSignal<FolderExplorerEntry[]>([]);
+  const [newLoading, setNewLoading] = createSignal(false);
+  const [newError, setNewError] = createSignal<string | undefined>(undefined);
+  const [newScroll, setNewScroll] = createSignal(0);
   const [listOpen, setListOpen] = createSignal(false);
   const [listSelected, setListSelected] = createSignal(0);
   const [configOpen, setConfigOpen] = createSignal(false);
@@ -301,20 +344,11 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     openProjects().forEach((item) => names.add(item.project));
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   });
-  const newChoices = createMemo(() => {
-    const existing = openProjects()
-      .map((item) => item.project)
-      .filter((value, index, arr) => arr.indexOf(value) === index)
-      .sort((a, b) => a.localeCompare(b))
-      .map((project) => ({
-        type: 'existing' as const,
-        project,
-        label: `Use existing session: ${project}`,
-      }));
-    return [
-      { type: 'create' as const, label: 'Create new session' },
-      ...existing,
-    ];
+  const newDialogRows = createMemo(() => Math.max(8, Math.min(16, dims().height - 14)));
+  const newMaxScroll = createMemo(() => Math.max(0, newEntries().length - newDialogRows()));
+  const newVisibleEntries = createMemo(() => {
+    const start = Math.min(newScroll(), newMaxScroll());
+    return newEntries().slice(start, start + newDialogRows());
   });
   const currentWindowItems = createMemo(() => {
     if (!currentSession() || !currentWindow()) return [];
@@ -678,6 +712,39 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     await refreshConfigDialog();
   };
 
+  const refreshNewExplorer = (targetPath: string, preferredPath?: string) => {
+    setNewLoading(true);
+    try {
+      const resolvedTarget = resolve(targetPath);
+      const nextEntries = listFolderExplorerEntries(resolvedTarget);
+      setNewPath(resolvedTarget);
+      setNewEntries(nextEntries);
+      setNewError(undefined);
+
+      const preferred = preferredPath ? resolve(preferredPath) : undefined;
+      const preferredIndex = preferred
+        ? nextEntries.findIndex((entry) => entry.path === preferred)
+        : -1;
+      const selectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
+      setNewSelected(Math.max(0, Math.min(selectedIndex, nextEntries.length - 1)));
+      setNewScroll(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setNewEntries([{ kind: 'current', path: resolve(targetPath), label: `[.] ${basename(resolve(targetPath)) || resolve(targetPath)}` }]);
+      setNewSelected(0);
+      setNewScroll(0);
+      setNewError(`Cannot read folder: ${message}`);
+    } finally {
+      setNewLoading(false);
+    }
+  };
+
+  const openNewDialog = () => {
+    setNewOpen(true);
+    textarea?.blur();
+    refreshNewExplorer(newPath());
+  };
+
   const openCommandPalette = () => {
     setPaletteOpen(true);
     setPaletteQuery('');
@@ -707,8 +774,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     if (!item) return;
     if (item.command === '/new') {
       closeCommandPalette();
-      setNewOpen(true);
-      setNewSelected(0);
+      openNewDialog();
       return;
     }
     if (item.command === '/stop') {
@@ -740,6 +806,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   const closeNewDialog = () => {
     setNewOpen(false);
     setNewSelected(0);
+    setNewScroll(0);
   };
 
   const closeListDialog = () => {
@@ -784,21 +851,38 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
   };
 
   const clampNewSelection = (offset: number) => {
-    const items = newChoices();
+    const items = newEntries();
     if (items.length === 0) return;
     const next = (newSelected() + offset + items.length) % items.length;
     setNewSelected(next);
   };
 
+  const openSelectedNewFolder = () => {
+    if (newLoading()) return;
+    const entry = newEntries()[newSelected()];
+    if (!entry || entry.kind === 'current') return;
+    const preferred = entry.kind === 'parent' ? newPath() : undefined;
+    refreshNewExplorer(entry.path, preferred);
+  };
+
+  const openParentNewFolder = () => {
+    if (newLoading()) return;
+    const current = newPath();
+    const parent = dirname(current);
+    if (parent === current) return;
+    refreshNewExplorer(parent, current);
+  };
+
   const executeNewSelection = async () => {
-    const choice = newChoices()[newSelected()];
-    if (!choice) return;
-    closeNewDialog();
-    if (choice.type === 'create') {
-      await executeCommand('/new');
+    if (newLoading()) return;
+    const entry = newEntries()[newSelected()];
+    if (!entry) return;
+    if (entry.kind === 'parent') {
+      refreshNewExplorer(entry.path, newPath());
       return;
     }
-    await focusProject(choice.project);
+    closeNewDialog();
+    await executeCommand(`/new --path ${JSON.stringify(entry.path)}`);
   };
 
   const clampStopSelection = (offset: number) => {
@@ -823,8 +907,7 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     if (!command) return;
 
     if (command === 'new' || command === '/new') {
-      setNewOpen(true);
-      setNewSelected(0);
+      openNewDialog();
       return;
     }
 
@@ -856,6 +939,33 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
     const max = logsMaxScroll();
     if (logsScroll() > max) {
       setLogsScroll(max);
+    }
+  });
+
+  createEffect(() => {
+    const items = newEntries();
+    if (items.length === 0) {
+      if (newSelected() !== 0) setNewSelected(0);
+      if (newScroll() !== 0) setNewScroll(0);
+      return;
+    }
+
+    const selected = Math.max(0, Math.min(newSelected(), items.length - 1));
+    if (selected !== newSelected()) {
+      setNewSelected(selected);
+      return;
+    }
+
+    const rows = newDialogRows();
+    const maxScroll = Math.max(0, items.length - rows);
+    let nextScroll = Math.max(0, Math.min(newScroll(), maxScroll));
+    if (selected < nextScroll) {
+      nextScroll = selected;
+    } else if (selected >= nextScroll + rows) {
+      nextScroll = selected - rows + 1;
+    }
+    if (nextScroll !== newScroll()) {
+      setNewScroll(nextScroll);
     }
   });
 
@@ -1147,6 +1257,16 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
       if (evt.name === 'down') {
         evt.preventDefault();
         clampNewSelection(1);
+        return;
+      }
+      if (evt.name === 'left') {
+        evt.preventDefault();
+        openParentNewFolder();
+        return;
+      }
+      if (evt.name === 'right') {
+        evt.preventDefault();
+        openSelectedNewFolder();
         return;
       }
       if (evt.name === 'return') {
@@ -1651,31 +1771,43 @@ function TuiApp(props: { input: TuiInput; close: () => void }) {
           paddingTop={Math.floor(dims().height / 4)}
         >
           <box
-            width={Math.max(50, Math.min(70, dims().width - 2))}
+            width={Math.max(62, Math.min(92, dims().width - 2))}
             backgroundColor={palette.panel}
             flexDirection="column"
             paddingTop={1}
             paddingBottom={1}
           >
             <box paddingLeft={4} paddingRight={4} flexDirection="row" justifyContent="space-between">
-              <text fg={palette.primary} attributes={TextAttributes.BOLD}>New session</text>
+              <text fg={palette.primary} attributes={TextAttributes.BOLD}>New session folder</text>
               <text fg={palette.muted}>esc</text>
             </box>
-            <For each={newChoices().slice(0, 12)}>
-              {(item, index) => (
-                <box
-                  paddingLeft={3}
-                  paddingRight={1}
-                  paddingTop={index() === 0 ? 1 : 0}
-                  backgroundColor={newSelected() === index() ? palette.selectedBg : palette.panel}
-                >
-                  <text fg={newSelected() === index() ? palette.selectedFg : palette.text}>{item.label}</text>
-                </box>
-              )}
-            </For>
+            <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+              <text fg={palette.muted}>{newPath()}</text>
+            </box>
+            <Show when={newError()}>
+              <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+                <text fg={palette.muted}>{newError()}</text>
+              </box>
+            </Show>
+            <Show when={!newLoading()} fallback={<box paddingLeft={4} paddingRight={4} paddingTop={1}><text fg={palette.muted}>Loading...</text></box>}>
+              <For each={newVisibleEntries()}>
+                {(item, index) => (
+                  <box
+                    paddingLeft={3}
+                    paddingRight={1}
+                    paddingTop={index() === 0 ? 1 : 0}
+                    backgroundColor={newSelected() === newScroll() + index() ? palette.selectedBg : palette.panel}
+                  >
+                    <text fg={newSelected() === newScroll() + index() ? palette.selectedFg : palette.text}>{item.label}</text>
+                  </box>
+                )}
+              </For>
+            </Show>
             <box paddingLeft={4} paddingRight={2} paddingTop={1}>
-              <text fg={palette.text}>Select </text>
+              <text fg={palette.text}>Submit </text>
               <text fg={palette.muted}>enter</text>
+              <text fg={palette.text}>  Browse </text>
+              <text fg={palette.muted}>left/right</text>
             </box>
           </box>
         </box>

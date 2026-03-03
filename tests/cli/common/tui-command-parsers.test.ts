@@ -9,6 +9,7 @@ describe('parseNewCommand', () => {
       agentName: undefined,
       attach: false,
       instanceId: undefined,
+      projectPath: undefined,
     });
   });
 
@@ -62,6 +63,16 @@ describe('parseNewCommand', () => {
   it('handles extra whitespace', () => {
     const result = parseNewCommand('  /new   myProject   ');
     expect(result.projectName).toBe('myProject');
+  });
+
+  it('parses --path with quoted value', () => {
+    const result = parseNewCommand('/new --path "/tmp/my folder"');
+    expect(result.projectPath).toBe('/tmp/my folder');
+  });
+
+  it('parses --path= with escaped spaces', () => {
+    const result = parseNewCommand('/new --path=/tmp/my\\ folder');
+    expect(result.projectPath).toBe('/tmp/my folder');
   });
 });
 
