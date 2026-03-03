@@ -158,6 +158,14 @@ function parseTurnTexts(tail) {
     if (obj.type === "user") {
       const message = asObject(obj.message) || obj;
       const content = Array.isArray(message.content) ? message.content : [];
+
+      // Claude Code may store content as a plain string (not array of blocks).
+      // Treat string content as a real user message — it's a turn boundary.
+      if (typeof message.content === "string" && message.content.trim().length > 0) {
+        if (!isSystemInjectedMessage(message.content)) break;
+        continue;
+      }
+
       const hasUserText = content.some((c) => {
         const co = asObject(c);
         return co && co.type === "text";
