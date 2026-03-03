@@ -96,10 +96,16 @@ export class StreamingMessageUpdater {
     // Guard: if a newer request took over this streaming slot, don't finalize it
     if (expectedMessageId && entry.messageId !== expectedMessageId) return;
 
+    const hadPendingTimer = !!entry.debounceTimer;
     if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
 
     // Wait for any in-progress flush to complete before posting the finalize line.
     if (entry.flushPromise) await entry.flushPromise;
+
+    // Flush any content that was waiting in the cancelled debounce timer.
+    if (hadPendingTimer && entry.currentText) {
+      await this.flush(k);
+    }
 
     const content = customHeader || '\u2705 Done';
     this.entries.delete(k);
@@ -153,6 +159,7 @@ export class StreamingMessageUpdater {
   private scheduleFlush(key: string, entry: StreamingEntry): void {
     if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
     entry.debounceTimer = setTimeout(() => {
+      entry.debounceTimer = null;
       this.flush(key).catch(() => {});
     }, DEBOUNCE_MS);
   }

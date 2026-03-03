@@ -270,21 +270,22 @@ describe('StreamingMessageUpdater', () => {
       expect(updater.has('proj', 'inst')).toBe(false);
     });
 
-    it('cancels pending debounce timer', async () => {
+    it('flushes pending content before posting Done when debounce has not fired', async () => {
       const messaging = createMockMessaging();
       const updater = new StreamingMessageUpdater(messaging as any);
       updater.start('proj', 'inst', 'ch-1', 'msg-1');
       updater.append('proj', 'inst', 'tool 1');
 
-      // Finalize before debounce fires
+      // Finalize before debounce fires — should flush pending content then post Done
       await updater.finalize('proj', 'inst');
 
       // Advance past debounce — should not trigger extra update
       vi.advanceTimersByTime(1000);
 
-      // Finalize posts one completion message, and timer does not trigger extra edit.
+      expect(messaging.updateMessage).toHaveBeenCalledTimes(1);
+      expect(messaging.updateMessage).toHaveBeenCalledWith('ch-1', 'msg-1', 'tool 1');
       expect(messaging.sendToChannel).toHaveBeenCalledTimes(1);
-      expect(messaging.updateMessage).not.toHaveBeenCalled();
+      expect(messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '\u2705 Done');
     });
 
     it('uses custom header when provided', async () => {
