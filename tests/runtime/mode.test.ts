@@ -4,25 +4,19 @@ import { isPtyRuntimeMode, normalizeRuntimeMode, parseRuntimeModeInput } from '.
 describe('runtime mode helpers', () => {
   it('normalizes known and unknown runtime mode values', () => {
     expect(normalizeRuntimeMode('tmux')).toBe('tmux');
-    expect(normalizeRuntimeMode('pty')).toBe('pty-rust');
-    expect(normalizeRuntimeMode('pty-ts')).toBe('pty-rust');
     expect(normalizeRuntimeMode('pty-rust')).toBe('pty-rust');
     expect(normalizeRuntimeMode('something-else')).toBe('tmux');
     expect(normalizeRuntimeMode(undefined)).toBe('tmux');
   });
 
-  it('parses explicit runtime-mode inputs with legacy alias support', () => {
+  it('parses explicit runtime-mode inputs', () => {
     expect(parseRuntimeModeInput('tmux')).toBe('tmux');
-    expect(parseRuntimeModeInput('pty')).toBe('pty-rust');
-    expect(parseRuntimeModeInput('pty-ts')).toBe('pty-rust');
     expect(parseRuntimeModeInput('pty-rust')).toBe('pty-rust');
     expect(parseRuntimeModeInput('unknown')).toBeUndefined();
   });
 
-  it('recognizes pty-like runtime modes', () => {
+  it('recognizes only pty-rust as pty runtime mode', () => {
     expect(isPtyRuntimeMode('tmux')).toBe(false);
-    expect(isPtyRuntimeMode('pty')).toBe(true);
-    expect(isPtyRuntimeMode('pty-ts')).toBe(true);
     expect(isPtyRuntimeMode('pty-rust')).toBe(true);
   });
 });

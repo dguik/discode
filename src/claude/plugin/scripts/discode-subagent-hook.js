@@ -30,9 +30,16 @@ async function main() {
   var instanceId = process.env.DISCODE_INSTANCE || process.env.AGENT_DISCORD_INSTANCE || "";
   var port = process.env.DISCODE_PORT || process.env.AGENT_DISCORD_PORT || "18470";
 
-  var subagentType = typeof input.agent_type === "string" ? input.agent_type : "";
-  // Skip when agent_type is empty — these are suggested next prompts, not real subagents
-  if (!subagentType) return;
+  var hasAgentType = input && Object.prototype.hasOwnProperty.call(input, "agent_type");
+  var subagentType = "unknown";
+  if (typeof input.agent_type === "string") {
+    var normalized = input.agent_type.trim();
+    // Skip when agent_type is explicitly empty — these are suggested next prompts, not real subagents
+    if (!normalized) return;
+    subagentType = normalized;
+  } else if (hasAgentType) {
+    subagentType = "unknown";
+  }
 
   var lastMessage = typeof input.last_assistant_message === "string" ? input.last_assistant_message : "";
 

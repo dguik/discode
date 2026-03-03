@@ -168,27 +168,21 @@ describe('ConfigManager', () => {
       expect(managerFromStored.config.runtimeMode).toBe('pty-rust');
     });
 
-    it('normalizes legacy pty runtime mode to pty-rust', () => {
+    it('falls back to tmux for unsupported runtime mode values', () => {
       const storage = new MockStorage();
       const env = new MockEnvironment();
       env.set('DISCODE_RUNTIME_MODE', 'pty');
 
       const managerFromEnv = new ConfigManager(storage, env, configDir);
-      expect(managerFromEnv.config.runtimeMode).toBe('pty-rust');
+      expect(managerFromEnv.config.runtimeMode).toBe('tmux');
 
-      const storedLegacyTs: StoredConfig = {
-        runtimeMode: 'pty-ts',
-      };
-      storage.setFile(configFile, JSON.stringify(storedLegacyTs));
+      storage.setFile(configFile, JSON.stringify({ runtimeMode: 'pty-ts' }));
       const managerFromStoredLegacyTs = new ConfigManager(storage, env, configDir);
-      expect(managerFromStoredLegacyTs.config.runtimeMode).toBe('pty-rust');
+      expect(managerFromStoredLegacyTs.config.runtimeMode).toBe('tmux');
 
-      const storedConfig: StoredConfig = {
-        runtimeMode: 'pty',
-      };
-      storage.setFile(configFile, JSON.stringify(storedConfig));
+      storage.setFile(configFile, JSON.stringify({ runtimeMode: 'pty' }));
       const managerFromStored = new ConfigManager(storage, env, configDir);
-      expect(managerFromStored.config.runtimeMode).toBe('pty-rust');
+      expect(managerFromStored.config.runtimeMode).toBe('tmux');
     });
 
     it('normalizes token from stored config and env', () => {

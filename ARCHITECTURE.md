@@ -39,13 +39,11 @@ Runtime notes:
 Implementations:
 
 - `TmuxRuntime` (`src/runtime/tmux-runtime.ts`) via `TmuxManager`
-- `PtyRuntime` (`src/runtime/pty-runtime.ts`) process-backed windows (+ optional `node-pty`)
 - `PtyRustRuntime` (`src/runtime/pty-rust-runtime.ts`) Rust sidecar RPC runtime (sidecar-only)
 
 Runtime selection:
 
 - Config key: `runtimeMode: 'tmux' | 'pty-rust'`
-- Legacy config values `pty` and `pty-ts` are accepted and normalized to `pty-rust`
 - Sources: `~/.discode/config.json`, `DISCODE_RUNTIME_MODE`
 - Loader default: `tmux`
 - Optional sidecar binary override: `DISCODE_PTY_RUST_SIDECAR_BIN`

@@ -231,8 +231,10 @@ export function stripFilePaths(text: string, filePaths: string[]): string {
 export function extractFilePaths(text: string): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
+  // Avoid shared mutable lastIndex on the module-level /g regex across calls.
+  const pathRegex = new RegExp(FILE_PATH_REGEX.source, FILE_PATH_REGEX.flags);
 
-  for (const match of text.matchAll(FILE_PATH_REGEX)) {
+  for (const match of text.matchAll(pathRegex)) {
     const p = match[1];
     if (!seen.has(p)) {
       seen.add(p);

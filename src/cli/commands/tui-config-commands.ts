@@ -119,8 +119,6 @@ function handleConfigRuntimeMode(parts: string[], append: (line: string) => void
     nextMode = currentMode === 'tmux' ? 'pty-rust' : 'tmux';
   } else if (value === 'tmux' || value === 'pty-rust') {
     nextMode = value;
-  } else if (value === 'pty' || value === 'pty-ts') {
-    nextMode = 'pty-rust';
   } else {
     append(`⚠️ Unknown runtime mode: ${parts[2]}`);
     append('Use tmux, pty-rust, or toggle');

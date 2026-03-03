@@ -207,7 +207,7 @@ describe('container lifecycle integration', () => {
         stateManager: mockStateManager,
         registry: createMockRegistry(),
         config: createMockConfig({
-          runtimeMode: 'pty',
+          runtimeMode: 'pty-rust',
           container: { enabled: true },
         }),
       });
@@ -263,7 +263,7 @@ describe('container lifecycle integration', () => {
         runtime: mockRuntime,
         stateManager: mockStateManager,
         registry: createMockRegistry(),
-        config: createMockConfig({ runtimeMode: 'pty' }),
+        config: createMockConfig({ runtimeMode: 'pty-rust' }),
       });
 
       await bridge.start();

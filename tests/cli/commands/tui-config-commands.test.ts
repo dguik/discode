@@ -204,9 +204,9 @@ describe('handleConfigSet', () => {
   });
 
   describe('runtimeMode', () => {
-    it('sets runtimeMode to pty-rust (pty is aliased to pty-rust)', () => {
+    it('sets runtimeMode to pty-rust', () => {
       const deps = createMockDeps();
-      handleConfigSet('/config runtimeMode pty', append, deps);
+      handleConfigSet('/config runtimeMode pty-rust', append, deps);
       expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-rust' });
       expect(lines[0]).toContain('runtimeMode is now pty-rust');
     });
@@ -237,10 +237,18 @@ describe('handleConfigSet', () => {
       expect(lines[0]).toContain('runtimeMode: tmux');
     });
 
-    it('accepts runtime-mode alias', () => {
+    it('accepts runtime-mode key alias', () => {
       const deps = createMockDeps();
-      handleConfigSet('/config runtime-mode pty', append, deps);
+      handleConfigSet('/config runtime-mode pty-rust', append, deps);
       expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-rust' });
+    });
+
+    it('rejects legacy runtime mode aliases', () => {
+      const deps = createMockDeps();
+      handleConfigSet('/config runtimeMode pty', append, deps);
+      expect(lines[0]).toContain('Unknown runtime mode');
+      handleConfigSet('/config runtimeMode pty-ts', append, deps);
+      expect(lines[2]).toContain('Unknown runtime mode');
     });
   });
 

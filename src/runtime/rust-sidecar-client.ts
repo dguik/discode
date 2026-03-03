@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readSync, writeSync } from 'fs';
 import { join } from 'path';
 import { arch as osArch, homedir, platform as osPlatform, tmpdir } from 'os';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
-import type { RuntimeWindowSnapshot } from './pty-runtime.js';
+import type { RuntimeWindowSnapshot } from './window-types.js';
 import type { TerminalStyledFrame } from './vt-screen.js';
 
 type SidecarRpcResponse<T = unknown> = {

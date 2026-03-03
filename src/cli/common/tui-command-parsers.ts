@@ -97,10 +97,10 @@ export function parseOnboardCommand(raw: string): ParsedOnboardCommand {
 
     if (flag === '--runtime-mode') {
       const value = (readValue() || '').toLowerCase();
-      if (value !== 'tmux' && value !== 'pty' && value !== 'pty-ts' && value !== 'pty-rust') {
+      if (value !== 'tmux' && value !== 'pty-rust') {
         return { options, error: 'runtime mode must be tmux or pty-rust.' };
       }
-      options.runtimeMode = value === 'tmux' ? 'tmux' : 'pty-rust';
+      options.runtimeMode = value;
       continue;
     }
 
