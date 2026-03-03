@@ -120,6 +120,10 @@ export async function handleSessionNotification(deps: EventHandlerDeps, ctx: Eve
     return true;
   }
 
+  // Skip promptText for elicitation_dialog — the Stop hook (session.idle) will
+  // deliver it with interactive buttons via sendQuestionWithButtons.
+  if (notificationType === 'elicitation_dialog') return true;
+
   const promptText = typeof ctx.event.promptText === 'string' ? ctx.event.promptText.trim() : '';
   if (promptText) {
     await splitAndSendToChannel(deps.messaging, ctx.channelId, promptText);

@@ -6,7 +6,7 @@ const mockSaveConfig = vi.hoisted(() => vi.fn());
 const mockConfig = vi.hoisted(() => ({
   defaultAgentCli: 'claude',
   discord: { channelId: '' },
-  runtimeMode: 'tmux' as 'tmux' | 'pty-ts' | 'pty-rust',
+  runtimeMode: 'tmux' as 'tmux' | 'pty-rust',
 }));
 
 vi.mock('../../../src/config/index.js', () => ({
@@ -204,22 +204,22 @@ describe('handleConfigSet', () => {
   });
 
   describe('runtimeMode', () => {
-    it('sets runtimeMode to pty-ts (pty is aliased to pty-ts)', () => {
+    it('sets runtimeMode to pty-rust', () => {
       const deps = createMockDeps();
-      handleConfigSet('/config runtimeMode pty', append, deps);
-      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-ts' });
-      expect(lines[0]).toContain('runtimeMode is now pty-ts');
+      handleConfigSet('/config runtimeMode pty-rust', append, deps);
+      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-rust' });
+      expect(lines[0]).toContain('runtimeMode is now pty-rust');
     });
 
-    it('toggles runtimeMode from tmux to pty-ts', () => {
+    it('toggles runtimeMode from tmux to pty-rust', () => {
       mockConfig.runtimeMode = 'tmux';
       const deps = createMockDeps();
       handleConfigSet('/config runtimeMode toggle', append, deps);
-      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-ts' });
+      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-rust' });
     });
 
-    it('toggles runtimeMode from pty-ts to tmux', () => {
-      mockConfig.runtimeMode = 'pty-ts';
+    it('toggles runtimeMode from pty-rust to tmux', () => {
+      mockConfig.runtimeMode = 'pty-rust';
       const deps = createMockDeps();
       handleConfigSet('/config runtimeMode toggle', append, deps);
       expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'tmux' });
@@ -237,10 +237,18 @@ describe('handleConfigSet', () => {
       expect(lines[0]).toContain('runtimeMode: tmux');
     });
 
-    it('accepts runtime-mode alias', () => {
+    it('accepts runtime-mode key alias', () => {
       const deps = createMockDeps();
-      handleConfigSet('/config runtime-mode pty', append, deps);
-      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-ts' });
+      handleConfigSet('/config runtime-mode pty-rust', append, deps);
+      expect(mockSaveConfig).toHaveBeenCalledWith({ runtimeMode: 'pty-rust' });
+    });
+
+    it('rejects legacy runtime mode aliases', () => {
+      const deps = createMockDeps();
+      handleConfigSet('/config runtimeMode pty', append, deps);
+      expect(lines[0]).toContain('Unknown runtime mode');
+      handleConfigSet('/config runtimeMode pty-ts', append, deps);
+      expect(lines[2]).toContain('Unknown runtime mode');
     });
   });
 

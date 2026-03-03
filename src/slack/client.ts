@@ -237,8 +237,9 @@ export class SlackClient implements MessagingClient {
     channelId: string,
     toolName: string,
     toolInput: any,
+    timeoutMs?: number,
   ): Promise<boolean> {
-    return this.interactions.sendApprovalRequest(channelId, toolName, toolInput);
+    return this.interactions.sendApprovalRequest(channelId, toolName, toolInput, timeoutMs);
   }
   async sendQuestionWithButtons(
     channelId: string,

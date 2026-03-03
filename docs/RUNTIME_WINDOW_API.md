@@ -1,6 +1,6 @@
 # Runtime Window API (Phase 3)
 
-This document defines the stable runtime window contract used for `pty-ts` and `pty-rust` backends.
+This document defines the stable runtime window contract used for `pty-rust` backend.
 
 ## 1) Window Identity
 

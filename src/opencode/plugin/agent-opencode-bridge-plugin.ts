@@ -69,6 +69,16 @@ export const AgentDiscordBridgePlugin = async () => {
       .join("\n");
   };
 
+  /** @param {string} text */
+  const isAbortLikeError = (text) => {
+    if (!text) return false;
+    return (
+      /\bAbortError\b/i.test(text) ||
+      /\bMessageAbortedError\b/i.test(text) ||
+      /operation was aborted/i.test(text)
+    );
+  };
+
   /** @param {unknown} event */
   const getProperties = (event) => {
     const obj = toObject(event);
@@ -173,8 +183,11 @@ export const AgentDiscordBridgePlugin = async () => {
       }
 
       if (eventType === "session.error") {
-        const errorText = textFromNode(properties.error || eventObj.error || eventObj).trim();
-        await post({ type: "session.error", text: errorText || "unknown error" });
+        const errorText = textFromNode(properties.error || eventObj.error).trim();
+        if (!errorText || isAbortLikeError(errorText)) {
+          return;
+        }
+        await post({ type: "session.error", text: errorText });
         return;
       }
 

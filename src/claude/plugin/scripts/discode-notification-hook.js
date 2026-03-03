@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 var { asObject, extractToolUseBlocks, formatPromptText, parseLineJson, readTail, readStdin, postToBridge } = require("./discode-hook-lib.js");
 
+
 function extractPromptQuestions(toolUseBlocks) {
   const questions = [];
   for (const block of toolUseBlocks) {
@@ -115,6 +116,7 @@ function extractFromTranscript(transcriptPath) {
 
   return { promptText: formatPromptText(allToolUseBlocks), promptQuestions: extractPromptQuestions(allToolUseBlocks), planFilePath: planFilePath };
 }
+
 
 async function main() {
   const inputRaw = await readStdin();

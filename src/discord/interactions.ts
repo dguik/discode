@@ -13,6 +13,14 @@ import {
 import type { Client } from 'discord.js';
 import { randomUUID } from 'crypto';
 
+function getEnvInt(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return defaultValue;
+  return Math.trunc(n);
+}
+
 export class DiscordInteractions {
   constructor(private client: Client) {}
 
@@ -20,6 +28,7 @@ export class DiscordInteractions {
     channelId: string,
     toolName: string,
     toolInput: any,
+    timeoutMs: number = getEnvInt('DISCODE_APPROVAL_TIMEOUT_MS', 120000),
   ): Promise<boolean> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel?.isTextBased()) {
@@ -37,7 +46,7 @@ export class DiscordInteractions {
 
     const embed = new EmbedBuilder()
       .setTitle('\uD83D\uDD12 Permission Request')
-      .setDescription(`Tool: \`${toolName}\`\n\`\`\`\n${inputPreview}\n\`\`\``)
+      .setDescription(`Tool: \`${toolName}\`\n\`\`\`\n${inputPreview}\n\`\`\`\n_${Math.round(timeoutMs / 1000)}s timeout, auto-deny on timeout_`)
       .setColor(0xf0b232);
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -56,19 +65,28 @@ export class DiscordInteractions {
       components: [row],
     });
 
-    const interaction = await message.awaitMessageComponent({
-      componentType: ComponentType.Button,
-      filter: (i) => !i.user.bot,
-    });
+    try {
+      const interaction = await message.awaitMessageComponent({
+        componentType: ComponentType.Button,
+        filter: (i) => !i.user.bot,
+        time: timeoutMs,
+      });
 
-    const approved = interaction.customId === 'approve';
-    await interaction.update({
-      embeds: [embed
-        .setColor(approved ? 0x57f287 : 0xed4245)
-        .setFooter({ text: approved ? '\u2705 Allowed' : '\u274C Denied' })],
-      components: [],
-    });
-    return approved;
+      const approved = interaction.customId === 'approve';
+      await interaction.update({
+        embeds: [embed
+          .setColor(approved ? 0x57f287 : 0xed4245)
+          .setFooter({ text: approved ? '\u2705 Allowed' : '\u274C Denied' })],
+        components: [],
+      });
+      return approved;
+    } catch {
+      await message.edit({
+        embeds: [embed.setColor(0x95a5a6).setFooter({ text: '\u23F0 Timed out \u2014 auto-denied' })],
+        components: [],
+      }).catch(() => {});
+      return false;
+    }
   }
 
   async sendQuestionWithButtons(
@@ -79,10 +97,11 @@ export class DiscordInteractions {
       options: Array<{ label: string; description?: string }>;
       multiSelect?: boolean;
     }>,
-    _timeoutMs?: number,
+    timeoutMs: number = getEnvInt('DISCODE_QUESTION_TIMEOUT_MS', 300000),
     onAnswer?: (answer: string, optionIndex: number) => Promise<void>,
   ): Promise<string | null> {
     if (questions.length === 0) return null;
+
 
     const channel = await this.client.channels.fetch(channelId);
     if (!channel?.isTextBased()) return null;
@@ -91,7 +110,8 @@ export class DiscordInteractions {
     // Sequential: send each question one at a time
     const answers: string[] = [];
     for (const q of questions) {
-      const result = await this.sendSingleQuestion(textChannel, q);
+      const result = await this.sendSingleQuestion(textChannel, q, timeoutMs);
+      if (!result) return null; // timed out
       answers.push(result.label);
       if (onAnswer) {
         await onAnswer(result.label, result.index);
@@ -103,7 +123,8 @@ export class DiscordInteractions {
   private async sendSingleQuestion(
     textChannel: TextChannel,
     q: { question: string; header?: string; options: Array<{ label: string; description?: string }> },
-  ): Promise<{ label: string; index: number }> {
+    timeoutMs: number = getEnvInt('DISCODE_QUESTION_TIMEOUT_MS', 300000),
+  ): Promise<{ label: string; index: number } | null> {
     const requestId = randomUUID().slice(0, 8);
 
     const embed = new EmbedBuilder()
@@ -143,20 +164,31 @@ export class DiscordInteractions {
       components: rows,
     });
 
-    const interaction = await message.awaitMessageComponent({
-      componentType: ComponentType.Button,
-      filter: (i) => !i.user.bot,
-    });
+    try {
+      const interaction = await message.awaitMessageComponent({
+        componentType: ComponentType.Button,
+        filter: (i) => !i.user.bot,
+        time: timeoutMs,
+      });
 
-    const optIndex = parseInt(interaction.customId.split('_')[2]);
-    const selected = q.options[optIndex]?.label || '';
+      const optIndex = parseInt(interaction.customId.split('_')[2]);
+      const selected = q.options[optIndex]?.label || '';
 
-    await interaction.update({
-      embeds: [embed.setColor(0x57f287).setFooter({ text: `✅ ${selected}` })],
-      components: [],
-    });
+      await interaction.update({
+        embeds: [embed.setColor(0x57f287).setFooter({ text: `✅ ${selected}` })],
+        components: [],
+      });
 
-    return { label: selected, index: optIndex };
+      return { label: selected, index: optIndex };
+    } catch {
+      await message
+        .edit({
+          embeds: [embed.setColor(0x95a5a6).setFooter({ text: '⏰ Timed out' })],
+          components: [],
+        })
+        .catch(() => {});
+      return null;
+    }
   }
 
   async sendSubmitConfirmation(
@@ -185,23 +217,34 @@ export class DiscordInteractions {
         .setStyle(ButtonStyle.Danger),
     );
 
-    const message = await textChannel.send({
+    const confirmMsg = await textChannel.send({
       embeds: [embed],
       components: [row],
     });
 
-    const interaction = await message.awaitMessageComponent({
-      componentType: ComponentType.Button,
-      filter: (i) => !i.user.bot,
-    });
+    try {
+      const interaction = await confirmMsg.awaitMessageComponent({
+        componentType: ComponentType.Button,
+        filter: (i) => !i.user.bot,
+        time: getEnvInt('DISCODE_QUESTION_TIMEOUT_MS', 300000),
+      });
 
-    const submitted = interaction.customId === 'submit';
-    await interaction.update({
-      embeds: [embed
-        .setColor(submitted ? 0x57f287 : 0xed4245)
-        .setFooter({ text: submitted ? '\u2705 Submitted' : '\u274C Cancelled' })],
-      components: [],
-    });
-    return submitted;
+      const submitted = interaction.customId === 'submit';
+      await interaction.update({
+        embeds: [embed
+          .setColor(submitted ? 0x57f287 : 0xed4245)
+          .setFooter({ text: submitted ? '\u2705 Submitted' : '\u274C Cancelled' })],
+        components: [],
+      });
+      return submitted;
+    } catch {
+      await confirmMsg
+        .edit({
+          embeds: [embed.setColor(0x95a5a6).setFooter({ text: '⏰ Timed out' })],
+          components: [],
+        })
+        .catch(() => {});
+      return false;
+    }
   }
 }

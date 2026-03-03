@@ -72,9 +72,9 @@
           <p class="news">
             <span data-i18n-en="new" data-i18n-ko="new">new</span>
             <span
-              data-i18n-en="Discode 0.7.6 adds per-agent container isolation, Chrome MCP bridge support, and tmux-first onboarding."
-              data-i18n-ko="Discode 0.7.6은 에이전트별 컨테이너 격리, Chrome MCP 브리지 지원, tmux 우선 온보딩을 추가합니다."
-              >Discode 0.7.6 adds per-agent container isolation, Chrome MCP bridge support, and tmux-first onboarding.</span
+              data-i18n-en="Discode 0.9.0 adds PTY-Rust query policy safeguards, runtime observability upgrades, and Mixpanel browser SDK conversion tracking on the landing page."
+              data-i18n-ko="Discode 0.9.0은 PTY-Rust 쿼리 정책 보호, 런타임 관측성 개선, 랜딩 페이지 Mixpanel Browser SDK 전환 추적을 추가합니다."
+              >Discode 0.9.0 adds PTY-Rust query policy safeguards, runtime observability upgrades, and Mixpanel browser SDK conversion tracking on the landing page.</span
             >
           </p>
           <h1 data-i18n-en="Your ultimate IDE is a messenger." data-i18n-ko="당신의 궁극의 IDE는 메신저입니다.">
@@ -202,103 +202,6 @@
       </main>
     </div>
     <script src="/language.js"></script>
-    <script>
-      const installCommands = {
-        bun: "bun add -g @siisee11/discode",
-        npm: "npm install -g @siisee11/discode",
-        curl: "curl -fsSL https://discode.chat/install | bash",
-        brew: "# coming soon",
-      };
-
-      const tabs = Array.from(document.querySelectorAll(".tab[data-tab]"));
-      const installCommand = document.getElementById("install-command");
-      const installCopyButton = document.getElementById("install-copy-btn");
-      const languageSelects = Array.from(document.querySelectorAll("[data-language-select]"));
-
-      const copyLabels = {
-        en: {
-          copy: "Copy",
-          copied: "Copied",
-          aria: "Copy install command",
-        },
-        ko: {
-          copy: "복사",
-          copied: "복사됨",
-          aria: "설치 명령어 복사",
-        },
-      };
-
-      function currentLanguage() {
-        const lang = (document.documentElement.lang || "en").toLowerCase();
-        return lang.startsWith("ko") ? "ko" : "en";
-      }
-
-      function updateCopyButtonLabel(mode = "copy") {
-        if (!installCopyButton) return;
-        const labels = copyLabels[currentLanguage()] || copyLabels.en;
-        installCopyButton.textContent = labels[mode] || labels.copy;
-        installCopyButton.setAttribute("aria-label", labels.aria);
-      }
-
-      function fallbackCopy(text) {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        textArea.setAttribute("readonly", "");
-        textArea.style.position = "fixed";
-        textArea.style.left = "-9999px";
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textArea);
-      }
-
-      function activateTab(nextTab) {
-        const tabKey = nextTab.dataset.tab;
-        if (!tabKey || !installCommand) return;
-
-        tabs.forEach((tab) => {
-          const isActive = tab === nextTab;
-          tab.classList.toggle("tab-active", isActive);
-          tab.setAttribute("aria-selected", isActive ? "true" : "false");
-        });
-
-        installCommand.textContent = installCommands[tabKey] || "";
-      }
-
-      tabs.forEach((tab) => {
-        tab.addEventListener("click", () => activateTab(tab));
-      });
-
-      if (installCopyButton) {
-        installCopyButton.addEventListener("click", () => {
-          if (!installCommand) return;
-          const text = installCommand.textContent || "";
-          if (!text) return;
-
-          const writePromise = navigator.clipboard && navigator.clipboard.writeText
-            ? navigator.clipboard.writeText(text)
-            : Promise.resolve().then(() => fallbackCopy(text));
-
-          writePromise
-            .then(() => {
-              updateCopyButtonLabel("copied");
-              window.setTimeout(() => updateCopyButtonLabel("copy"), 1400);
-            })
-            .catch(() => {
-              fallbackCopy(text);
-              updateCopyButtonLabel("copied");
-              window.setTimeout(() => updateCopyButtonLabel("copy"), 1400);
-            });
-        });
-
-        languageSelects.forEach((select) => {
-          select.addEventListener("change", () => {
-            window.setTimeout(() => updateCopyButtonLabel("copy"), 0);
-          });
-        });
-
-        updateCopyButtonLabel("copy");
-      }
-    </script>
+    <script type="module" src="./main.js"></script>
   </body>
 </html>

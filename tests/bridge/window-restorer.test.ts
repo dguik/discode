@@ -99,7 +99,7 @@ function createBridgeConfig(overrides: any = {}): any {
     discord: { token: 'test-token' },
     tmux: { sessionPrefix: 'bridge-' },
     hookServerPort: 18470,
-    runtimeMode: 'pty',
+    runtimeMode: 'pty-rust',
     ...overrides,
   };
 }

@@ -201,7 +201,7 @@ export async function configCommand(options: {
     console.log(chalk.gray('  discode config --channel 123456789012345678'));
     console.log(chalk.gray('  discode config --default-agent claude'));
     console.log(chalk.gray('  discode config --platform slack'));
-    console.log(chalk.gray('  discode config --runtime-mode pty-ts'));
+    console.log(chalk.gray('  discode config --runtime-mode pty-rust'));
     console.log(chalk.gray('  discode config --slack-bot-token xoxb-...'));
     console.log(chalk.gray('  discode config --slack-app-token xapp-...'));
     console.log(chalk.gray('  discode config --opencode-permission allow'));

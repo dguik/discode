@@ -154,7 +154,7 @@ describe('SlackInteractions', () => {
       expect(await promise).toBe('Red');
     });
 
-    it('throws when postMessage returns no ts', async () => {
+    it('returns null when postMessage returns no ts', async () => {
       app.client.chat.postMessage.mockResolvedValueOnce({ ts: undefined });
 
       const questions = [
@@ -164,9 +164,8 @@ describe('SlackInteractions', () => {
         },
       ];
 
-      await expect(
-        interactions.sendQuestionWithButtons('C001', questions),
-      ).rejects.toThrow('Failed to post question message');
+      const result = await interactions.sendQuestionWithButtons('C001', questions);
+      expect(result).toBeNull();
     });
 
     it('calls onAnswer callback with label and option index', async () => {

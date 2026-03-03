@@ -39,6 +39,7 @@ describe('runtime diagnostics metrics', () => {
     expect(getRuntimeMetric('pty_query_response', { kind: 'csi_6n' })).toBeGreaterThan(0);
   });
 
+
   it('tracks stream forced flush and coalesced skip', () => {
     resetRuntimeMetrics();
     const runtime: AgentRuntime = {

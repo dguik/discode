@@ -7,6 +7,15 @@ import type { App } from '@slack/bolt';
 import type { MessageCallback } from '../messaging/interface.js';
 import type { SlackChannels } from './channels.js';
 
+function getEnvInt(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return defaultValue;
+  return Math.trunc(n);
+}
+
+
 export class SlackInteractions {
   constructor(
     private app: App,
@@ -18,6 +27,7 @@ export class SlackInteractions {
     channelId: string,
     toolName: string,
     toolInput: any,
+    timeoutMs: number = getEnvInt('DISCODE_APPROVAL_TIMEOUT_MS', 120000),
   ): Promise<boolean> {
     const requestId = randomUUID().slice(0, 8);
     const approveId = `approve_${requestId}`;
@@ -38,7 +48,7 @@ export class SlackInteractions {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `:lock: *Permission Request*\nTool: \`${toolName}\`\n\`\`\`${inputPreview}\`\`\``,
+            text: `:lock: *Permission Request*\nTool: \`${toolName}\`\n\`\`\`${inputPreview}\`\`\`\n_${Math.round(timeoutMs / 1000)}s timeout, auto-deny on timeout_`,
           },
         },
         {
@@ -69,10 +79,24 @@ export class SlackInteractions {
     return new Promise<boolean>((resolve) => {
       let settled = false;
 
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.app.client.chat.update({
+          token: this.botToken,
+          channel: channelId,
+          ts: messageTs,
+          text: `Permission Request: Tool \`${toolName}\` - Timed out`,
+          blocks: [],
+        }).catch(() => undefined);
+        resolve(false);
+      }, timeoutMs);
+
       const handler = async ({ action, ack, respond }: any) => {
         await ack();
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         const approved = action.value === 'approve';
         await respond({
           text: approved ? ':white_check_mark: *Allowed*' : ':x: *Denied*',
@@ -94,7 +118,7 @@ export class SlackInteractions {
       options: Array<{ label: string; description?: string }>;
       multiSelect?: boolean;
     }>,
-    _timeoutMs?: number,
+    timeoutMs: number = getEnvInt('DISCODE_QUESTION_TIMEOUT_MS', 300000),
     onAnswer?: (answer: string, optionIndex: number) => Promise<void>,
   ): Promise<string | null> {
     if (questions.length === 0) return null;
@@ -104,7 +128,8 @@ export class SlackInteractions {
     // so the caller can send it to Claude before the next question appears.
     const answers: string[] = [];
     for (const q of questions) {
-      const result = await this.sendSingleQuestion(channelId, q);
+      const result = await this.sendSingleQuestion(channelId, q, timeoutMs);
+      if (!result) return null; // timed out
       answers.push(result.label);
       if (onAnswer) {
         await onAnswer(result.label, result.index);
@@ -117,7 +142,8 @@ export class SlackInteractions {
   private async sendSingleQuestion(
     channelId: string,
     q: { question: string; header?: string; options: Array<{ label: string; description?: string }> },
-  ): Promise<{ label: string; index: number }> {
+    timeoutMs: number = getEnvInt('DISCODE_QUESTION_TIMEOUT_MS', 300000),
+  ): Promise<{ label: string; index: number } | null> {
     const requestId = randomUUID().slice(0, 8);
 
     const buttons = q.options.map((opt, i) => ({
@@ -161,10 +187,24 @@ export class SlackInteractions {
     });
 
     const messageTs = result.ts;
-    if (!messageTs) throw new Error('Failed to post question message');
+    if (!messageTs) return null;
 
-    return new Promise<{ label: string; index: number }>((resolve) => {
+    return new Promise<{ label: string; index: number } | null>((resolve) => {
       let settled = false;
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.app.client.chat.update({
+          token: this.botToken,
+          channel: channelId,
+          ts: messageTs,
+          text: `${q.question} - Timed out`,
+          blocks: [],
+        }).catch(() => undefined);
+        resolve(null);
+      }, timeoutMs);
+
 
       for (let i = 0; i < q.options.length; i++) {
         const actionId = `opt_${requestId}_${i}`;
@@ -172,6 +212,7 @@ export class SlackInteractions {
           await ack();
           if (settled) return;
           settled = true;
+          clearTimeout(timer);
           const selected = action.value || q.options[i].label;
           this.app.client.chat.update({
             token: this.botToken,
@@ -235,13 +276,28 @@ export class SlackInteractions {
     const messageTs = result.ts;
     if (!messageTs) return false;
 
+    const timeoutMs = getEnvInt('DISCODE_QUESTION_TIMEOUT_MS', 300000);
     return new Promise<boolean>((resolve) => {
       let settled = false;
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.app.client.chat.update({
+          token: this.botToken,
+          channel: channelId,
+          ts: messageTs,
+          text: 'Submit answers? - Timed out',
+          blocks: [],
+        }).catch(() => undefined);
+        resolve(false);
+      }, timeoutMs);
 
       const handler = async ({ action, ack, respond }: any) => {
         await ack();
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         const submitted = action.value === 'submit';
         await respond({
           text: submitted
@@ -256,6 +312,7 @@ export class SlackInteractions {
       this.app.action(cancelId, handler);
     });
   }
+
 
   /**
    * Poll conversations.history for each mapped channel to catch messages

@@ -1,6 +1,6 @@
-# discode PTY Rust sidecar (PoC)
+# discode PTY Rust sidecar
 
-This crate is a Phase 4 PoC runtime sidecar.
+This crate provides the `pty-rust` runtime sidecar.
 
 ## What it does
 
@@ -8,6 +8,8 @@ This crate is a Phase 4 PoC runtime sidecar.
 - Accepts request/response RPC over a unix domain socket
 - Manages PTY windows with `portable-pty`
 - Returns a text-based frame payload compatible with `TerminalStyledFrame`
+
+Current support target for `pty-rust`: macOS/Linux.
 
 ## Build
 
@@ -20,6 +22,30 @@ Binary path:
 
 `sidecar/pty-rust/target/release/discode-pty-sidecar`
 
+## Package host binary (release artifact)
+
+```bash
+npm run sidecar:package
+```
+
+Output path shape:
+
+`dist/release/sidecar/discode-pty-sidecar-<os>-<arch>/bin/discode-pty-sidecar`
+
+Runtime binary discovery order:
+
+1. explicit option (`sidecarBinary`)
+2. `DISCODE_PTY_RUST_SIDECAR_BIN`
+3. local build output (`sidecar/pty-rust/target/release/...`)
+4. packaged release output (`dist/release/sidecar/discode-pty-sidecar-<os>-<arch>/bin/...`)
+5. home install paths (`~/.discode/bin/...`)
+
+Runtime regression suite (Node side):
+
+```bash
+npm run test:runtime:pty-rust
+```
+
 ## Local wiring
 
 Set runtime mode + sidecar binary path:
@@ -29,4 +55,4 @@ discode config --runtime-mode pty-rust
 export DISCODE_PTY_RUST_SIDECAR_BIN="/absolute/path/to/sidecar/pty-rust/target/release/discode-pty-sidecar"
 ```
 
-If sidecar startup fails, runtime falls back to TS `PtyRuntime` automatically.
+`pty-rust` runtime requires a working sidecar connection.

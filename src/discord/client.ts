@@ -234,8 +234,8 @@ export class DiscordClient implements MessagingClient {
 
   // --- Delegate to DiscordInteractions ---
 
-  sendApprovalRequest(channelId: string, toolName: string, toolInput: any): Promise<boolean> {
-    return this.interactions.sendApprovalRequest(channelId, toolName, toolInput);
+  sendApprovalRequest(channelId: string, toolName: string, toolInput: any, timeoutMs?: number): Promise<boolean> {
+    return this.interactions.sendApprovalRequest(channelId, toolName, toolInput, timeoutMs);
   }
 
   async sendQuestionWithButtons(

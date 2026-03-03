@@ -15,10 +15,11 @@
 
 ## 2. 현재 문제 요약
 
-현재 `pty` 런타임은 다음 구조다.
+현재 `pty-rust` 런타임은 다음 구조다.
 
-- 실행: `src/runtime/pty-runtime.ts`
-- VT 상태/렌더: `src/runtime/vt-screen.ts`
+- 실행: `src/runtime/pty-rust-runtime.ts`
+- RPC 클라이언트: `src/runtime/rust-sidecar-client.ts`
+- VT 상태/렌더: `sidecar/pty-rust/src/terminal_pane.rs`, `sidecar/pty-rust/src/screen.rs`, `sidecar/pty-rust/src/renderer.rs`
 - 스트리밍: `src/runtime/stream-server.ts`
 - 메시지 라우팅 시 캡처 사용: `src/bridge/message-router.ts`
 
@@ -68,7 +69,7 @@
 - `CSI J/K/L/M/S/T`, `CSI r`, `DECSC/DECRC`, alt-screen 전환 시 상태 일관성 점검
 - 분할 입력(chunk split) 시 pending 시퀀스 파손 방지
 
-2. query 응답 정책 정비 (`buildTerminalResponse`)
+2. query 응답 정책 정비 (`query_policy`)
 - 현재 지원 쿼리와 응답 포맷 명세화
 - 미지원 쿼리는 no-op + debug 카운터
 - 과도한 가짜 응답 제거, 필요한 최소 응답만 유지
@@ -87,7 +88,7 @@
 산출물:
 
 - `src/runtime/vt-screen.ts` 안정화 패치
-- `src/runtime/pty-runtime.ts` query 응답 패치
+- `sidecar/pty-rust/src/query_policy.rs` query 응답 패치
 - `src/runtime/stream-server.ts` 전송 안정화 패치
 - 디버그 로그 + 메트릭
 
@@ -136,7 +137,7 @@
 - serialization format 버전 필드 도입
 
 3. feature flag 도입
-- `runtimeMode: pty-ts | pty-rust | tmux`
+- `runtimeMode: tmux | pty-rust`
 - 점진 롤아웃 가능하도록 설정 분리
 
 산출물:
@@ -147,7 +148,7 @@
 
 진행 메모 (2026-02):
 
-- `runtimeMode`를 `tmux | pty-ts | pty-rust`로 정리하고 legacy `pty`는 `pty-ts`로 정규화
+- `runtimeMode`를 `tmux | pty-rust`로 정리
 - 윈도우 식별자 규약을 `src/runtime/window-id.ts`로 통합
 - Runtime window adapter(`src/runtime/window-api.ts`) 도입
 - control/stream plane에서 adapter + 공통 window-id 사용
@@ -167,7 +168,7 @@ PoC 범위:
 
 - 단일 윈도우 PTY + VT 파싱 + styled frame 반환
 - UDS/pipe RPC로 Node와 연동
-- 기존 `pty-ts` 대비 정확도/CPU 비교
+- 기존 TS PoC 경로 대비 정확도/CPU 비교
 
 성공 기준:
 
@@ -179,7 +180,7 @@ PoC 범위:
 
 - Rust sidecar crate 초안 추가 (`sidecar/pty-rust`)
 - UDS request/response RPC 경로 도입 (`server`/`request`)
-- `pty-rust` 런타임에서 sidecar 우선 사용 + 자동 TS fallback 연결
+- `pty-rust` 런타임을 sidecar-only로 고정
 - PoC 문서 추가 (`docs/PTY_RUST_SIDECAR_POC.md`)
 - sidecar `get_window_frame`를 ANSI strip 기반에서 VT-lite renderer 기반으로 확장 (cursor/style/clear/alt-screen 기본 지원)
 
@@ -190,7 +191,7 @@ PoC 범위:
 P0:
 
 1. [x] `vt-screen`의 alt-screen + scroll region 경계 버그 보강
-2. [x] `buildTerminalResponse` 응답 범위 문서화/정리
+2. [x] query 응답 범위 문서화/정리
 3. [x] stream frame/patch 경계 안정화
 4. [x] VT fixture 테스트 최소 20개 확보 (`tests/runtime/vt-fixture.test.ts`, 28 fixtures)
 
@@ -198,7 +199,7 @@ P1:
 
 1. [x] wide-char/combining-char 처리 고도화
 2. [x] cursor style/state query 대응 확장
-3. [x] CLI별(Claude/OpenCode/Codex) 회귀 테스트 세트 구축 (`tests/runtime/cli-runtime-regression.test.ts`)
+3. [x] CLI별(Claude/OpenCode/Codex) 회귀 테스트 세트 구축 (Phase 9에서 legacy TS PTY 테스트 정리됨)
 
 P2:
 

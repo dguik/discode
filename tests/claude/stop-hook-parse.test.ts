@@ -460,6 +460,7 @@ describe('parseTurnTexts', () => {
     expect(result.intermediateText).toBe('Previous');
   });
 
+
   it('handles assistant entry without messageId', () => {
     const tail = line({
       type: 'assistant',

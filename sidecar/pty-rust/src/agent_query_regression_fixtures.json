@@ -1,0 +1,51 @@
+[
+  {
+    "name": "claude_style_cursor_and_private_query",
+    "cols": 80,
+    "rows": 24,
+    "cursor_row": 0,
+    "cursor_col": 2,
+    "chunks": [
+      "\u001b[",
+      "?25$p\u001b[6n"
+    ],
+    "expect_contains": [
+      "\u001b[?25;1$y",
+      "\u001b[1;3R"
+    ]
+  },
+  {
+    "name": "opencode_style_capability_and_osc_queries",
+    "cols": 100,
+    "rows": 30,
+    "cursor_row": 0,
+    "cursor_col": 0,
+    "chunks": [
+      "\u001b]10;?",
+      "\u0007\u001b]11;?\u0007\u001b]4;12;?\u0007\u001b[?u\u001b[14t"
+    ],
+    "expect_contains": [
+      "\u001b]10;rgb:e5e5/e5e5/e5e5\u0007",
+      "\u001b]11;rgb:0a0a/0a0a/0a0a\u0007",
+      "\u001b]4;12;rgb:3b3b/8e8e/eaea\u0007",
+      "\u001b[?0u",
+      "\u001b[4;660;1100t"
+    ]
+  },
+  {
+    "name": "codex_style_mode_da_and_kitty_handshake",
+    "cols": 80,
+    "rows": 24,
+    "cursor_row": 0,
+    "cursor_col": 0,
+    "chunks": [
+      "\u001b[?2004h\u001b[?2004$p\u001b[c\u001b_",
+      "a=q\u001b\\"
+    ],
+    "expect_contains": [
+      "\u001b[?2004;1$y",
+      "\u001b[?62;c",
+      "\u001b_Gi=31337;OK\u001b\\"
+    ]
+  }
+]

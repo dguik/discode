@@ -113,6 +113,7 @@ export class StreamingMessageUpdater {
       await this.flush(k);
     }
 
+
     const content = customHeader || '\u2705 Done';
     this.entries.delete(k);
 
@@ -152,6 +153,7 @@ export class StreamingMessageUpdater {
       if (entry.flushPromise === promise) entry.flushPromise = undefined;
       return;
     }
+
 
     if (this.messaging.updateMessage) {
       const promise = this.messaging.updateMessage(entry.channelId, entry.messageId, content).catch(() => {});

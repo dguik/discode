@@ -574,7 +574,7 @@ describe('opencode plugin installer', () => {
       expect(payload.text).toBe('Nested error message');
     });
 
-    it('falls back to event object text when error property is empty', async () => {
+    it('ignores session.error when error payload is missing', async () => {
       const harness = createPluginHarness();
       const plugin = await harness.create();
 
@@ -585,14 +585,10 @@ describe('opencode plugin installer', () => {
         },
       });
 
-      expect(harness.calls).toHaveLength(1);
-      const payload = parseBody(harness.calls[0]);
-      // When properties.error is undefined, textFromNode falls through to the
-      // event object itself, extracting "session.error" from the type field
-      expect(payload.text).toBe('session.error');
+      expect(harness.calls).toHaveLength(0);
     });
 
-    it('falls back to "unknown error" when all text extraction yields empty', async () => {
+    it('ignores session.error when extracted text is empty', async () => {
       const harness = createPluginHarness();
       const plugin = await harness.create();
 
@@ -604,9 +600,21 @@ describe('opencode plugin installer', () => {
         },
       });
 
-      expect(harness.calls).toHaveLength(1);
-      const payload = parseBody(harness.calls[0]);
-      expect(payload.text).toBe('unknown error');
+      expect(harness.calls).toHaveLength(0);
+    });
+
+    it('ignores abort-style session.error noise', async () => {
+      const harness = createPluginHarness();
+      const plugin = await harness.create();
+
+      await plugin.event({
+        event: {
+          type: 'session.error',
+          properties: { error: 'MessageAbortedError\nThe operation was aborted.' },
+        },
+      });
+
+      expect(harness.calls).toHaveLength(0);
     });
 
     it('includes instanceId when set', async () => {

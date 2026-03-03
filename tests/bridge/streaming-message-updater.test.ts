@@ -235,7 +235,7 @@ describe('StreamingMessageUpdater', () => {
       expect(messaging.sendToChannelWithId).toHaveBeenLastCalledWith('ch-1', 'overflow-2');
     });
 
-    it('truncates overly long single line for discord-safe update length', () => {
+    it('overflows to new message when cumulative text exceeds discord limit', () => {
       const messaging = {
         ...createMockMessaging(),
         platform: 'discord' as const,
@@ -243,16 +243,18 @@ describe('StreamingMessageUpdater', () => {
       const updater = new StreamingMessageUpdater(messaging as any);
       updater.start('proj', 'inst', 'ch-1', 'msg-1');
 
-      // A single line exceeding the limit gets clamped (not split)
-      const longLine = 'x'.repeat(2500);
+      const longLine = 'x'.repeat(1200);
+      updater.appendCumulative('proj', 'inst', longLine);
+      updater.appendCumulative('proj', 'inst', longLine);
       updater.appendCumulative('proj', 'inst', longLine);
 
       vi.advanceTimersByTime(800);
 
-      const call = messaging.updateMessage!.mock.calls.at(-1);
-      const content = call?.[2] as string;
+      // Overflow resets history to latest line and sends via new message
+      expect(messaging.sendToChannelWithId).toHaveBeenCalled();
+      const call = messaging.sendToChannelWithId.mock.calls.at(-1);
+      const content = call?.[1] as string;
       expect(content.length).toBeLessThanOrEqual(1900);
-      expect(content.startsWith('...(truncated)\n')).toBe(true);
     });
   });
 

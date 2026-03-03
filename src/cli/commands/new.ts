@@ -1,4 +1,5 @@
-import { basename } from 'path';
+import { existsSync, statSync } from 'fs';
+import { basename, resolve } from 'path';
 import chalk from 'chalk';
 import { stateManager } from '../../state/index.js';
 import { validateConfig, config } from '../../config/index.js';
@@ -29,7 +30,7 @@ import { isPtyRuntimeMode } from '../../runtime/mode.js';
 
 export async function newCommand(
   agentArg: string | undefined,
-  options: TmuxCliOptions & { name?: string; attach?: boolean; instance?: string; container?: boolean }
+  options: TmuxCliOptions & { name?: string; attach?: boolean; instance?: string; container?: boolean; cwd?: string }
 ) {
   try {
     validateConfig();
@@ -48,8 +49,12 @@ export async function newCommand(
       process.exit(1);
     }
 
-    const projectPath = process.cwd();
-    const projectName = options.name || basename(projectPath);
+    const projectPath = options.cwd ? resolve(options.cwd) : process.cwd();
+    if (!existsSync(projectPath) || !statSync(projectPath).isDirectory()) {
+      console.error(chalk.red(`Invalid project path: ${projectPath}`));
+      process.exit(1);
+    }
+    const projectName = options.name || basename(projectPath) || 'project';
     let port = effectiveConfig.hookServerPort || 18470;
 
     const staleTuiCount = cleanupStaleDiscodeTuiProcesses();

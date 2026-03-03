@@ -3,12 +3,72 @@ export type ParsedNewCommand = {
   agentName?: string;
   attach: boolean;
   instanceId?: string;
+  projectPath?: string;
 };
 
+function splitCommand(raw: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let escaping = false;
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (escaping) {
+      current += ch;
+      escaping = false;
+      continue;
+    }
+
+    if (ch === '\\') {
+      const next = raw[i + 1];
+      if (next && (/\s/.test(next) || next === '"' || next === "'" || next === '\\')) {
+        escaping = true;
+        continue;
+      }
+      current += ch;
+      continue;
+    }
+
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (escaping) {
+    current += '\\';
+  }
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
 export function parseNewCommand(raw: string): ParsedNewCommand {
-  const parts = raw.split(/\s+/).filter(Boolean);
+  const parts = splitCommand(raw);
   let attach = false;
   let instanceId: string | undefined;
+  let projectPath: string | undefined;
   const values: string[] = [];
 
   for (let i = 1; i < parts.length; i += 1) {
@@ -27,19 +87,35 @@ export function parseNewCommand(raw: string): ParsedNewCommand {
       if (value) instanceId = value;
       continue;
     }
+    if (part === '--path' && parts[i + 1]) {
+      projectPath = parts[i + 1];
+      i += 1;
+      continue;
+    }
+    if (part.startsWith('--path=')) {
+      const value = part.slice('--path='.length).trim();
+      if (value) projectPath = value;
+      continue;
+    }
     if (part.startsWith('--')) continue;
     values.push(part);
   }
 
   const projectName = values[0];
   const agentName = values[1];
-  return { projectName, agentName, attach, instanceId };
+  return {
+    projectName,
+    agentName,
+    attach,
+    instanceId,
+    projectPath,
+  };
 }
 
 export type ParsedOnboardCommand = {
   options: {
     platform?: 'discord' | 'slack';
-    runtimeMode?: 'tmux' | 'pty';
+    runtimeMode?: 'tmux' | 'pty-rust';
     token?: string;
     slackBotToken?: string;
     slackAppToken?: string;
@@ -97,8 +173,8 @@ export function parseOnboardCommand(raw: string): ParsedOnboardCommand {
 
     if (flag === '--runtime-mode') {
       const value = (readValue() || '').toLowerCase();
-      if (value !== 'tmux' && value !== 'pty') {
-        return { options, error: 'runtime mode must be tmux or pty.' };
+      if (value !== 'tmux' && value !== 'pty-rust') {
+        return { options, error: 'runtime mode must be tmux or pty-rust.' };
       }
       options.runtimeMode = value;
       continue;

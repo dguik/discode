@@ -89,6 +89,7 @@ export class BridgeMessageRouter {
         return;
       }
 
+
       // Process file attachments (isolated in message-file-handler.ts)
       let enrichedContent = content;
       if (attachments && attachments.length > 0) {
@@ -260,6 +261,7 @@ export class BridgeMessageRouter {
     await this.sleep(150);
     this.deps.runtime.sendEnterToWindow(tmuxSession, windowName, agentType);
   }
+
 
   private buildDeliveryFailureGuidance(projectName: string, error: unknown): string {
     const rawMessage = error instanceof Error ? error.message : String(error);

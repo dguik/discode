@@ -9,6 +9,7 @@ describe('parseNewCommand', () => {
       agentName: undefined,
       attach: false,
       instanceId: undefined,
+      projectPath: undefined,
     });
   });
 
@@ -63,6 +64,16 @@ describe('parseNewCommand', () => {
     const result = parseNewCommand('  /new   myProject   ');
     expect(result.projectName).toBe('myProject');
   });
+
+  it('parses --path with quoted value', () => {
+    const result = parseNewCommand('/new --path "/tmp/my folder"');
+    expect(result.projectPath).toBe('/tmp/my folder');
+  });
+
+  it('parses --path= with escaped spaces', () => {
+    const result = parseNewCommand('/new --path=/tmp/my\\ folder');
+    expect(result.projectPath).toBe('/tmp/my folder');
+  });
 });
 
 describe('parseOnboardCommand', () => {
@@ -116,14 +127,19 @@ describe('parseOnboardCommand', () => {
     expect(result.options.runtimeMode).toBe('tmux');
   });
 
-  it('parses --runtime-mode pty', () => {
-    const result = parseOnboardCommand('/onboard --runtime-mode pty');
-    expect(result.options.runtimeMode).toBe('pty');
+  it('parses --runtime-mode pty-rust', () => {
+    const result = parseOnboardCommand('/onboard --runtime-mode pty-rust');
+    expect(result.options.runtimeMode).toBe('pty-rust');
+  });
+
+  it('rejects legacy runtime-mode aliases', () => {
+    expect(parseOnboardCommand('/onboard --runtime-mode pty').error).toBe('runtime mode must be tmux or pty-rust.');
+    expect(parseOnboardCommand('/onboard --runtime-mode pty-ts').error).toBe('runtime mode must be tmux or pty-rust.');
   });
 
   it('returns error for invalid runtime-mode', () => {
     const result = parseOnboardCommand('/onboard --runtime-mode screen');
-    expect(result.error).toBe('runtime mode must be tmux or pty.');
+    expect(result.error).toBe('runtime mode must be tmux or pty-rust.');
   });
 
   it('parses --token', () => {

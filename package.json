@@ -1,6 +1,6 @@
 {
   "name": "@siisee11/discode",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Bridge AI agent outputs to Discord via Claude Code hooks and tmux",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,7 +31,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "sidecar:build": "cargo build --release --manifest-path sidecar/pty-rust/Cargo.toml"
+    "test:runtime:pty-rust": "vitest run tests/runtime/rust-sidecar-client.test.ts tests/runtime/pty-rust-runtime.test.ts tests/runtime/mode.test.ts",
+    "sidecar:build": "cargo build --release --manifest-path sidecar/pty-rust/Cargo.toml",
+    "sidecar:package": "npm run sidecar:build && node scripts/package-sidecar-binary.mjs",
+    "sidecar:bench": "node scripts/bench-sidecar-latency.mjs"
   },
   "keywords": [
     "discord",
@@ -46,17 +49,17 @@
     "access": "public"
   },
   "optionalDependencies": {
-    "@siisee11/discode-darwin-arm64": "0.8.0",
-    "@siisee11/discode-darwin-x64": "0.8.0",
-    "@siisee11/discode-darwin-x64-baseline": "0.8.0",
-    "@siisee11/discode-linux-arm64": "0.8.0",
-    "@siisee11/discode-linux-arm64-musl": "0.8.0",
-    "@siisee11/discode-linux-x64": "0.8.0",
-    "@siisee11/discode-linux-x64-baseline": "0.8.0",
-    "@siisee11/discode-linux-x64-baseline-musl": "0.8.0",
-    "@siisee11/discode-linux-x64-musl": "0.8.0",
-    "@siisee11/discode-windows-x64": "0.8.0",
-    "@siisee11/discode-windows-x64-baseline": "0.8.0"
+    "@siisee11/discode-darwin-arm64": "0.9.0",
+    "@siisee11/discode-darwin-x64": "0.9.0",
+    "@siisee11/discode-darwin-x64-baseline": "0.9.0",
+    "@siisee11/discode-linux-arm64": "0.9.0",
+    "@siisee11/discode-linux-arm64-musl": "0.9.0",
+    "@siisee11/discode-linux-x64": "0.9.0",
+    "@siisee11/discode-linux-x64-baseline": "0.9.0",
+    "@siisee11/discode-linux-x64-baseline-musl": "0.9.0",
+    "@siisee11/discode-linux-x64-musl": "0.9.0",
+    "@siisee11/discode-windows-x64": "0.9.0",
+    "@siisee11/discode-windows-x64-baseline": "0.9.0"
   },
   "engines": {
     "bun": ">=1.3.0"
@@ -70,6 +73,7 @@
     "chalk": "^5.3.0",
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5",
+    "mixpanel-browser": "^2.75.0",
     "node-pty": "^1.1.0",
     "solid-js": "^1.9.9",
     "yargs": "^18.0.0"

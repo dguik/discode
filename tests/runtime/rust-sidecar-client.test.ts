@@ -2,7 +2,11 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RustSidecarClient } from '../../src/runtime/rust-sidecar-client.js';
+import {
+  getDefaultRustSidecarSocketPathForPlatform,
+  getSidecarBinaryCandidates,
+  RustSidecarClient,
+} from '../../src/runtime/rust-sidecar-client.js';
 
 const tempDirs: string[] = [];
 
@@ -13,6 +17,46 @@ afterEach(() => {
 });
 
 describe('RustSidecarClient', () => {
+  it('returns unix socket path for darwin and linux', () => {
+    expect(getDefaultRustSidecarSocketPathForPlatform('darwin', 1234, '/tmp')).toBe('/tmp/discode-pty-rust-1234.sock');
+    expect(getDefaultRustSidecarSocketPathForPlatform('linux', 5678, '/var/tmp')).toBe('/var/tmp/discode-pty-rust-5678.sock');
+  });
+
+  it('resolves binary candidates with explicit/env and unix package paths', () => {
+    const candidates = getSidecarBinaryCandidates({
+      explicitPath: '/explicit/discode-pty-sidecar',
+      envPath: '/env/discode-pty-sidecar',
+      cwd: '/repo',
+      homeDir: '/home/demo',
+      platform: 'linux',
+      arch: 'x64',
+    });
+
+    expect(candidates[0]).toBe('/explicit/discode-pty-sidecar');
+    expect(candidates[1]).toBe('/env/discode-pty-sidecar');
+    expect(candidates).toContain('/repo/sidecar/pty-rust/target/release/discode-pty-sidecar');
+    expect(candidates).toContain('/repo/dist/release/sidecar/discode-pty-sidecar-linux-x64/bin/discode-pty-sidecar');
+    expect(candidates).toContain('/home/demo/.discode/bin/discode-pty-sidecar');
+    expect(candidates).toContain('/home/demo/.discode/bin/sidecar/linux-x64/discode-pty-sidecar');
+  });
+
+  it('omits unix platform package candidate when platform is unsupported', () => {
+    const candidates = getSidecarBinaryCandidates({
+      cwd: '/repo',
+      homeDir: '/home/demo',
+      platform: 'freebsd',
+      arch: 'x64',
+    });
+
+    expect(candidates).toContain('/repo/sidecar/pty-rust/target/release/discode-pty-sidecar');
+    expect(
+      candidates.some((item) => item.includes('/dist/release/sidecar/discode-pty-sidecar-')),
+    ).toBe(false);
+    expect(
+      candidates.some((item) => item.includes('/.discode/bin/sidecar/')),
+    ).toBe(false);
+  });
+
   it('connects to sidecar RPC helper and maps responses', () => {
     const dir = mkdtempSync(join(tmpdir(), 'discode-sidecar-mock-'));
     tempDirs.push(dir);
@@ -29,12 +73,8 @@ const getFlag = (name) => {
 if (args[0] === 'server') {
   process.on('SIGTERM', () => process.exit(0));
   setInterval(() => {}, 1000);
-} else if (args[0] === 'request') {
-  const method = getFlag('--method');
-  const paramsRaw = getFlag('--params') || '{}';
-  let params = {};
-  try { params = JSON.parse(paramsRaw); } catch {}
-
+} else if (args[0] === 'request' || args[0] === 'client') {
+  const buildResult = (method, params) => {
   let result = {};
   if (method === 'hello') result = { version: 1 };
   else if (method === 'get_or_create_session') result = { sessionName: params.projectName || 'unknown' };
@@ -57,10 +97,62 @@ if (args[0] === 'server') {
     cursorCol: 4,
     cursorVisible: true,
   };
+  else if (method === 'health') result = {
+    status: 'ok',
+    version: 1,
+    pid: 999,
+    startedAtUnixMs: 1710000000000,
+    uptimeMs: 123,
+    sessions: 1,
+    windows: 1,
+    runningWindows: 1,
+    rpc: {
+      requestsTotal: 7,
+      errorsTotal: 0,
+      methods: {
+        health: {
+          requests: 2,
+          errors: 0,
+          lastLatencyMs: 1,
+          avgLatencyMs: 1,
+          maxLatencyMs: 1,
+          lastErrorCode: null,
+        },
+      },
+    },
+  };
   else if (method === 'stop_window') result = { stopped: true };
   else result = { ok: true };
 
-  process.stdout.write(JSON.stringify({ ok: true, result }));
+  return result;
+  };
+
+  if (args[0] === 'request') {
+    const method = getFlag('--method');
+    const paramsRaw = getFlag('--params') || '{}';
+    let params = {};
+    try { params = JSON.parse(paramsRaw); } catch {}
+
+    if (method !== 'hello') {
+      process.stderr.write('request mode only supports hello');
+      process.exit(2);
+    }
+
+    process.stdout.write(JSON.stringify({ ok: true, result: buildResult(method, params) }));
+  } else {
+    const readline = require('node:readline');
+    const rl = readline.createInterface({ input: process.stdin, terminal: false });
+    rl.on('line', (line) => {
+      let payload = {};
+      try { payload = JSON.parse(line); } catch {
+        process.stdout.write(JSON.stringify({ ok: false, error: 'invalid request' }) + '\\n');
+        return;
+      }
+      const method = payload.method || '';
+      const params = payload.params || {};
+      process.stdout.write(JSON.stringify({ ok: true, result: buildResult(method, params) }) + '\\n');
+    });
+  }
 } else {
   process.stderr.write('unknown command');
   process.exit(1);
@@ -77,8 +169,11 @@ if (args[0] === 'server') {
     });
 
     expect(client.isAvailable()).toBe(true);
+    expect(client.getStartupMetrics().strategy).not.toBe('unavailable');
     expect(client.getOrCreateSession('bridge', 'demo')).toBe('bridge');
     expect(client.windowExists('bridge', 'demo')).toBe(true);
+    expect(client.health().status).toBe('ok');
+    expect(client.health().rpc?.requestsTotal).toBeGreaterThan(0);
     expect(client.listWindows()).toHaveLength(1);
     expect(client.getWindowBuffer('bridge', 'demo')).toContain('sidecar');
     expect(client.getWindowFrame('bridge', 'demo')?.cols).toBe(80);

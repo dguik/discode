@@ -1,7 +1,9 @@
-import { PtyRuntime } from './pty-runtime.js';
-import type { RuntimeWindowSnapshot } from './pty-runtime.js';
+import type { AgentRuntime } from './interface.js';
+import type { RuntimeWindowSnapshot } from './window-types.js';
 import type { TerminalStyledFrame } from './vt-screen.js';
+import type { SidecarHealthSnapshot, SidecarStartupMetrics } from './rust-sidecar-client.js';
 import { RustSidecarClient } from './rust-sidecar-client.js';
+import { recordTelemetryEvents } from '../telemetry/index.js';
 
 export type PtyRustRuntimeOptions = {
   sidecarBinary?: string;
@@ -13,118 +15,88 @@ export type PtyRustRuntimeOptions = {
   useNodePty?: boolean;
 };
 
-export class PtyRustRuntime extends PtyRuntime {
+export class PtyRustRuntime implements AgentRuntime {
   private sidecar?: RustSidecarClient;
   private sidecarActive = false;
-  private warnedFallback = false;
 
   constructor(options?: PtyRustRuntimeOptions) {
-    super(options);
     if (options?.sidecarDisabled) {
-      this.warnFallback('sidecar disabled by option');
-      return;
+      throw new Error('pty-rust runtime requires sidecar; sidecarDisabled is not supported');
     }
 
-    try {
-      this.sidecar = new RustSidecarClient({
-        binaryPath: options?.sidecarBinary,
-        socketPath: options?.sidecarSocketPath,
-        startupTimeoutMs: options?.sidecarStartupTimeoutMs,
-      });
-      this.sidecarActive = this.sidecar.isAvailable();
-      if (this.sidecarActive) {
-        console.warn('[runtime] pty-rust mode enabled (PoC); sidecar connected');
-      } else {
-        this.warnFallback('sidecar unavailable');
-      }
-    } catch (error) {
-      this.warnFallback(error instanceof Error ? error.message : String(error));
+    this.sidecar = new RustSidecarClient({
+      binaryPath: options?.sidecarBinary,
+      socketPath: options?.sidecarSocketPath,
+      startupTimeoutMs: options?.sidecarStartupTimeoutMs,
+    });
+    this.sidecarActive = this.sidecar.isAvailable();
+    const startupMetrics = this.sidecar.getStartupMetrics();
+    if (!this.sidecarActive) {
+      this.emitStartupTelemetry(startupMetrics, null, false);
+      const detail = startupMetrics.reason ? ` (${startupMetrics.reason})` : '';
+      throw new Error(`pty-rust sidecar unavailable${detail}`);
     }
+    console.warn('[runtime] pty-rust mode enabled; sidecar connected');
+    this.emitStartupTelemetry(startupMetrics, this.readHealthSnapshot(), true);
   }
 
-  override getOrCreateSession(projectName: string, firstWindowName?: string): string {
-    return this.useSidecar(
-      () => this.sidecar!.getOrCreateSession(projectName, firstWindowName),
-      () => super.getOrCreateSession(projectName, firstWindowName),
-    );
+  getOrCreateSession(projectName: string, firstWindowName?: string): string {
+    return this.requireSidecar().getOrCreateSession(projectName, firstWindowName);
   }
 
-  override setSessionEnv(sessionName: string, key: string, value: string): void {
-    this.useSidecar(
-      () => this.sidecar!.setSessionEnv(sessionName, key, value),
-      () => super.setSessionEnv(sessionName, key, value),
-    );
+  setSessionEnv(sessionName: string, key: string, value: string): void {
+    this.requireSidecar().setSessionEnv(sessionName, key, value);
   }
 
-  override windowExists(sessionName: string, windowName: string): boolean {
-    return this.useSidecar(
-      () => this.sidecar!.windowExists(sessionName, windowName),
-      () => super.windowExists(sessionName, windowName),
-    );
+  windowExists(sessionName: string, windowName: string): boolean {
+    return this.requireSidecar().windowExists(sessionName, windowName);
   }
 
-  override startAgentInWindow(sessionName: string, windowName: string, agentCommand: string): void {
-    this.useSidecar(
-      () => this.sidecar!.startWindow(sessionName, windowName, agentCommand),
-      () => super.startAgentInWindow(sessionName, windowName, agentCommand),
-    );
+  startAgentInWindow(sessionName: string, windowName: string, agentCommand: string): void {
+    this.requireSidecar().startWindow(sessionName, windowName, agentCommand);
   }
 
-  override typeKeysToWindow(sessionName: string, windowName: string, keys: string): void {
-    this.useSidecar(
-      () => this.sidecar!.typeKeys(sessionName, windowName, keys),
-      () => super.typeKeysToWindow(sessionName, windowName, keys),
-    );
+  sendKeysToWindow(sessionName: string, windowName: string, keys: string): void {
+    this.typeKeysToWindow(sessionName, windowName, keys);
+    this.sendEnterToWindow(sessionName, windowName);
   }
 
-  override sendEnterToWindow(sessionName: string, windowName: string): void {
-    this.useSidecar(
-      () => this.sidecar!.sendEnter(sessionName, windowName),
-      () => super.sendEnterToWindow(sessionName, windowName),
-    );
+  typeKeysToWindow(sessionName: string, windowName: string, keys: string): void {
+    this.requireSidecar().typeKeys(sessionName, windowName, keys);
   }
 
-  override resizeWindow(sessionName: string, windowName: string, cols: number, rows: number): void {
-    this.useSidecar(
-      () => this.sidecar!.resizeWindow(sessionName, windowName, cols, rows),
-      () => super.resizeWindow(sessionName, windowName, cols, rows),
-    );
+  sendEnterToWindow(sessionName: string, windowName: string): void {
+    this.requireSidecar().sendEnter(sessionName, windowName);
   }
 
-  override listWindows(sessionName?: string): RuntimeWindowSnapshot[] {
-    return this.useSidecar(
-      () => this.sidecar!.listWindows(sessionName),
-      () => super.listWindows(sessionName),
-    );
+  resizeWindow(sessionName: string, windowName: string, cols: number, rows: number): void {
+    this.requireSidecar().resizeWindow(sessionName, windowName, cols, rows);
   }
 
-  override getWindowBuffer(sessionName: string, windowName: string): string {
-    return this.useSidecar(
-      () => this.sidecar!.getWindowBuffer(sessionName, windowName),
-      () => super.getWindowBuffer(sessionName, windowName),
-    );
+  listWindows(sessionName?: string): RuntimeWindowSnapshot[] {
+    return this.requireSidecar().listWindows(sessionName);
   }
 
-  override getWindowFrame(
+  getWindowBuffer(sessionName: string, windowName: string): string {
+    return this.requireSidecar().getWindowBuffer(sessionName, windowName);
+  }
+
+  getWindowFrame(
     sessionName: string,
     windowName: string,
     cols?: number,
     rows?: number,
   ): TerminalStyledFrame | null {
-    return this.useSidecar(
-      () => this.sidecar!.getWindowFrame(sessionName, windowName, cols, rows),
-      () => super.getWindowFrame(sessionName, windowName, cols, rows),
-    );
+    return this.requireSidecar().getWindowFrame(sessionName, windowName, cols, rows);
   }
 
-  override stopWindow(sessionName: string, windowName: string, signal: NodeJS.Signals = 'SIGTERM'): boolean {
-    return this.useSidecar(
-      () => this.sidecar!.stopWindow(sessionName, windowName),
-      () => super.stopWindow(sessionName, windowName, signal),
-    );
+  stopWindow(sessionName: string, windowName: string, signal: NodeJS.Signals = 'SIGTERM'): boolean {
+    void signal;
+    return this.requireSidecar().stopWindow(sessionName, windowName);
   }
 
-  override dispose(signal: NodeJS.Signals = 'SIGTERM'): void {
+  dispose(signal: NodeJS.Signals = 'SIGTERM'): void {
+    void signal;
     if (this.sidecarActive) {
       try {
         this.sidecar?.dispose();
@@ -133,26 +105,45 @@ export class PtyRustRuntime extends PtyRuntime {
       }
       this.sidecarActive = false;
     }
-    super.dispose(signal);
   }
 
-  private useSidecar<T>(runSidecar: () => T, runFallback: () => T): T {
-    if (!this.sidecarActive || !this.sidecar) {
-      return runFallback();
+  private requireSidecar(): RustSidecarClient {
+    if (!this.sidecar || !this.sidecarActive) {
+      throw new Error('pty-rust sidecar unavailable');
     }
+    return this.sidecar;
+  }
 
+  private readHealthSnapshot(): SidecarHealthSnapshot | null {
     try {
-      return runSidecar();
-    } catch (error) {
-      this.sidecarActive = false;
-      this.warnFallback(`sidecar request failed: ${error instanceof Error ? error.message : String(error)}`);
-      return runFallback();
+      return this.requireSidecar().health();
+    } catch {
+      return null;
     }
   }
 
-  private warnFallback(reason: string): void {
-    if (this.warnedFallback) return;
-    this.warnedFallback = true;
-    console.warn(`[runtime] pty-rust mode enabled (PoC); using TS fallback implementation (${reason})`);
+  private emitStartupTelemetry(
+    startupMetrics: SidecarStartupMetrics,
+    health: SidecarHealthSnapshot | null,
+    success: boolean,
+  ): void {
+    void recordTelemetryEvents([
+      {
+        name: 'pty_rust_runtime_startup',
+        params: {
+          success,
+          strategy: startupMetrics.strategy,
+          startup_duration_ms: startupMetrics.durationMs,
+          startup_attempts: startupMetrics.attempts,
+          startup_reason: startupMetrics.reason,
+          health_ok: health?.status === 'ok',
+          health_uptime_ms: health?.uptimeMs,
+          health_windows: health?.windows,
+          health_running_windows: health?.runningWindows,
+          rpc_requests_total: health?.rpc?.requestsTotal,
+          rpc_errors_total: health?.rpc?.errorsTotal,
+        },
+      },
+    ]);
   }
 }

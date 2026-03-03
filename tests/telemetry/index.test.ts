@@ -118,4 +118,59 @@ describe('telemetry', () => {
     expect(mocks.randomUUID).toHaveBeenCalledOnce();
     expect(mocks.saveConfig).toHaveBeenCalledWith({ telemetryInstallId: 'generated-install-id' });
   });
+
+  it('sends custom runtime telemetry events', async () => {
+    mocks.getConfigValue.mockImplementation((key: string) => {
+      if (key === 'telemetryEnabled') return true;
+      if (key === 'telemetryEndpoint') return 'https://telemetry.example/v1/events';
+      if (key === 'telemetryInstallId') return 'install-1234';
+      return undefined;
+    });
+
+    const mod = await import('../../src/telemetry/index.js');
+    await mod.recordTelemetryEvents(
+      [
+        {
+          name: 'pty_rust_runtime_startup',
+          params: {
+            success: true,
+            startup_duration_ms: 88,
+            strategy: 'spawned-server',
+          },
+        },
+      ],
+      { source: 'discode-cli', version: '0.9.0' },
+    );
+
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    const [, init] = mocks.fetch.mock.calls[0];
+    const body = JSON.parse(String(init.body));
+    expect(body.events[0].name).toBe('pty_rust_runtime_startup');
+    expect(body.events[0].params.success).toBe(1);
+    expect(body.events[0].params.startup_duration_ms).toBe(88);
+    expect(body.events[0].params.strategy).toBe('spawned-server');
+  });
+
+  it('limits telemetry payload to 10 events', async () => {
+    mocks.getConfigValue.mockImplementation((key: string) => {
+      if (key === 'telemetryEnabled') return true;
+      if (key === 'telemetryEndpoint') return 'https://telemetry.example/v1/events';
+      if (key === 'telemetryInstallId') return 'install-1234';
+      return undefined;
+    });
+
+    const mod = await import('../../src/telemetry/index.js');
+    await mod.recordTelemetryEvents(
+      Array.from({ length: 12 }, (_, index) => ({
+        name: `event_${index}`,
+        params: { n: index },
+      })),
+      { source: 'discode-cli', version: '0.9.0' },
+    );
+
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    const [, init] = mocks.fetch.mock.calls[0];
+    const body = JSON.parse(String(init.body));
+    expect(body.events).toHaveLength(10);
+  });
 });
