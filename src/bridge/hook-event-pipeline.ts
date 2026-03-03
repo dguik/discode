@@ -259,7 +259,7 @@ export class HookEventPipeline {
               // Fall back to reusing startMessageId
             }
           }
-          this.deps.streamingUpdater.start(ctx.projectName, ctx.instanceKey, pending.channelId, streamingMsgId);
+          this.deps.streamingUpdater.start(ctx.projectName, ctx.instanceKey, pending.channelId, streamingMsgId, startMessageId);
         }
       }
     }

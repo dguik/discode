@@ -3,6 +3,8 @@ import type { MessagingClient } from '../messaging/interface.js';
 interface StreamingEntry {
   channelId: string;
   messageId: string;
+  /** Stable origin ID for staleness guard (e.g. startMessageId). */
+  originId?: string;
   /** The latest status text to display (replaces previous on each update). */
   currentText: string;
   /** Accumulated activity lines for cumulative mode. */
@@ -29,7 +31,7 @@ export class StreamingMessageUpdater {
     return typeof this.messaging.updateMessage === 'function';
   }
 
-  start(projectName: string, instanceKey: string, channelId: string, messageId: string): void {
+  start(projectName: string, instanceKey: string, channelId: string, messageId: string, originId?: string): void {
     if (!this.canStream()) return;
     const k = this.key(projectName, instanceKey);
 
@@ -40,6 +42,7 @@ export class StreamingMessageUpdater {
     this.entries.set(k, {
       channelId,
       messageId,
+      originId,
       currentText: '',
       historyLines: [],
       debounceTimer: null,
@@ -93,8 +96,11 @@ export class StreamingMessageUpdater {
     const entry = this.entries.get(k);
     if (!entry) return;
 
-    // Guard: if a newer request took over this streaming slot, don't finalize it
-    if (expectedMessageId && entry.messageId !== expectedMessageId) return;
+    // Guard: if a newer request took over this streaming slot, don't finalize it.
+    // Compare against originId (the stable startMessageId) when available,
+    // since entry.messageId may differ (separate streaming message).
+    const guardId = entry.originId || entry.messageId;
+    if (expectedMessageId && guardId !== expectedMessageId) return;
 
     const hadPendingTimer = !!entry.debounceTimer;
     if (entry.debounceTimer) clearTimeout(entry.debounceTimer);

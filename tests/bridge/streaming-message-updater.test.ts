@@ -331,6 +331,31 @@ describe('StreamingMessageUpdater', () => {
       expect(messaging.updateMessage).not.toHaveBeenCalled();
       expect(updater.has('proj', 'inst')).toBe(true);
     });
+
+    it('finalizes when originId matches expectedMessageId even if messageId differs', async () => {
+      const messaging = createMockMessaging();
+      const updater = new StreamingMessageUpdater(messaging as any);
+      // messageId is streaming msg, originId is the start message
+      updater.start('proj', 'inst', 'ch-1', 'streaming-msg', 'start-msg');
+      updater.append('proj', 'inst', 'tool activity');
+
+      await updater.finalize('proj', 'inst', undefined, 'start-msg');
+
+      expect(messaging.updateMessage).toHaveBeenCalledWith('ch-1', 'streaming-msg', 'tool activity');
+      expect(messaging.sendToChannel).toHaveBeenCalledWith('ch-1', '\u2705 Done');
+      expect(updater.has('proj', 'inst')).toBe(false);
+    });
+
+    it('skips finalize when originId does not match expectedMessageId', async () => {
+      const messaging = createMockMessaging();
+      const updater = new StreamingMessageUpdater(messaging as any);
+      updater.start('proj', 'inst', 'ch-1', 'streaming-msg', 'start-msg-1');
+
+      await updater.finalize('proj', 'inst', undefined, 'start-msg-2');
+
+      expect(messaging.sendToChannel).not.toHaveBeenCalled();
+      expect(updater.has('proj', 'inst')).toBe(true);
+    });
   });
 
   describe('start when canStream is false', () => {
