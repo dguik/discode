@@ -10,6 +10,8 @@ interface StreamingEntry {
   debounceTimer: ReturnType<typeof setTimeout> | null;
   /** Promise for any in-progress flush (prevents finalize from racing). */
   flushPromise?: Promise<void>;
+  /** When true, the next flush should create a new message instead of updating. */
+  needsNewMessage?: boolean;
 }
 
 const DEBOUNCE_MS = 750;
@@ -68,7 +70,13 @@ export class StreamingMessageUpdater {
     if (!entry) return false;
 
     if (text.length > 0) {
-      entry.historyLines.push(text);
+      const newLength = entry.currentText.length + 1 + text.length; // +1 for \n
+      if (entry.historyLines.length > 0 && newLength > this.platformLimit()) {
+        entry.historyLines = [text];
+        entry.needsNewMessage = true;
+      } else {
+        entry.historyLines.push(text);
+      }
     }
     entry.currentText = entry.historyLines.join('\n');
     this.scheduleFlush(k, entry);
@@ -120,6 +128,19 @@ export class StreamingMessageUpdater {
     if (!entry) return;
 
     const content = this.clampForPlatform(entry.currentText || '\u23F3 Working...');
+
+    if (entry.needsNewMessage) {
+      const promise = (async () => {
+        const newId = await this.messaging.sendToChannelWithId(entry.channelId, content);
+        if (newId) entry.messageId = newId;
+        entry.needsNewMessage = false;
+      })().catch(() => {});
+      entry.flushPromise = promise;
+      await promise;
+      if (entry.flushPromise === promise) entry.flushPromise = undefined;
+      return;
+    }
+
     if (this.messaging.updateMessage) {
       const promise = this.messaging.updateMessage(entry.channelId, entry.messageId, content).catch(() => {});
       entry.flushPromise = promise;
@@ -136,8 +157,12 @@ export class StreamingMessageUpdater {
     }, DEBOUNCE_MS);
   }
 
+  private platformLimit(): number {
+    return this.messaging.platform === 'slack' ? 3900 : 1900;
+  }
+
   private clampForPlatform(content: string): string {
-    const limit = this.messaging.platform === 'slack' ? 3900 : 1900;
+    const limit = this.platformLimit();
     if (content.length <= limit) return content;
 
     const prefix = '...(truncated)\n';

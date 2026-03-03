@@ -148,7 +148,94 @@ describe('StreamingMessageUpdater', () => {
       );
     });
 
-    it('truncates overly long cumulative text for discord-safe update length', () => {
+    it('starts new message when content exceeds platform limit', async () => {
+      const messaging = createMockMessaging();
+      messaging.sendToChannelWithId.mockResolvedValue('new-msg-ts');
+      const updater = new StreamingMessageUpdater(messaging as any);
+      updater.start('proj', 'inst', 'ch-1', 'msg-1');
+
+      // Fill up near the limit (slack = 3900)
+      const bigLine = 'x'.repeat(3890);
+      updater.appendCumulative('proj', 'inst', bigLine);
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(messaging.updateMessage).toHaveBeenCalledTimes(1);
+
+      // This line would push past 3900 → triggers overflow
+      updater.appendCumulative('proj', 'inst', 'overflow line');
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Should have created a new message instead of updating
+      expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', 'overflow line');
+    });
+
+    it('uses new message ID for subsequent updates after overflow', async () => {
+      const messaging = createMockMessaging();
+      messaging.sendToChannelWithId.mockResolvedValue('new-msg-ts');
+      const updater = new StreamingMessageUpdater(messaging as any);
+      updater.start('proj', 'inst', 'ch-1', 'msg-1');
+
+      // Fill near limit (3890 + 1 + 13 = 3904 > 3900 triggers overflow)
+      const bigLine = 'x'.repeat(3890);
+      updater.appendCumulative('proj', 'inst', bigLine);
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      updater.appendCumulative('proj', 'inst', 'overflow line');
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Now append more content — should update the NEW message ID
+      // (13 + 1 + 9 = 23 < 3900, no overflow)
+      updater.appendCumulative('proj', 'inst', 'next line');
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(messaging.updateMessage).toHaveBeenLastCalledWith(
+        'ch-1',
+        'new-msg-ts',
+        'overflow line\nnext line',
+      );
+    });
+
+    it('handles multiple overflows creating multiple new messages', async () => {
+      const messaging = createMockMessaging();
+      let msgCounter = 0;
+      messaging.sendToChannelWithId.mockImplementation(async () => `new-msg-${++msgCounter}`);
+      const updater = new StreamingMessageUpdater(messaging as any);
+      updater.start('proj', 'inst', 'ch-1', 'msg-1');
+
+      // First overflow: 3890 + 1 + 10 = 3901 > 3900
+      const bigLine = 'x'.repeat(3890);
+      updater.appendCumulative('proj', 'inst', bigLine);
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      updater.appendCumulative('proj', 'inst', 'overflow-1');
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(messaging.sendToChannelWithId).toHaveBeenCalledWith('ch-1', 'overflow-1');
+
+      // Fill up the new message: after overflow, currentText="overflow-1" (10 chars)
+      // 10 + 1 + 3880 = 3891 < 3900 → fits
+      const bigLine2 = 'x'.repeat(3880);
+      updater.appendCumulative('proj', 'inst', bigLine2);
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Second overflow: 3891 + 1 + 10 = 3902 > 3900
+      updater.appendCumulative('proj', 'inst', 'overflow-2');
+      vi.advanceTimersByTime(800);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(messaging.sendToChannelWithId).toHaveBeenCalledTimes(2);
+      expect(messaging.sendToChannelWithId).toHaveBeenLastCalledWith('ch-1', 'overflow-2');
+    });
+
+    it('truncates overly long single line for discord-safe update length', () => {
       const messaging = {
         ...createMockMessaging(),
         platform: 'discord' as const,
@@ -156,14 +243,13 @@ describe('StreamingMessageUpdater', () => {
       const updater = new StreamingMessageUpdater(messaging as any);
       updater.start('proj', 'inst', 'ch-1', 'msg-1');
 
-      const longLine = 'x'.repeat(1200);
-      updater.appendCumulative('proj', 'inst', longLine);
-      updater.appendCumulative('proj', 'inst', longLine);
+      // A single line exceeding the limit gets clamped (not split)
+      const longLine = 'x'.repeat(2500);
       updater.appendCumulative('proj', 'inst', longLine);
 
       vi.advanceTimersByTime(800);
 
-      const call = messaging.updateMessage.mock.calls.at(-1);
+      const call = messaging.updateMessage!.mock.calls.at(-1);
       const content = call?.[2] as string;
       expect(content.length).toBeLessThanOrEqual(1900);
       expect(content.startsWith('...(truncated)\n')).toBe(true);
