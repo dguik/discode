@@ -29,6 +29,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Nunito+Sans:wght@700;800;900&display=swap"
       rel="stylesheet"
     />
+    <script src="https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js"></script>
     <link rel="icon" type="image/png" href="./discode.png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -203,6 +204,45 @@
     </div>
     <script src="/language.js"></script>
     <script>
+      const MIXPANEL_TOKEN = "f9964661bdefbfa47215c21a11770db2";
+      const MIXPANEL_USER_ID_KEY = "discode-mixpanel-user-id";
+
+      function getOrCreateMixpanelUserId() {
+        try {
+          const saved = window.localStorage.getItem(MIXPANEL_USER_ID_KEY);
+          if (saved) return saved;
+          const generated = `visitor_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+          window.localStorage.setItem(MIXPANEL_USER_ID_KEY, generated);
+          return generated;
+        } catch {
+          return `visitor_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        }
+      }
+
+      function trackMixpanelEvent(eventName, properties) {
+        if (!window.mixpanel || typeof window.mixpanel.track !== "function") return;
+        window.mixpanel.track(eventName, properties);
+      }
+
+      const mixpanelUserId = getOrCreateMixpanelUserId();
+      if (window.mixpanel && typeof window.mixpanel.init === "function") {
+        window.mixpanel.init(MIXPANEL_TOKEN, {
+          debug: true,
+          track_pageview: true,
+          persistence: "localStorage",
+          autocapture: true,
+          record_sessions_percent: 100,
+        });
+        window.mixpanel.identify(mixpanelUserId);
+        window.mixpanel.people.set({ plan: "Visitor" });
+      }
+
+      trackMixpanelEvent("Page View", {
+        page_url: window.location.href,
+        page_title: document.title,
+        user_id: mixpanelUserId,
+      });
+
       const installCommands = {
         bun: "bun add -g @siisee11/discode",
         npm: "npm install -g @siisee11/discode",
@@ -281,6 +321,10 @@
 
           writePromise
             .then(() => {
+              trackMixpanelEvent("Conversion", {
+                "Conversion Type": "install_command_copy",
+                "Conversion Value": 1,
+              });
               updateCopyButtonLabel("copied");
               window.setTimeout(() => updateCopyButtonLabel("copy"), 1400);
             })
